@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package action;
+
+import "base.proto";
+
+service ActionRecognition {
+  rpc Predict(ActionRequest) returns (ActionResponse);
+  rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
+}
+
+message ActionParams {
+  base.InferenceParams base = 1;
+}
+
+message ActionResult {
+  string label = 1;
+  float confidence = 2;
+  int64 sequence_id = 3;
+  base.ImageCacheInfo cache_info = 4;
+  int32 class_id = 5;
+}
+
+message ActionRequest {
+  base.RequestHeader request_header = 1;
+  repeated base.ImageSequence sequences = 2;
+  ActionParams params = 3;
+}
+
+message ActionResponse {
+  base.ResponseHeader response_header = 1;
+  repeated ActionResult results = 2;
+}

@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package detection;
+
+import "base.proto";
+
+service ObjectDetection {
+  rpc Predict(DetectionRequest) returns (DetectionResponse);
+  rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
+}
+
+message DetectionParams {
+  base.InferenceParams base = 1;
+  float confidence_threshold = 2;
+  float nms_iou_threshold = 3;
+}
+
+message BoundingBox {
+  float x_min = 1;
+  float y_min = 2;
+  float x_max = 3;
+  float y_max = 4;
+  float confidence = 5;
+  int32 class_id = 6;
+  string label = 7;
+}
+
+message DetectionResults {
+  repeated string names = 1;
+  repeated BoundingBox boxes = 2;
+  int64 image_id = 3;
+  base.ImageCacheInfo cache_info = 4;
+}
+
+message DetectionRequest {
+  base.RequestHeader request_header = 1;
+  repeated base.Image images = 2;
+  DetectionParams params = 3;
+}
+
+message DetectionResponse {
+  base.ResponseHeader response_header = 1;
+  repeated DetectionResults results = 2;
+}

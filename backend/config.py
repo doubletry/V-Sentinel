@@ -1,7 +1,9 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env")
+
     # V-Engine service addresses
     detection_addr: str = "localhost:50051"
     classification_addr: str = "localhost:50052"
@@ -22,9 +24,6 @@ class Settings(BaseSettings):
     max_pull_workers: int = 20
     max_push_workers: int = 10
     max_cpu_workers: int = 16
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()

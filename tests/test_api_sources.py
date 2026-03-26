@@ -1,0 +1,145 @@
+"""Tests for the Sources REST API endpoints."""
+from __future__ import annotations
+
+import pytest
+from httpx import AsyncClient
+
+
+class TestHealthEndpoint:
+    async def test_health(self, async_client: AsyncClient):
+        resp = await async_client.get("/api/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["app"] == "V-Sentinel"
+
+
+class TestCreateSource:
+    async def test_create_success(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        resp = await async_client.post("/api/sources", json=sample_source_data)
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["name"] == sample_source_data["name"]
+        assert data["rtsp_url"] == sample_source_data["rtsp_url"]
+        assert "id" in data
+        assert data["rois"] == []
+
+    async def test_create_duplicate(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        await async_client.post("/api/sources", json=sample_source_data)
+        resp = await async_client.post("/api/sources", json=sample_source_data)
+        assert resp.status_code == 409
+
+    async def test_create_missing_field(self, async_client: AsyncClient):
+        resp = await async_client.post("/api/sources", json={"name": "x"})
+        assert resp.status_code == 422
+
+
+class TestListSources:
+    async def test_list_empty(self, async_client: AsyncClient):
+        resp = await async_client.get("/api/sources")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_list_multiple(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        await async_client.post("/api/sources", json=sample_source_data)
+        await async_client.post(
+            "/api/sources",
+            json={"name": "Cam2", "rtsp_url": "rtsp://localhost:8554/cam2"},
+        )
+        resp = await async_client.get("/api/sources")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+
+class TestGetSource:
+    async def test_get_existing(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        create_resp = await async_client.post("/api/sources", json=sample_source_data)
+        source_id = create_resp.json()["id"]
+        resp = await async_client.get(f"/api/sources/{source_id}")
+        assert resp.status_code == 200
+        assert resp.json()["id"] == source_id
+
+    async def test_get_not_found(self, async_client: AsyncClient):
+        resp = await async_client.get("/api/sources/nonexistent-id")
+        assert resp.status_code == 404
+
+
+class TestGetSourceByRtsp:
+    async def test_by_rtsp(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        await async_client.post("/api/sources", json=sample_source_data)
+        resp = await async_client.get(
+            "/api/sources/by-rtsp",
+            params={"rtsp_url": sample_source_data["rtsp_url"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == sample_source_data["name"]
+
+    async def test_by_rtsp_not_found(self, async_client: AsyncClient):
+        resp = await async_client.get(
+            "/api/sources/by-rtsp", params={"rtsp_url": "rtsp://missing"}
+        )
+        assert resp.status_code == 404
+
+
+class TestUpdateSource:
+    async def test_update_name(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        create_resp = await async_client.post("/api/sources", json=sample_source_data)
+        source_id = create_resp.json()["id"]
+        resp = await async_client.put(
+            f"/api/sources/{source_id}", json={"name": "Updated Name"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Updated Name"
+
+    async def test_update_with_rois(
+        self,
+        async_client: AsyncClient,
+        sample_source_data: dict,
+        sample_roi_data: list,
+    ):
+        create_resp = await async_client.post("/api/sources", json=sample_source_data)
+        source_id = create_resp.json()["id"]
+        resp = await async_client.put(
+            f"/api/sources/{source_id}",
+            json={"rois": sample_roi_data},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["rois"]) == 1
+        assert data["rois"][0]["tag"] == "zone-A"
+
+    async def test_update_not_found(self, async_client: AsyncClient):
+        resp = await async_client.put(
+            "/api/sources/nope", json={"name": "X"}
+        )
+        assert resp.status_code == 404
+
+
+class TestDeleteSource:
+    async def test_delete_existing(
+        self, async_client: AsyncClient, sample_source_data: dict
+    ):
+        create_resp = await async_client.post("/api/sources", json=sample_source_data)
+        source_id = create_resp.json()["id"]
+        resp = await async_client.delete(f"/api/sources/{source_id}")
+        assert resp.status_code == 204
+
+        # Verify deleted
+        resp2 = await async_client.get(f"/api/sources/{source_id}")
+        assert resp2.status_code == 404
+
+    async def test_delete_not_found(self, async_client: AsyncClient):
+        resp = await async_client.delete("/api/sources/missing")
+        assert resp.status_code == 404

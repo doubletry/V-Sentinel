@@ -14,6 +14,7 @@ from backend.processing.base import AnalysisResult, BaseVideoProcessor
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
+    from backend.processing.agent import AnalysisAgent
 
 
 class ExampleProcessor(BaseVideoProcessor):
@@ -39,6 +40,7 @@ class ExampleProcessor(BaseVideoProcessor):
         vengine_client: "AsyncVEngineClient",
         ws_manager: "WSManager",
         app_settings: dict[str, str],
+        agent: "AnalysisAgent | None" = None,
     ) -> None:
         super().__init__(
             source_id=source_id,
@@ -48,6 +50,7 @@ class ExampleProcessor(BaseVideoProcessor):
             vengine_client=vengine_client,
             ws_manager=ws_manager,
             app_settings=app_settings,
+            agent=agent,
         )
         self._frame_count = 0
 

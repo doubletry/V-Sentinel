@@ -15,6 +15,7 @@ from backend.models.schemas import AnalysisMessage, ROI
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
+    from backend.processing.agent import AnalysisAgent
 
 
 @dataclass
@@ -52,6 +53,7 @@ class BaseVideoProcessor(ABC):
         vengine_client: "AsyncVEngineClient",
         ws_manager: "WSManager",
         app_settings: dict[str, str],
+        agent: "AnalysisAgent | None" = None,
     ) -> None:
         self.source_id = source_id
         self.source_name = source_name
@@ -60,6 +62,7 @@ class BaseVideoProcessor(ABC):
         self.vengine = vengine_client
         self.ws_manager = ws_manager
         self.app_settings = app_settings
+        self.agent = agent
 
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -136,9 +139,15 @@ class BaseVideoProcessor(ABC):
                     )
                     result = AnalysisResult()
 
-                # Broadcast messages
-                for msg in result.messages:
-                    await self.ws_manager.broadcast(msg)
+                # Route results through agent (aggregator) or broadcast directly
+                if self.agent is not None:
+                    await self.agent.submit(
+                        self.source_id, self.source_name, result
+                    )
+                else:
+                    # Fallback: broadcast messages directly
+                    for msg in result.messages:
+                        await self.ws_manager.broadcast(msg)
 
                 # Push annotated frame back to MediaMTX
                 if result.annotated_frame is not None:

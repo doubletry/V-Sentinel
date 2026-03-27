@@ -46,12 +46,13 @@ async def lifespan(app: FastAPI):
     vengine_client = AsyncVEngineClient(settings)
     await vengine_client.connect(app_settings)
 
-    # Initialize ProcessorManager
+    # Initialize ProcessorManager (includes AnalysisAgent)
     processor_manager = ProcessorManager(
         vengine_client=vengine_client,
         ws_manager=ws_manager,
         app_settings=app_settings,
     )
+    await processor_manager.start_agent()
 
     logger.info("{} started successfully", settings.app_name)
     yield
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down {} ...", settings.app_name)
 
     await processor_manager.stop_all()
+    await processor_manager.stop_agent()
     await vengine_client.close()
 
     logger.info("{} shutdown complete", settings.app_name)

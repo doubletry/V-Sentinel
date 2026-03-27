@@ -7,6 +7,7 @@ from loguru import logger
 
 from backend.db.database import get_source
 from backend.models.schemas import ProcessorStatus
+from backend.processing.agent import AnalysisAgent
 from backend.processing.example import ExampleProcessor
 
 if TYPE_CHECKING:
@@ -18,6 +19,7 @@ class ProcessorManager:
     """Manages the lifecycle of all running video processors.
 
     Processors are keyed by ``source_id``. Each is an asyncio Task.
+    An ``AnalysisAgent`` aggregates results from all processors.
     """
 
     def __init__(
@@ -31,6 +33,15 @@ class ProcessorManager:
         self._app_settings = app_settings
         self._processors: dict[str, ExampleProcessor] = {}
         self._lock = asyncio.Lock()
+        self._agent = AnalysisAgent(ws_manager=ws_manager)
+
+    async def start_agent(self) -> None:
+        """Start the analysis agent (called once during app startup)."""
+        await self._agent.start()
+
+    async def stop_agent(self) -> None:
+        """Stop the analysis agent (called during shutdown)."""
+        await self._agent.stop()
 
     async def start_processor(self, source_id: str) -> dict:
         """Start a processor for the given source_id.
@@ -58,6 +69,7 @@ class ProcessorManager:
                 vengine_client=self._vengine,
                 ws_manager=self._ws_manager,
                 app_settings=self._app_settings,
+                agent=self._agent,
             )
             await processor.start()
             self._processors[source_id] = processor

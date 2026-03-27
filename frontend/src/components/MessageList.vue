@@ -4,7 +4,7 @@
       v-for="(msg, idx) in messages"
       :key="idx"
       class="message-card"
-      :class="`level-${msg.level}`"
+      :class="[`level-${msg.level}`, { 'agent-summary': msg.source_id === '__agent__' }]"
     >
       <div class="msg-header">
         <el-tag
@@ -12,7 +12,7 @@
           size="small"
           effect="dark"
         >
-          {{ msg.level.toUpperCase() }}
+          {{ msg.source_id === '__agent__' ? 'SUMMARY' : msg.level.toUpperCase() }}
         </el-tag>
         <span class="msg-source">{{ msg.source_name }}</span>
         <span class="msg-time">{{ formatTime(msg.timestamp) }}</span>
@@ -75,6 +75,12 @@ function formatTime(ts) {
 
 .message-card.level-alert {
   border-left-color: #f56c6c;
+}
+
+.message-card.agent-summary {
+  background: #1a2a3e;
+  border-left-color: #67c23a;
+  border: 1px solid #2a3a4e;
 }
 
 .msg-header {

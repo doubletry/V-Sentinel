@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from backend.db import database as db
 from backend.models.schemas import AppSettingsUpdate
@@ -15,7 +15,7 @@ async def get_settings() -> dict[str, str]:
 
 
 @router.put("")
-async def update_settings(data: AppSettingsUpdate) -> dict[str, str]:
+async def update_settings(data: AppSettingsUpdate, request: Request) -> dict[str, str]:
     """Update application settings.
 
     After saving, the V-Engine gRPC client is reconnected with the new
@@ -29,7 +29,7 @@ async def update_settings(data: AppSettingsUpdate) -> dict[str, str]:
     result = await db.update_settings(updates)
 
     # Reconnect V-Engine client with new addresses
-    from backend.main import vengine_client
+    vengine_client = request.app.state.vengine_client
     await vengine_client.reconnect_from_settings(result)
 
     return result

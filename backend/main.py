@@ -46,6 +46,9 @@ async def lifespan(app: FastAPI):
     vengine_client = AsyncVEngineClient(settings)
     await vengine_client.connect(app_settings)
 
+    # Store on app.state for dependency-injection in API routes
+    app.state.vengine_client = vengine_client
+
     # Initialize ProcessorManager (includes AnalysisAgent)
     processor_manager = ProcessorManager(
         vengine_client=vengine_client,

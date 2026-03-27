@@ -45,7 +45,7 @@ class AnalysisAgent:
         self._ws_manager = ws_manager
         self._interval = summary_interval
 
-        # Queue for incoming per-frame results from processors
+        # Queue for incoming per-frame results from processors (unbounded)
         self._queue: asyncio.Queue[tuple[str, str, AnalysisResult]] = asyncio.Queue()
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -89,16 +89,8 @@ class AnalysisAgent:
         for msg in result.messages:
             await self._ws_manager.broadcast(msg)
 
-        # Queue result for aggregation
-        try:
-            self._queue.put_nowait((source_id, source_name, result))
-        except asyncio.QueueFull:
-            # Drop oldest if queue is too large
-            try:
-                self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            self._queue.put_nowait((source_id, source_name, result))
+        # Queue result for aggregation (unbounded queue, always succeeds)
+        await self._queue.put((source_id, source_name, result))
 
     # ── Aggregation Loop ──────────────────────────────────────────────────
 
@@ -177,10 +169,10 @@ class AnalysisAgent:
             )
 
         # Determine alert level
-        if total_detections > 20:
-            level = "warning"
-        elif total_detections > 50:
+        if total_detections > 50:
             level = "alert"
+        elif total_detections > 20:
+            level = "warning"
         else:
             level = "info"
 

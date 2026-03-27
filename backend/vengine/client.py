@@ -30,6 +30,9 @@ class AsyncVEngineClient:
 
     All channels are shared across all camera processors.
     HTTP/2 multiplexing handles concurrent requests automatically.
+
+    Service addresses are read from the DB-backed ``app_settings`` table.
+    The ``reconnect_from_settings`` method allows hot-reloading addresses.
     """
 
     def __init__(self, config: "Settings") -> None:
@@ -37,21 +40,49 @@ class AsyncVEngineClient:
         self._channels: dict[str, grpc.aio.Channel] = {}
         self._stubs: dict[str, object] = {}
 
-    async def connect(self) -> None:
-        """Create grpc.aio channels and stubs for all services."""
-        self._channels["detection"] = grpc.aio.insecure_channel(
-            self._config.detection_addr
-        )
-        self._channels["classification"] = grpc.aio.insecure_channel(
-            self._config.classification_addr
-        )
-        self._channels["action"] = grpc.aio.insecure_channel(
-            self._config.action_addr
-        )
-        self._channels["ocr"] = grpc.aio.insecure_channel(self._config.ocr_addr)
-        self._channels["upload"] = grpc.aio.insecure_channel(
-            self._config.upload_addr
-        )
+    # ── Address resolution ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_addresses(app_settings: dict[str, str]) -> dict[str, str]:
+        """Build ``{service: host:port}`` from DB settings dict."""
+        host = app_settings.get("vengine_host", "localhost")
+        return {
+            "detection": f"{host}:{app_settings.get('detection_port', '50051')}",
+            "classification": f"{host}:{app_settings.get('classification_port', '50052')}",
+            "action": f"{host}:{app_settings.get('action_port', '50053')}",
+            "ocr": f"{host}:{app_settings.get('ocr_port', '50054')}",
+            "upload": f"{host}:{app_settings.get('upload_port', '50050')}",
+        }
+
+    # ── Connect / reconnect ───────────────────────────────────────────────────
+
+    async def connect(self, app_settings: dict[str, str] | None = None) -> None:
+        """Create grpc.aio channels and stubs for all services.
+
+        If *app_settings* is ``None``, defaults from ``config.DEFAULT_APP_SETTINGS``
+        are used (typically during first startup before DB is ready).
+        """
+        from backend.config import DEFAULT_APP_SETTINGS
+
+        if app_settings is None:
+            app_settings = DEFAULT_APP_SETTINGS
+
+        addrs = self._build_addresses(app_settings)
+        self._create_channels_and_stubs(addrs)
+        logger.info("AsyncVEngineClient connected to all V-Engine services")
+
+    async def reconnect_from_settings(self, app_settings: dict[str, str]) -> None:
+        """Close existing channels and reconnect with new addresses."""
+        await self.close()
+        await self.connect(app_settings)
+        logger.info("AsyncVEngineClient reconnected with updated settings")
+
+    def _create_channels_and_stubs(self, addrs: dict[str, str]) -> None:
+        self._channels["detection"] = grpc.aio.insecure_channel(addrs["detection"])
+        self._channels["classification"] = grpc.aio.insecure_channel(addrs["classification"])
+        self._channels["action"] = grpc.aio.insecure_channel(addrs["action"])
+        self._channels["ocr"] = grpc.aio.insecure_channel(addrs["ocr"])
+        self._channels["upload"] = grpc.aio.insecure_channel(addrs["upload"])
 
         self._stubs["detection"] = detection_service_pb2_grpc.ObjectDetectionStub(
             self._channels["detection"]
@@ -72,7 +103,6 @@ class AsyncVEngineClient:
         self._stubs["upload"] = upload_service_pb2_grpc.UploadStub(
             self._channels["upload"]
         )
-        logger.info("AsyncVEngineClient connected to all V-Engine services")
 
     async def close(self) -> None:
         """Close all gRPC channels."""

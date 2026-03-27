@@ -62,3 +62,19 @@ class AnalysisMessage(BaseModel):
     level: str  # "info", "warning", "alert"
     message: str
     image_base64: str | None = None
+
+
+class AppSettingsUpdate(BaseModel):
+    """Partial update for app settings (all fields optional)."""
+
+    vengine_host: str | None = None
+    detection_port: str | None = None
+    classification_port: str | None = None
+    action_port: str | None = None
+    ocr_port: str | None = None
+    upload_port: str | None = None
+    mediamtx_rtsp_addr: str | None = None
+    mediamtx_webrtc_addr: str | None = None
+    max_pull_workers: str | None = None
+    max_push_workers: str | None = None
+    max_cpu_workers: str | None = None

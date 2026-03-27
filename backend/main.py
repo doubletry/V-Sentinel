@@ -10,10 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from backend.api import processor as processor_router
+from backend.api import settings as settings_router
 from backend.api import sources as sources_router
 from backend.api import ws as ws_module
 from backend.config import settings
-from backend.db.database import init_db
+from backend.db.database import get_all_settings, init_db
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
 
@@ -40,15 +41,16 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
 
-    # Initialize V-Engine async gRPC client
+    # Initialize V-Engine async gRPC client (addresses from DB settings)
+    app_settings = await get_all_settings()
     vengine_client = AsyncVEngineClient(settings)
-    await vengine_client.connect()
+    await vengine_client.connect(app_settings)
 
     # Initialize ProcessorManager
     processor_manager = ProcessorManager(
         vengine_client=vengine_client,
         ws_manager=ws_manager,
-        config=settings,
+        app_settings=app_settings,
     )
 
     logger.info("{} started successfully", settings.app_name)
@@ -82,6 +84,7 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(sources_router.router)
 app.include_router(processor_router.router)
+app.include_router(settings_router.router)
 app.include_router(ws_module.router)
 
 

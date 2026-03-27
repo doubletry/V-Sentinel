@@ -15,7 +15,6 @@ from backend.models.schemas import AnalysisMessage, ROI
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
-    from backend.config import Settings
 
 
 @dataclass
@@ -52,7 +51,7 @@ class BaseVideoProcessor(ABC):
         rois: list[ROI],
         vengine_client: "AsyncVEngineClient",
         ws_manager: "WSManager",
-        config: "Settings",
+        app_settings: dict[str, str],
     ) -> None:
         self.source_id = source_id
         self.source_name = source_name
@@ -60,7 +59,7 @@ class BaseVideoProcessor(ABC):
         self.rois = rois
         self.vengine = vengine_client
         self.ws_manager = ws_manager
-        self.config = config
+        self.app_settings = app_settings
 
         self._task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
@@ -277,7 +276,7 @@ class BaseVideoProcessor(ABC):
         """Push annotated frame to MediaMTX via RTSP (blocking, runs in thread)."""
         import av
 
-        rtsp_url = f"{self.config.mediamtx_rtsp_addr}/{output_rtsp_path}"
+        rtsp_url = f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}/{output_rtsp_path}"
         try:
             container = av.open(rtsp_url, mode="w", format="rtsp")
             stream = container.add_stream("h264", rate=25)

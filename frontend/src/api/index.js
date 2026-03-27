@@ -38,4 +38,10 @@ export const processorApi = {
   status: () => api.get('/api/processor/status'),
 }
 
+// Settings API
+export const settingsApi = {
+  get: () => api.get('/api/settings'),
+  update: (data) => api.put('/api/settings', data),
+}
+
 export default api

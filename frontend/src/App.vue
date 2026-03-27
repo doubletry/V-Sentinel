@@ -24,6 +24,10 @@
             <el-icon><Bell /></el-icon>
             Messages
           </el-menu-item>
+          <el-menu-item index="/settings">
+            <el-icon><Setting /></el-icon>
+            Settings
+          </el-menu-item>
         </el-menu>
       </el-header>
       <el-main class="app-main">

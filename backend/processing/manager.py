@@ -12,7 +12,6 @@ from backend.processing.example import ExampleProcessor
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
-    from backend.config import Settings
 
 
 class ProcessorManager:
@@ -25,11 +24,11 @@ class ProcessorManager:
         self,
         vengine_client: "AsyncVEngineClient",
         ws_manager: "WSManager",
-        config: "Settings",
+        app_settings: dict[str, str],
     ) -> None:
         self._vengine = vengine_client
         self._ws_manager = ws_manager
-        self._config = config
+        self._app_settings = app_settings
         self._processors: dict[str, ExampleProcessor] = {}
         self._lock = asyncio.Lock()
 
@@ -58,7 +57,7 @@ class ProcessorManager:
                 rois=source.rois,
                 vengine_client=self._vengine,
                 ws_manager=self._ws_manager,
-                config=self._config,
+                app_settings=self._app_settings,
             )
             await processor.start()
             self._processors[source_id] = processor

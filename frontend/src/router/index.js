@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import VideoWall from '../views/VideoWall.vue'
 import Messages from '../views/Messages.vue'
+import Settings from '../views/Settings.vue'
 
 const routes = [
   {
@@ -12,6 +13,11 @@ const routes = [
     path: '/messages',
     name: 'Messages',
     component: Messages,
+  },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: Settings,
   },
 ]
 

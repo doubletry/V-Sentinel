@@ -14,7 +14,6 @@ from backend.processing.base import AnalysisResult, BaseVideoProcessor
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
-    from backend.config import Settings
 
 
 class ExampleProcessor(BaseVideoProcessor):
@@ -39,7 +38,7 @@ class ExampleProcessor(BaseVideoProcessor):
         rois: list[ROI],
         vengine_client: "AsyncVEngineClient",
         ws_manager: "WSManager",
-        config: "Settings",
+        app_settings: dict[str, str],
     ) -> None:
         super().__init__(
             source_id=source_id,
@@ -48,7 +47,7 @@ class ExampleProcessor(BaseVideoProcessor):
             rois=rois,
             vengine_client=vengine_client,
             ws_manager=ws_manager,
-            config=config,
+            app_settings=app_settings,
         )
         self._frame_count = 0
 

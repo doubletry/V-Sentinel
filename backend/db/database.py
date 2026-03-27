@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import aiosqlite
 from loguru import logger
 
-from backend.config import settings
+from backend.config import DEFAULT_APP_SETTINGS, settings
 from backend.models.schemas import ROI, ROICreate, VideoSource, VideoSourceCreate, VideoSourceUpdate
 
 
@@ -33,6 +33,13 @@ CREATE TABLE IF NOT EXISTS rois (
 );
 """
 
+CREATE_SETTINGS_TABLE = """
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
 PRAGMA_FK = "PRAGMA foreign_keys = ON;"
 
 
@@ -42,6 +49,16 @@ async def init_db() -> None:
         await db.execute(PRAGMA_FK)
         await db.execute(CREATE_SOURCES_TABLE)
         await db.execute(CREATE_ROIS_TABLE)
+        await db.execute(CREATE_SETTINGS_TABLE)
+        # Seed default settings if table is empty
+        async with db.execute("SELECT COUNT(*) FROM app_settings") as cursor:
+            row = await cursor.fetchone()
+        if row and row[0] == 0:
+            for key, value in DEFAULT_APP_SETTINGS.items():
+                await db.execute(
+                    "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+                    (key, value),
+                )
         await db.commit()
     logger.info("Database initialized at {}", _DB_PATH)
 
@@ -204,3 +221,36 @@ async def save_rois(source_id: str, rois: list[ROICreate]) -> list[ROI]:
 async def get_rois(source_id: str) -> list[ROI]:
     async with aiosqlite.connect(_DB_PATH) as db:
         return await _get_rois_for_source(db, source_id)
+
+
+# ── App Settings ──────────────────────────────────────────────────────────────
+
+async def get_all_settings() -> dict[str, str]:
+    """Return all app settings as a key→value dict."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        async with db.execute("SELECT key, value FROM app_settings") as cursor:
+            rows = await cursor.fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
+async def get_setting(key: str) -> str | None:
+    """Return a single setting value, or None if not found."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        async with db.execute(
+            "SELECT value FROM app_settings WHERE key = ?", (key,)
+        ) as cursor:
+            row = await cursor.fetchone()
+    return row[0] if row else None
+
+
+async def update_settings(data: dict[str, str]) -> dict[str, str]:
+    """Update multiple settings at once. Returns all settings after update."""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        for key, value in data.items():
+            await db.execute(
+                "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+        await db.commit()
+    return await get_all_settings()

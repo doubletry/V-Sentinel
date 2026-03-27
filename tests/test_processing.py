@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from backend.api.ws import WSManager
-from backend.config import Settings
+from backend.config import DEFAULT_APP_SETTINGS
 from backend.models.schemas import ROI, ROIPoint
 from backend.processing.base import AnalysisResult, BaseVideoProcessor
 from backend.processing.manager import ProcessorManager
@@ -37,7 +37,6 @@ class TestAnalysisResult:
 
 class TestBaseVideoProcessor:
     def _make_processor(self) -> DummyProcessor:
-        cfg = Settings()
         ws = WSManager()
         vengine = MagicMock()
         roi = ROI(
@@ -53,7 +52,7 @@ class TestBaseVideoProcessor:
             rois=[roi],
             vengine_client=vengine,
             ws_manager=ws,
-            config=cfg,
+            app_settings=dict(DEFAULT_APP_SETTINGS),
         )
 
     def test_init(self):
@@ -131,8 +130,7 @@ class TestProcessorManager:
     def _make_manager(self) -> ProcessorManager:
         vengine = MagicMock()
         ws = WSManager()
-        cfg = Settings()
-        return ProcessorManager(vengine_client=vengine, ws_manager=ws, config=cfg)
+        return ProcessorManager(vengine_client=vengine, ws_manager=ws, app_settings=dict(DEFAULT_APP_SETTINGS))
 
     async def test_status_empty(self):
         mgr = self._make_manager()

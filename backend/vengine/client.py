@@ -129,33 +129,69 @@ class AsyncVEngineClient:
         points = [base_pb2.Point(x=float(p["x"]), y=float(p["y"])) for p in roi_points]
         return base_pb2.Polygon(points=points)
 
+    def _make_image(
+        self,
+        shape: tuple[int, ...],
+        roi_points: list[dict] | None = None,
+        *,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
+    ) -> base_pb2.Image:
+        """Build a ``base_pb2.Image`` from either raw bytes **or** a cache key.
+
+        Exactly one of *image_bytes* / *image_key* must be provided.
+        """
+        if image_bytes is None and image_key is None:
+            raise ValueError("Provide either image_bytes or image_key")
+        if image_bytes is not None and image_key is not None:
+            raise ValueError("Provide only one of image_bytes or image_key, not both")
+
+        image_roi = (
+            self._make_roi_polygon(roi_points) if roi_points else base_pb2.Polygon()
+        )
+        kwargs: dict = {
+            "id": 0,
+            "shape": base_pb2.ShapeInfo(dims=list(shape)),
+            "region_of_interest": image_roi,
+        }
+        if image_bytes is not None:
+            kwargs["data"] = image_bytes
+        else:
+            kwargs["key"] = image_key
+        return base_pb2.Image(**kwargs)
+
+    # ── Upload + cache key ────────────────────────────────────────────────────
+
+    async def upload_and_get_key(self, image_bytes: bytes, filename: str = "frame.jpg") -> str | None:
+        """Upload an image to the cache and return its key.
+
+        Returns ``None`` on failure so callers can fall back to raw bytes.
+        """
+        results = await self.upload_image(image_bytes, filename)
+        if results:
+            return results[0].get("key")
+        return None
+
     # ── Detection ─────────────────────────────────────────────────────────────
 
     async def detect(
         self,
-        image_bytes: bytes,
         shape: tuple[int, ...],
         model_name: str,
         conf: float = 0.5,
         nms: float = 0.7,
         roi_points: list[dict] | None = None,
+        *,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
     ) -> list[dict]:
         """Async object detection.
 
+        Pass either *image_bytes* (raw JPEG) or *image_key* (cache key from upload).
         Returns list of {x_min, y_min, x_max, y_max, confidence, class_id, label}.
         """
         try:
-            image_roi = (
-                self._make_roi_polygon(roi_points)
-                if roi_points
-                else base_pb2.Polygon()
-            )
-            image = base_pb2.Image(
-                data=image_bytes,
-                id=0,
-                shape=base_pb2.ShapeInfo(dims=list(shape)),
-                region_of_interest=image_roi,
-            )
+            image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
             params = detection_service_pb2.DetectionParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
@@ -197,27 +233,20 @@ class AsyncVEngineClient:
 
     async def classify(
         self,
-        image_bytes: bytes,
         shape: tuple[int, ...],
         model_name: str,
         roi_points: list[dict] | None = None,
+        *,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
     ) -> list[dict]:
         """Async image classification.
 
+        Pass either *image_bytes* or *image_key*.
         Returns list of {label, confidence, class_id}.
         """
         try:
-            image_roi = (
-                self._make_roi_polygon(roi_points)
-                if roi_points
-                else base_pb2.Polygon()
-            )
-            image = base_pb2.Image(
-                data=image_bytes,
-                id=0,
-                shape=base_pb2.ShapeInfo(dims=list(shape)),
-                region_of_interest=image_roi,
-            )
+            image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
             params = classification_service_pb2.ClassificationParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
@@ -254,28 +283,21 @@ class AsyncVEngineClient:
 
     async def ocr(
         self,
-        image_bytes: bytes,
         shape: tuple[int, ...],
         model_name: str,
         conf: float = 0.5,
         roi_points: list[dict] | None = None,
+        *,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
     ) -> list[dict]:
         """Async OCR.
 
+        Pass either *image_bytes* or *image_key*.
         Returns list of {text, confidence, points}.
         """
         try:
-            image_roi = (
-                self._make_roi_polygon(roi_points)
-                if roi_points
-                else base_pb2.Polygon()
-            )
-            image = base_pb2.Image(
-                data=image_bytes,
-                id=0,
-                shape=base_pb2.ShapeInfo(dims=list(shape)),
-                region_of_interest=image_roi,
-            )
+            image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
             params = ocr_service_pb2.OCRParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,

@@ -1,4 +1,4 @@
-"""Tests for the AsyncVEngineClient initialisation."""
+"""Tests for the AsyncVEngineClient initialisation and image building."""
 from __future__ import annotations
 
 import pytest
@@ -56,3 +56,41 @@ class TestAsyncVEngineClient:
         assert len(poly.points) == 2
         assert poly.points[0].x == 10.0
         assert poly.points[1].y == 40.0
+
+
+class TestMakeImage:
+    """Tests for _make_image (bytes vs key routing)."""
+
+    def _client(self) -> AsyncVEngineClient:
+        return AsyncVEngineClient(Settings())
+
+    def test_from_bytes(self):
+        client = self._client()
+        img = client._make_image((100, 200, 3), image_bytes=b"jpeg-data")
+        assert img.data == b"jpeg-data"
+        assert img.shape.dims == [100, 200, 3]
+
+    def test_from_key(self):
+        client = self._client()
+        img = client._make_image((100, 200, 3), image_key="abc-key-123")
+        assert img.key == "abc-key-123"
+        assert img.shape.dims == [100, 200, 3]
+
+    def test_with_roi(self):
+        client = self._client()
+        img = client._make_image(
+            (100, 200, 3),
+            roi_points=[{"x": 10, "y": 20}],
+            image_key="k",
+        )
+        assert len(img.region_of_interest.points) == 1
+
+    def test_neither_raises(self):
+        client = self._client()
+        with pytest.raises(ValueError, match="Provide either"):
+            client._make_image((100, 200, 3))
+
+    def test_both_raises(self):
+        client = self._client()
+        with pytest.raises(ValueError, match="only one"):
+            client._make_image((100, 200, 3), image_bytes=b"x", image_key="k")

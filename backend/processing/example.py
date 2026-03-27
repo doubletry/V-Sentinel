@@ -58,26 +58,36 @@ class ExampleProcessor(BaseVideoProcessor):
         shape: tuple[int, int, int],
         roi_pixel_points: list[list[dict]],
     ) -> AnalysisResult:
-        """Process one frame: concurrent detection + OCR, then serial classify."""
+        """Process one frame: upload → concurrent detection + OCR by key → serial classify."""
         self._frame_count += 1
 
         # Use first ROI for inference if available
         primary_roi = roi_pixel_points[0] if roi_pixel_points else None
 
-        # 1. Run detection and OCR concurrently
+        # 0. Upload frame to cache to avoid duplicate transmission
+        image_key = await self.vengine.upload_and_get_key(encoded)
+
+        # Build kwargs: prefer cache key, fall back to raw bytes
+        img_kwargs: dict = {}
+        if image_key:
+            img_kwargs["image_key"] = image_key
+        else:
+            img_kwargs["image_bytes"] = encoded
+
+        # 1. Run detection and OCR concurrently (both use the same key)
         detect_coro = self.vengine.detect(
-            image_bytes=encoded,
             shape=shape,
             model_name=self.DETECTION_MODEL,
             conf=0.5,
             roi_points=primary_roi,
+            **img_kwargs,
         )
         ocr_coro = self.vengine.ocr(
-            image_bytes=encoded,
             shape=shape,
             model_name=self.OCR_MODEL,
             conf=0.5,
             roi_points=primary_roi,
+            **img_kwargs,
         )
         detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)
 
@@ -98,10 +108,19 @@ class ExampleProcessor(BaseVideoProcessor):
                 continue
             crop_bytes = buf.tobytes()
             crop_shape = (y2 - y1, x2 - x1, 3)
+
+            # Upload crop and use cache key for classification
+            crop_key = await self.vengine.upload_and_get_key(crop_bytes)
+            crop_kwargs: dict = {}
+            if crop_key:
+                crop_kwargs["image_key"] = crop_key
+            else:
+                crop_kwargs["image_bytes"] = crop_bytes
+
             cls_results = await self.vengine.classify(
-                image_bytes=crop_bytes,
                 shape=crop_shape,
                 model_name=self.CLASSIFICATION_MODEL,
+                **crop_kwargs,
             )
             if cls_results:
                 best = cls_results[0]

@@ -2,15 +2,15 @@
   <div class="messages-page">
     <div class="page-header">
       <div class="header-left">
-        <h2>Real-time Messages</h2>
+        <h2>{{ t('messages.title') }}</h2>
         <el-tag :type="store.wsConnected ? 'success' : 'danger'" size="small" effect="dark">
-          {{ store.wsConnected ? 'Connected' : 'Disconnected' }}
+          {{ store.wsConnected ? t('messages.connected') : t('messages.disconnected') }}
         </el-tag>
       </div>
       <div class="header-right">
         <el-select
           v-model="filterSource"
-          placeholder="All sources"
+          :placeholder="t('messages.allSources')"
           clearable
           size="small"
           style="width: 200px"
@@ -23,7 +23,7 @@
             :value="src.id"
           />
         </el-select>
-        <el-button size="small" @click="store.clearMessages">Clear</el-button>
+        <el-button size="small" @click="store.clearMessages">{{ t('messages.clear') }}</el-button>
       </div>
     </div>
 
@@ -35,12 +35,14 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useMessageStore } from '../stores/message.js'
 import { useSourceStore } from '../stores/source.js'
 import MessageList from '../components/MessageList.vue'
 
 const store = useMessageStore()
 const sourceStore = useSourceStore()
+const { t } = useI18n()
 const filterSource = ref('')
 const scrollbar = ref(null)
 

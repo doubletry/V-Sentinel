@@ -12,7 +12,7 @@
           size="small"
           effect="dark"
         >
-          {{ msg.source_id === '__agent__' ? 'SUMMARY' : msg.level.toUpperCase() }}
+          {{ msg.source_id === '__agent__' ? t('messageList.summary') : msg.level.toUpperCase() }}
         </el-tag>
         <span class="msg-source">{{ msg.source_name }}</span>
         <span class="msg-time">{{ formatTime(msg.timestamp) }}</span>
@@ -25,18 +25,22 @@
 
     <div v-if="!messages.length" class="empty-msgs">
       <el-icon :size="32" color="#555"><ChatRound /></el-icon>
-      <span>No messages yet</span>
+      <span>{{ t('messageList.noMessages') }}</span>
     </div>
   </div>
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
 const props = defineProps({
   messages: {
     type: Array,
     default: () => [],
   },
 })
+
+const { t } = useI18n()
 
 function levelType(level) {
   const map = { info: '', warning: 'warning', alert: 'danger' }

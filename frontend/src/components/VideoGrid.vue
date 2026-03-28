@@ -2,7 +2,7 @@
   <div class="video-grid-container">
     <!-- Toolbar -->
     <div class="grid-toolbar">
-      <span class="toolbar-label">Layout:</span>
+      <span class="toolbar-label">{{ t('common.layout') }}:</span>
       <el-button-group>
         <el-button
           v-for="layout in layouts"
@@ -11,7 +11,7 @@
           size="small"
           @click="setLayout(layout.cols)"
         >
-          {{ layout.label }}
+          {{ t(layout.labelKey) }}
         </el-button>
       </el-button-group>
     </div>
@@ -43,7 +43,7 @@
               @click="toggleRoi(cellIdx)"
             >
               <el-icon><Edit /></el-icon>
-              ROI
+              {{ t('videoGrid.roi') }}
             </el-button>
             <el-button
               size="small"
@@ -64,7 +64,7 @@
           <!-- Empty cell / drop target -->
           <div class="drop-target">
             <el-icon :size="32" color="#555"><Plus /></el-icon>
-            <span>Drop source here</span>
+            <span>{{ t('videoGrid.dropHere') }}</span>
           </div>
         </template>
       </div>
@@ -74,19 +74,21 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useSourceStore } from '../stores/source.js'
 import VideoPlayer from './VideoPlayer.vue'
 import RoiDrawer from './RoiDrawer.vue'
 
 const store = useSourceStore()
+const { t } = useI18n()
 const currentCols = ref(2)
 const roiCellIndex = ref(null)
 const dragOverCell = ref(null)
 
 const layouts = [
-  { cols: 1, label: '1×1' },
-  { cols: 2, label: '2×2' },
-  { cols: 3, label: '3×3' },
+  { cols: 1, labelKey: 'videoGrid.layout1' },
+  { cols: 2, labelKey: 'videoGrid.layout4' },
+  { cols: 3, labelKey: 'videoGrid.layout9' },
 ]
 
 const totalCells = computed(() => currentCols.value * currentCols.value)

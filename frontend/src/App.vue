@@ -18,17 +18,29 @@
         >
           <el-menu-item index="/">
             <el-icon><Monitor /></el-icon>
-            Video Wall
+            {{ t('nav.videoWall') }}
           </el-menu-item>
           <el-menu-item index="/messages">
             <el-icon><Bell /></el-icon>
-            Messages
+            {{ t('nav.messages') }}
           </el-menu-item>
           <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
-            Settings
+            {{ t('nav.settings') }}
           </el-menu-item>
         </el-menu>
+
+        <div class="header-tools">
+          <span class="lang-label">{{ t('language.label') }}</span>
+          <el-select v-model="localeModel" size="small" class="lang-select">
+            <el-option
+              v-for="option in localeOptions"
+              :key="option.value"
+              :label="t(option.labelKey)"
+              :value="option.value"
+            />
+          </el-select>
+        </div>
       </el-header>
       <el-main class="app-main">
         <router-view />
@@ -38,7 +50,19 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import config from './config.js'
+import { localeOptions, setI18nLocale } from './i18n/index.js'
+
+const { t, locale } = useI18n()
+
+const localeModel = computed({
+  get: () => locale.value,
+  set: (value) => {
+    setI18nLocale(value)
+  },
+})
 </script>
 
 <style>
@@ -63,6 +87,7 @@ body {
 .app-header {
   display: flex;
   align-items: center;
+  gap: 12px;
   background: #1a1a2e;
   border-bottom: 1px solid #333;
   padding: 0 16px;
@@ -74,7 +99,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-right: 32px;
+  margin-right: 16px;
+  min-width: 0;
 }
 
 .brand-name {
@@ -86,16 +112,49 @@ body {
 .brand-desc {
   font-size: 12px;
   color: #888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
 }
 
 .header-nav {
   flex: 1;
+  min-width: 0;
   border-bottom: none !important;
+}
+
+.header-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.lang-label {
+  color: #888;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lang-select {
+  width: 118px;
 }
 
 .app-main {
   flex: 1;
   overflow: hidden;
   padding: 0;
+}
+
+@media (max-width: 960px) {
+  .brand-desc,
+  .lang-label {
+    display: none;
+  }
+
+  .lang-select {
+    width: 90px;
+  }
 }
 </style>

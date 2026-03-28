@@ -9,12 +9,12 @@
     />
     <div v-if="!connected && !error" class="video-placeholder">
       <el-icon :size="40" color="#555"><VideoCamera /></el-icon>
-      <span>Connecting...</span>
+      <span>{{ t('videoPlayer.connecting') }}</span>
     </div>
     <div v-if="error" class="video-placeholder error">
       <el-icon :size="40" color="#f56c6c"><CircleClose /></el-icon>
       <span>{{ error }}</span>
-      <el-button size="small" type="primary" @click="connect">Retry</el-button>
+      <el-button size="small" type="primary" @click="connect">{{ t('common.retry') }}</el-button>
     </div>
     <div v-if="label" class="video-label">{{ label }}</div>
   </div>
@@ -22,6 +22,7 @@
 
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { connectWebRTC } from '../utils/webrtc.js'
 
 const props = defineProps({
@@ -38,6 +39,7 @@ const props = defineProps({
 const videoEl = ref(null)
 const connected = ref(false)
 const error = ref('')
+const { t } = useI18n()
 let _conn = null
 
 async function connect() {
@@ -54,7 +56,7 @@ async function connect() {
     _conn = await connectWebRTC(props.streamPath, videoEl.value)
     connected.value = true
   } catch (err) {
-    error.value = err.message || 'Connection failed'
+    error.value = err.message || t('videoPlayer.connectionFailed')
   }
 }
 

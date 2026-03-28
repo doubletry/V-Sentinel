@@ -1,10 +1,10 @@
 <template>
   <div class="source-list">
     <div class="list-header">
-      <span class="list-title">Video Sources</span>
+      <span class="list-title">{{ t('sourceList.title') }}</span>
       <el-button type="primary" size="small" @click="showAddDialog = true">
         <el-icon><Plus /></el-icon>
-        Add
+        {{ t('common.add') }}
       </el-button>
     </div>
 
@@ -34,7 +34,7 @@
             :loading="actionLoading[source.id]"
             @click="toggleAnalysis(source)"
           >
-            {{ store.isRunning(source.id) ? 'Stop' : 'Analyze' }}
+            {{ store.isRunning(source.id) ? t('sourceList.stop') : t('sourceList.analyze') }}
           </el-button>
           <el-button
             size="small"
@@ -48,22 +48,22 @@
 
       <div v-if="!store.sources.length" class="empty-hint">
         <el-icon :size="32" color="#555"><VideoCamera /></el-icon>
-        <span>No sources yet</span>
+        <span>{{ t('sourceList.noSources') }}</span>
       </div>
     </el-scrollbar>
 
     <!-- Add Source Dialog -->
     <el-dialog
       v-model="showAddDialog"
-      title="Add Video Source"
+      :title="t('sourceList.addSource')"
       width="400px"
       :close-on-click-modal="false"
     >
       <el-form :model="form" label-width="80px" @submit.prevent="addSource">
-        <el-form-item label="Name" required>
-          <el-input v-model="form.name" placeholder="Camera 1" />
+        <el-form-item :label="t('sourceList.name')" required>
+          <el-input v-model="form.name" :placeholder="t('sourceList.name')" />
         </el-form-item>
-        <el-form-item label="RTSP URL" required>
+        <el-form-item :label="t('sourceList.rtspUrl')" required>
           <el-input
             v-model="form.rtsp_url"
             placeholder="rtsp://..."
@@ -72,9 +72,9 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false">Cancel</el-button>
+        <el-button @click="showAddDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="addLoading" @click="addSource">
-          Add
+          {{ t('common.add') }}
         </el-button>
       </template>
     </el-dialog>
@@ -83,10 +83,12 @@
 
 <script setup>
 import { ref, reactive } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useSourceStore } from '../stores/source.js'
 
 const store = useSourceStore()
+const { t } = useI18n()
 const showAddDialog = ref(false)
 const addLoading = ref(false)
 const actionLoading = reactive({})
@@ -100,7 +102,7 @@ function onDragStart(event, source) {
 
 async function addSource() {
   if (!form.name || !form.rtsp_url) {
-    ElMessage.warning('Please fill in all fields')
+    ElMessage.warning(t('sourceList.fillAllFields'))
     return
   }
   addLoading.value = true
@@ -109,9 +111,9 @@ async function addSource() {
     showAddDialog.value = false
     form.name = ''
     form.rtsp_url = ''
-    ElMessage.success('Source added')
+    ElMessage.success(t('sourceList.sourceAdded'))
   } catch (err) {
-    ElMessage.error(err.message || 'Failed to add source')
+    ElMessage.error(err.message || t('sourceList.failedToAdd'))
   } finally {
     addLoading.value = false
   }
@@ -133,12 +135,16 @@ async function toggleAnalysis(source) {
 async function confirmDelete(source) {
   try {
     await ElMessageBox.confirm(
-      `Delete "${source.name}"?`,
-      'Confirm',
-      { type: 'warning', confirmButtonText: 'Delete', cancelButtonText: 'Cancel' }
+      t('sourceList.deleteConfirmMessage', { name: source.name }),
+      t('sourceList.deleteConfirmTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('common.delete'),
+        cancelButtonText: t('common.cancel'),
+      }
     )
     await store.deleteSource(source.id)
-    ElMessage.success('Deleted')
+    ElMessage.success(t('sourceList.deleted'))
   } catch (_) {
     // User cancelled
   }

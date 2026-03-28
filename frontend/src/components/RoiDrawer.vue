@@ -18,18 +18,18 @@
           :type="mode === 'polygon' ? 'primary' : 'default'"
           @click="mode = 'polygon'"
         >
-          <el-icon><EditPen /></el-icon> Polygon
+          <el-icon><EditPen /></el-icon> {{ t('roi.polygon') }}
         </el-button>
         <el-button
           size="small"
           :type="mode === 'rectangle' ? 'primary' : 'default'"
           @click="mode = 'rectangle'"
         >
-          <el-icon><Crop /></el-icon> Rectangle
+          <el-icon><Crop /></el-icon> {{ t('roi.rectangle') }}
         </el-button>
       </el-button-group>
       <el-button size="small" type="success" :loading="saving" @click="save">
-        <el-icon><Check /></el-icon> Save ROIs
+        <el-icon><Check /></el-icon> {{ t('roi.saveRois') }}
       </el-button>
       <el-button size="small" @click="emit('close')">
         <el-icon><Close /></el-icon>
@@ -41,10 +41,10 @@
       <el-input
         v-model="shapes[selectedIdx].tag"
         size="small"
-        placeholder="Shape tag (optional)"
+        :placeholder="t('roi.tagPlaceholder')"
         clearable
       >
-        <template #prepend>Tag</template>
+        <template #prepend>{{ t('roi.tag') }}</template>
       </el-input>
       <el-button size="small" type="danger" @click="deleteSelected">
         <el-icon><Delete /></el-icon>
@@ -55,6 +55,7 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { useSourceStore } from '../stores/source.js'
 
@@ -67,6 +68,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const store = useSourceStore()
+const { t } = useI18n()
 const canvasEl = ref(null)
 const overlayEl = ref(null)
 const mode = ref('polygon')
@@ -359,9 +361,9 @@ async function save() {
       tag: s.tag,
     }))
     await store.updateSource(props.source.id, { rois })
-    ElMessage.success('ROIs saved')
+    ElMessage.success(t('roi.roisSaved'))
   } catch (err) {
-    ElMessage.error(err.message || 'Save failed')
+    ElMessage.error(err.message || t('roi.saveFailed'))
   } finally {
     saving.value = false
   }

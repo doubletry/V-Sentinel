@@ -5,6 +5,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import 'element-plus/dist/index.css'
 
 import App from './App.vue'
+import { i18n } from './i18n/index.js'
 import router from './router/index.js'
 import config from './config.js'
 
@@ -18,6 +19,7 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus)
+app.use(i18n)
 
 // Make config available globally
 app.config.globalProperties.$config = config

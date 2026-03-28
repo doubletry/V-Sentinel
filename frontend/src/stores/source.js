@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { sourcesApi, processorApi } from '../api/index.js'
 import { ElMessage } from 'element-plus'
+import { i18n } from '../i18n/index.js'
 
 export const useSourceStore = defineStore('source', () => {
   const sources = ref([])
@@ -18,7 +19,7 @@ export const useSourceStore = defineStore('source', () => {
     try {
       sources.value = await sourcesApi.list()
     } catch (err) {
-      ElMessage.error(`Failed to load sources: ${err.message}`)
+      ElMessage.error(i18n.global.t('sourceList.failedToLoadSources', { message: err.message }))
     } finally {
       loading.value = false
     }
@@ -51,9 +52,9 @@ export const useSourceStore = defineStore('source', () => {
     try {
       await processorApi.start(sourceId)
       runningSourceIds.value.add(sourceId)
-      ElMessage.success('Analysis started')
+      ElMessage.success(i18n.global.t('sourceList.analysisStarted'))
     } catch (err) {
-      ElMessage.error(`Failed to start: ${err.message}`)
+      ElMessage.error(i18n.global.t('sourceList.failedToStart', { message: err.message }))
     }
   }
 
@@ -61,9 +62,9 @@ export const useSourceStore = defineStore('source', () => {
     try {
       await processorApi.stop(sourceId)
       runningSourceIds.value.delete(sourceId)
-      ElMessage.success('Analysis stopped')
+      ElMessage.success(i18n.global.t('sourceList.analysisStopped'))
     } catch (err) {
-      ElMessage.error(`Failed to stop: ${err.message}`)
+      ElMessage.error(i18n.global.t('sourceList.failedToStop', { message: err.message }))
     }
   }
 

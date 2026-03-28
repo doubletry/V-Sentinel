@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <el-icon :size="20"><Setting /></el-icon>
-          <span>Platform Settings</span>
+          <span>{{ t('settings.title') }}</span>
         </div>
       </template>
 
@@ -16,54 +16,54 @@
         v-loading="loading"
       >
         <!-- V-Engine Host -->
-        <el-divider content-position="left">V-Engine Services</el-divider>
-        <el-form-item label="V-Engine Host">
+        <el-divider content-position="left">{{ t('settings.vengineServices') }}</el-divider>
+        <el-form-item :label="t('settings.vengineHost')">
           <el-input v-model="form.vengine_host" placeholder="localhost" />
         </el-form-item>
 
         <!-- Per-service ports -->
-        <el-form-item label="Detection Port">
+        <el-form-item :label="t('settings.detectionPort')">
           <el-input v-model="form.detection_port" placeholder="50051" />
         </el-form-item>
-        <el-form-item label="Classification Port">
+        <el-form-item :label="t('settings.classificationPort')">
           <el-input v-model="form.classification_port" placeholder="50052" />
         </el-form-item>
-        <el-form-item label="Action Port">
+        <el-form-item :label="t('settings.actionPort')">
           <el-input v-model="form.action_port" placeholder="50053" />
         </el-form-item>
-        <el-form-item label="OCR Port">
+        <el-form-item :label="t('settings.ocrPort')">
           <el-input v-model="form.ocr_port" placeholder="50054" />
         </el-form-item>
-        <el-form-item label="Upload Port">
+        <el-form-item :label="t('settings.uploadPort')">
           <el-input v-model="form.upload_port" placeholder="50050" />
         </el-form-item>
 
         <!-- MediaMTX -->
-        <el-divider content-position="left">MediaMTX</el-divider>
-        <el-form-item label="RTSP Address">
+        <el-divider content-position="left">{{ t('settings.mediamtx') }}</el-divider>
+        <el-form-item :label="t('settings.rtspAddress')">
           <el-input v-model="form.mediamtx_rtsp_addr" placeholder="rtsp://localhost:8554" />
         </el-form-item>
-        <el-form-item label="WebRTC Address">
+        <el-form-item :label="t('settings.webrtcAddress')">
           <el-input v-model="form.mediamtx_webrtc_addr" placeholder="http://localhost:8889" />
         </el-form-item>
 
         <!-- Thread pools -->
-        <el-divider content-position="left">Thread Pools</el-divider>
-        <el-form-item label="Max Pull Workers">
+        <el-divider content-position="left">{{ t('settings.threadPools') }}</el-divider>
+        <el-form-item :label="t('settings.maxPullWorkers')">
           <el-input v-model="form.max_pull_workers" placeholder="20" />
         </el-form-item>
-        <el-form-item label="Max Push Workers">
+        <el-form-item :label="t('settings.maxPushWorkers')">
           <el-input v-model="form.max_push_workers" placeholder="10" />
         </el-form-item>
-        <el-form-item label="Max CPU Workers">
+        <el-form-item :label="t('settings.maxCpuWorkers')">
           <el-input v-model="form.max_cpu_workers" placeholder="16" />
         </el-form-item>
 
         <el-form-item>
           <el-button type="primary" @click="save" :loading="saving">
-            Save Settings
+            {{ t('settings.saveSettings') }}
           </el-button>
-          <el-button @click="reload">Reset</el-button>
+          <el-button @click="reload">{{ t('common.reset') }}</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -72,9 +72,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { settingsApi } from '../api/index.js'
 
+const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const form = ref({
@@ -97,7 +99,7 @@ async function reload() {
     const data = await settingsApi.get()
     Object.assign(form.value, data)
   } catch (err) {
-    ElMessage.error(`Failed to load settings: ${err.message}`)
+    ElMessage.error(t('settings.failedToLoad', { message: err.message }))
   } finally {
     loading.value = false
   }
@@ -108,9 +110,9 @@ async function save() {
   try {
     const data = await settingsApi.update(form.value)
     Object.assign(form.value, data)
-    ElMessage.success('Settings saved successfully')
+    ElMessage.success(t('settings.settingsSaved'))
   } catch (err) {
-    ElMessage.error(`Failed to save settings: ${err.message}`)
+    ElMessage.error(t('settings.failedToSave', { message: err.message }))
   } finally {
     saving.value = false
   }

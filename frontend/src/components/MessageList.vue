@@ -92,18 +92,24 @@ function formatTime(ts) {
   align-items: center;
   gap: 8px;
   margin-bottom: 6px;
+  min-width: 0;
 }
 
 .msg-source {
   font-size: 13px;
   font-weight: 600;
   color: #aaa;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .msg-time {
   margin-left: auto;
   font-size: 11px;
   color: #666;
+  white-space: nowrap;
 }
 
 .msg-body {

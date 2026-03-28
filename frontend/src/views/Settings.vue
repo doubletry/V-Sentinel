@@ -315,6 +315,9 @@ onMounted(reload)
 
 :deep(.el-form-item__label) {
   color: #aab7d2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 @media (max-width: 768px) {

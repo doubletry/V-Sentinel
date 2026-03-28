@@ -89,12 +89,14 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .header-left h2 {
   font-size: 16px;
   color: #ddd;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .header-right {
@@ -103,6 +105,17 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
+@media (max-width: 880px) {
+  .page-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
 .messages-scroll {
   flex: 1;
 }

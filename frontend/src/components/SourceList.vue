@@ -210,6 +210,11 @@ async function confirmDelete(source) {
   display: flex;
   gap: 6px;
   margin-top: 8px;
+  flex-wrap: nowrap;
+}
+
+.source-actions :deep(.el-button span) {
+  white-space: nowrap;
 }
 
 .empty-hint {

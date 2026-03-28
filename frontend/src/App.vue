@@ -165,6 +165,13 @@ body {
   border-bottom: none !important;
 }
 
+.header-nav :deep(.el-menu-item) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .header-tools {
   display: flex;
   align-items: center;
@@ -192,6 +199,14 @@ body {
   .brand-desc,
   .lang-label {
     display: none;
+  }
+
+  .header-brand {
+    margin-right: 4px;
+  }
+
+  .brand-name {
+    font-size: 15px;
   }
 
   .lang-select {

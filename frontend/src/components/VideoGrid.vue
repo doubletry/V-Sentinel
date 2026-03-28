@@ -160,6 +160,7 @@ function onDrop(event, cellIdx) {
 .grid-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 12px;
   background: #1a1a2e;
@@ -170,6 +171,7 @@ function onDrop(event, cellIdx) {
 .toolbar-label {
   color: #888;
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .video-grid {

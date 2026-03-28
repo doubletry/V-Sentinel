@@ -35,6 +35,8 @@ export const sourcesApi = {
 export const processorApi = {
   start: (sourceId) => api.post('/api/processor/start', { source_id: sourceId }),
   stop: (sourceId) => api.post('/api/processor/stop', { source_id: sourceId }),
+  startAll: () => api.post('/api/processor/start-all'),
+  stopAll: () => api.post('/api/processor/stop-all'),
   status: () => api.get('/api/processor/status'),
 }
 

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from backend.db.database import get_source
+from backend.db.database import get_source, list_sources
 from backend.models.schemas import ProcessorStatus
 from backend.processing.agent import AnalysisAgent
 from backend.processing.example import ExampleProcessor
@@ -90,15 +90,67 @@ class ProcessorManager:
             logger.info("ProcessorManager: stopped processor for {}", source_id)
             return {"status": "stopped", "source_id": source_id}
 
-    async def stop_all(self) -> None:
-        """Stop all running processors (called during shutdown)."""
+    async def start_all_processors(self) -> dict:
+        """Start processors for all configured video sources."""
+        sources = await list_sources()
+        if not sources:
+            return {
+                "status": "no_sources",
+                "total": 0,
+                "started": 0,
+                "already_running": 0,
+                "failed": [],
+            }
+
+        started = 0
+        already_running = 0
+        failed: list[dict[str, str]] = []
+
+        for source in sources:
+            try:
+                result = await self.start_processor(source.id)
+                if result["status"] == "started":
+                    started += 1
+                elif result["status"] == "already_running":
+                    already_running += 1
+            except Exception as exc:
+                failed.append({"source_id": source.id, "reason": str(exc)})
+
+        return {
+            "status": "started_all" if not failed else "partial",
+            "total": len(sources),
+            "started": started,
+            "already_running": already_running,
+            "failed": failed,
+        }
+
+    async def stop_all_processors(self) -> dict:
+        """Stop all currently running processors."""
         async with self._lock:
             source_ids = list(self._processors.keys())
 
-        await asyncio.gather(
-            *[self.stop_processor(sid) for sid in source_ids],
-            return_exceptions=True,
-        )
+        if not source_ids:
+            return {"status": "not_running", "stopped": 0}
+
+        stopped = 0
+        failed: list[dict[str, str]] = []
+        for source_id in source_ids:
+            try:
+                result = await self.stop_processor(source_id)
+                if result["status"] == "stopped":
+                    stopped += 1
+            except Exception as exc:
+                failed.append({"source_id": source_id, "reason": str(exc)})
+
+        return {
+            "status": "stopped_all" if not failed else "partial",
+            "stopped": stopped,
+            "failed": failed,
+        }
+
+    async def stop_all(self) -> None:
+        """Stop all running processors (called during shutdown)."""
+        await self.stop_all_processors()
         logger.info("ProcessorManager: all processors stopped")
 
     def get_all_status(self) -> list[ProcessorStatus]:

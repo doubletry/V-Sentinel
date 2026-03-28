@@ -106,6 +106,36 @@
         </section>
 
         <section class="settings-section">
+          <h2>{{ t('settings.backendService') }}</h2>
+          <div class="service-control-row">
+            <el-tag :type="sourceStore.runningCount > 0 ? 'success' : 'info'" effect="dark">
+              {{
+                sourceStore.runningCount > 0
+                  ? t('settings.runningStatus', { count: sourceStore.runningCount })
+                  : t('settings.stoppedStatus')
+              }}
+            </el-tag>
+            <div class="service-buttons">
+              <el-button
+                type="success"
+                :loading="serviceAction === 'start'"
+                @click="startAllServices"
+              >
+                {{ t('settings.startAll') }}
+              </el-button>
+              <el-button
+                type="warning"
+                :loading="serviceAction === 'stop'"
+                @click="stopAllServices"
+              >
+                {{ t('settings.stopAll') }}
+              </el-button>
+            </div>
+          </div>
+          <p class="service-tip">{{ t('settings.backendServiceTip') }}</p>
+        </section>
+
+        <section class="settings-section">
           <h2>{{ t('settings.vengineServices') }}</h2>
           <el-form-item :label="t('settings.vengineHost')">
             <el-input v-model="form.vengine_host" placeholder="localhost" />
@@ -167,14 +197,17 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { localeOptions } from '../i18n/index.js'
 import { APP_ICON_OPTIONS, useAppSettingsStore } from '../stores/appSettings.js'
+import { useSourceStore } from '../stores/source.js'
 
 const { t } = useI18n()
 const appSettingsStore = useAppSettingsStore()
+const sourceStore = useSourceStore()
 const languageOptions = localeOptions
 const iconOptions = APP_ICON_OPTIONS
 
 const loading = ref(false)
 const saving = ref(false)
+const serviceAction = ref('')
 const form = ref({
   ui_language: 'zh-CN',
   site_title: '',
@@ -223,7 +256,30 @@ async function save() {
   }
 }
 
-onMounted(reload)
+async function startAllServices() {
+  serviceAction.value = 'start'
+  try {
+    await sourceStore.startAllProcessing()
+  } finally {
+    serviceAction.value = ''
+  }
+}
+
+async function stopAllServices() {
+  serviceAction.value = 'stop'
+  try {
+    await sourceStore.stopAllProcessing()
+  } finally {
+    serviceAction.value = ''
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([
+    reload(),
+    sourceStore.syncProcessorStatus(),
+  ])
+})
 </script>
 
 <style scoped>
@@ -299,6 +355,27 @@ onMounted(reload)
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.service-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.service-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.service-tip {
+  margin-top: 8px;
+  color: #8f9fbe;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .settings-actions {

@@ -25,3 +25,19 @@ class TestProcessorStartStop:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "not_running"
+
+
+class TestProcessorGlobalControl:
+    async def test_start_all_no_sources(self, async_client: AsyncClient):
+        resp = await async_client.post("/api/processor/start-all")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "no_sources"
+        assert data["total"] == 0
+
+    async def test_stop_all_not_running(self, async_client: AsyncClient):
+        resp = await async_client.post("/api/processor/stop-all")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "not_running"
+        assert data["stopped"] == 0

@@ -46,6 +46,7 @@ export default {
     layout1: '1 Grid',
     layout4: '4 Grid',
     layout9: '9 Grid',
+    layout16: '16 Grid',
     roi: 'ROI',
     dropHere: 'Drop source here',
   },

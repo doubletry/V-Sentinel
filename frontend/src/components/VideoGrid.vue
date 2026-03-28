@@ -79,9 +79,21 @@ import { useSourceStore } from '../stores/source.js'
 import VideoPlayer from './VideoPlayer.vue'
 import RoiDrawer from './RoiDrawer.vue'
 
+const GRID_LAYOUT_STORAGE_KEY = 'v-sentinel.layout.cols'
+const ALLOWED_LAYOUTS = [1, 2, 3, 4]
+
+function loadInitialLayout() {
+  if (typeof window === 'undefined') {
+    return 2
+  }
+
+  const raw = Number(window.localStorage.getItem(GRID_LAYOUT_STORAGE_KEY))
+  return ALLOWED_LAYOUTS.includes(raw) ? raw : 2
+}
+
 const store = useSourceStore()
 const { t } = useI18n()
-const currentCols = ref(2)
+const currentCols = ref(loadInitialLayout())
 const roiCellIndex = ref(null)
 const dragOverCell = ref(null)
 
@@ -89,6 +101,7 @@ const layouts = [
   { cols: 1, labelKey: 'videoGrid.layout1' },
   { cols: 2, labelKey: 'videoGrid.layout4' },
   { cols: 3, labelKey: 'videoGrid.layout9' },
+  { cols: 4, labelKey: 'videoGrid.layout16' },
 ]
 
 const totalCells = computed(() => currentCols.value * currentCols.value)
@@ -103,7 +116,12 @@ const gridStyle = computed(() => ({
 const assignments = computed(() => store.gridAssignments)
 
 function setLayout(cols) {
+  if (!ALLOWED_LAYOUTS.includes(cols)) return
   currentCols.value = cols
+
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(GRID_LAYOUT_STORAGE_KEY, String(cols))
+  }
 }
 
 function getStreamPath(source) {

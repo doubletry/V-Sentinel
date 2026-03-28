@@ -46,6 +46,7 @@ export default {
     layout1: '1宫格',
     layout4: '4宫格',
     layout9: '9宫格',
+    layout16: '16宫格',
     roi: 'ROI',
     dropHere: '将视频源拖拽到这里',
   },

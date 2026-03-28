@@ -71,10 +71,6 @@ class AppSettingsUpdate(BaseModel):
     site_title: str | None = None
     site_description: str | None = None
     favicon_url: str | None = None
-    brand_icon: str | None = None
-    nav_icon_video_wall: str | None = None
-    nav_icon_messages: str | None = None
-    nav_icon_settings: str | None = None
 
     vengine_host: str | None = None
     detection_port: str | None = None

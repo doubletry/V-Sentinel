@@ -39,69 +39,24 @@
             />
           </el-form-item>
           <el-form-item :label="t('settings.faviconUrl')">
+            <div class="icon-upload-group">
+              <el-avatar :size="28" shape="square" :src="form.favicon_url">
+                <el-icon><VideoCamera /></el-icon>
+              </el-avatar>
+              <el-upload
+                class="site-icon-upload"
+                :show-file-list="false"
+                :auto-upload="false"
+                accept=".ico,.png,.jpg,.jpeg,.svg,.webp"
+                :on-change="onSiteIconChange"
+              >
+                <el-button size="small">{{ t('settings.uploadSiteIcon') }}</el-button>
+              </el-upload>
+              <el-button size="small" @click="resetSiteIcon">{{ t('settings.resetSiteIcon') }}</el-button>
+            </div>
+          </el-form-item>
+          <el-form-item :label="t('settings.iconPath')">
             <el-input v-model="form.favicon_url" placeholder="/favicon.ico" />
-          </el-form-item>
-          <el-form-item :label="t('settings.brandIcon')">
-            <el-select v-model="form.brand_icon" style="width: 100%">
-              <el-option
-                v-for="option in iconOptions"
-                :key="option.value"
-                :label="t(option.labelKey)"
-                :value="option.value"
-              >
-                <div class="icon-option">
-                  <el-icon><component :is="option.value" /></el-icon>
-                  <span>{{ t(option.labelKey) }}</span>
-                </div>
-              </el-option>
-            </el-select>
-          </el-form-item>
-
-          <h3>{{ t('settings.tabbarIcons') }}</h3>
-          <el-form-item :label="t('settings.videoWallIcon')">
-            <el-select v-model="form.nav_icon_video_wall" style="width: 100%">
-              <el-option
-                v-for="option in iconOptions"
-                :key="`wall-${option.value}`"
-                :label="t(option.labelKey)"
-                :value="option.value"
-              >
-                <div class="icon-option">
-                  <el-icon><component :is="option.value" /></el-icon>
-                  <span>{{ t(option.labelKey) }}</span>
-                </div>
-              </el-option>
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="t('settings.messagesIcon')">
-            <el-select v-model="form.nav_icon_messages" style="width: 100%">
-              <el-option
-                v-for="option in iconOptions"
-                :key="`msg-${option.value}`"
-                :label="t(option.labelKey)"
-                :value="option.value"
-              >
-                <div class="icon-option">
-                  <el-icon><component :is="option.value" /></el-icon>
-                  <span>{{ t(option.labelKey) }}</span>
-                </div>
-              </el-option>
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="t('settings.settingsIcon')">
-            <el-select v-model="form.nav_icon_settings" style="width: 100%">
-              <el-option
-                v-for="option in iconOptions"
-                :key="`settings-${option.value}`"
-                :label="t(option.labelKey)"
-                :value="option.value"
-              >
-                <div class="icon-option">
-                  <el-icon><component :is="option.value" /></el-icon>
-                  <span>{{ t(option.labelKey) }}</span>
-                </div>
-              </el-option>
-            </el-select>
           </el-form-item>
         </section>
 
@@ -196,14 +151,13 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { localeOptions } from '../i18n/index.js'
-import { APP_ICON_OPTIONS, useAppSettingsStore } from '../stores/appSettings.js'
+import { useAppSettingsStore } from '../stores/appSettings.js'
 import { useSourceStore } from '../stores/source.js'
 
 const { t } = useI18n()
 const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
-const iconOptions = APP_ICON_OPTIONS
 
 const loading = ref(false)
 const saving = ref(false)
@@ -213,10 +167,6 @@ const form = ref({
   site_title: '',
   site_description: '',
   favicon_url: '/favicon.ico',
-  brand_icon: 'VideoCamera',
-  nav_icon_video_wall: 'Monitor',
-  nav_icon_messages: 'Bell',
-  nav_icon_settings: 'Setting',
   vengine_host: '',
   detection_port: '',
   classification_port: '',
@@ -254,6 +204,29 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+function onSiteIconChange(uploadFile) {
+  const raw = uploadFile?.raw
+  if (!raw) return
+
+  const maxBytes = 1024 * 1024
+  if (raw.size > maxBytes) {
+    ElMessage.warning(t('settings.iconTooLarge'))
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = () => {
+    if (typeof reader.result === 'string') {
+      form.value.favicon_url = reader.result
+    }
+  }
+  reader.readAsDataURL(raw)
+}
+
+function resetSiteIcon() {
+  form.value.favicon_url = '/favicon.ico'
 }
 
 async function startAllServices() {
@@ -344,17 +317,11 @@ onMounted(async () => {
   margin-bottom: 10px;
 }
 
-.settings-section h3 {
-  margin: 8px 0 12px;
-  color: #7f95bf;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.icon-option {
+.icon-upload-group {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .service-control-row {

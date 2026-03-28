@@ -3,9 +3,9 @@
     <el-container class="app-container">
       <el-header class="app-header">
         <div class="header-brand">
-          <el-icon :size="22" color="#409EFF">
-            <component :is="appSettingsStore.brandIcon" />
-          </el-icon>
+          <el-avatar :size="22" shape="square" :src="appSettingsStore.siteIconUrl" class="site-icon">
+            <el-icon><VideoCamera /></el-icon>
+          </el-avatar>
           <span class="brand-name">{{ appSettingsStore.siteTitle }}</span>
           <span class="brand-desc">{{ appSettingsStore.siteDescription }}</span>
         </div>
@@ -19,15 +19,15 @@
           class="header-nav"
         >
           <el-menu-item index="/">
-            <el-icon><component :is="appSettingsStore.navIcons.videoWall" /></el-icon>
+            <el-icon><Monitor /></el-icon>
             {{ t('nav.videoWall') }}
           </el-menu-item>
           <el-menu-item index="/messages">
-            <el-icon><component :is="appSettingsStore.navIcons.messages" /></el-icon>
+            <el-icon><Bell /></el-icon>
             {{ t('nav.messages') }}
           </el-menu-item>
           <el-menu-item index="/settings">
-            <el-icon><component :is="appSettingsStore.navIcons.settings" /></el-icon>
+            <el-icon><Setting /></el-icon>
             {{ t('nav.settings') }}
           </el-menu-item>
         </el-menu>
@@ -142,6 +142,11 @@ body {
   gap: 8px;
   margin-right: 16px;
   min-width: 0;
+}
+
+.site-icon {
+  border: 1px solid #3b4d7a;
+  background: #101b33;
 }
 
 .brand-name {

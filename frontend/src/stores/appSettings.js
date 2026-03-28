@@ -9,34 +9,13 @@ const DEFAULT_UI_SETTINGS = {
   site_title: config.siteName,
   site_description: config.siteDescription,
   favicon_url: '/favicon.ico',
-  brand_icon: 'VideoCamera',
-  nav_icon_video_wall: 'Monitor',
-  nav_icon_messages: 'Bell',
-  nav_icon_settings: 'Setting',
 }
-
-export const APP_ICON_OPTIONS = [
-  { value: 'VideoCamera', labelKey: 'settings.iconVideoCamera' },
-  { value: 'Monitor', labelKey: 'settings.iconMonitor' },
-  { value: 'Bell', labelKey: 'settings.iconBell' },
-  { value: 'Setting', labelKey: 'settings.iconSetting' },
-  { value: 'Tools', labelKey: 'settings.iconTools' },
-  { value: 'Camera', labelKey: 'settings.iconCamera' },
-  { value: 'Notification', labelKey: 'settings.iconNotification' },
-  { value: 'Operation', labelKey: 'settings.iconOperation' },
-]
-
-const ALLOWED_ICON_VALUES = new Set(APP_ICON_OPTIONS.map((item) => item.value))
 
 function withDefaults(data = {}) {
   return {
     ...DEFAULT_UI_SETTINGS,
     ...data,
   }
-}
-
-function normalizeIcon(iconName, fallback) {
-  return ALLOWED_ICON_VALUES.has(iconName) ? iconName : fallback
 }
 
 export const useAppSettingsStore = defineStore('appSettings', () => {
@@ -48,12 +27,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
   const siteDescription = computed(() => settings.value.site_description || DEFAULT_UI_SETTINGS.site_description)
   const uiLanguage = computed(() => settings.value.ui_language || DEFAULT_UI_SETTINGS.ui_language)
   const faviconUrl = computed(() => settings.value.favicon_url || DEFAULT_UI_SETTINGS.favicon_url)
-  const brandIcon = computed(() => normalizeIcon(settings.value.brand_icon, DEFAULT_UI_SETTINGS.brand_icon))
-  const navIcons = computed(() => ({
-    videoWall: normalizeIcon(settings.value.nav_icon_video_wall, DEFAULT_UI_SETTINGS.nav_icon_video_wall),
-    messages: normalizeIcon(settings.value.nav_icon_messages, DEFAULT_UI_SETTINGS.nav_icon_messages),
-    settings: normalizeIcon(settings.value.nav_icon_settings, DEFAULT_UI_SETTINGS.nav_icon_settings),
-  }))
+  const siteIconUrl = computed(() => faviconUrl.value)
 
   async function fetchSettings(force = false) {
     if (loaded.value && !force) {
@@ -98,8 +72,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     siteDescription,
     uiLanguage,
     faviconUrl,
-    brandIcon,
-    navIcons,
+    siteIconUrl,
     fetchSettings,
     updateSettings,
     patchSettings,

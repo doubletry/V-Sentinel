@@ -62,7 +62,6 @@ class TestSettingsAPI:
                 "vengine_host": "10.0.0.1",
                 "detection_port": "9999",
                 "site_title": "My Sentinel",
-                "nav_icon_settings": "Tools",
             },
         )
         assert resp.status_code == 200
@@ -70,7 +69,6 @@ class TestSettingsAPI:
         assert data["vengine_host"] == "10.0.0.1"
         assert data["detection_port"] == "9999"
         assert data["site_title"] == "My Sentinel"
-        assert data["nav_icon_settings"] == "Tools"
 
     async def test_update_empty(self, async_client: AsyncClient):
         """Empty update should return current settings."""

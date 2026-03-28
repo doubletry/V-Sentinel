@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package ocr;
+
+import "base.proto";
+
+service OpticalCharacterRecognition {
+  rpc Predict(OCRRequest) returns (OCRResponse);
+  rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
+}
+
+message OCRParams {
+  base.InferenceParams base = 1;
+  float confidence_threshold = 2;
+  string language_hint = 3;
+}
+
+message TextBlock {
+  repeated base.Point points = 1;
+  string text = 2;
+  float confidence = 3;
+  string language = 4;
+}
+
+message OCRResults {
+  repeated TextBlock blocks = 1;
+  int64 image_id = 2;
+  base.ImageCacheInfo cache_info = 3;
+}
+
+message OCRRequest {
+  base.RequestHeader request_header = 1;
+  repeated base.Image images = 2;
+  OCRParams params = 3;
+}
+
+message OCRResponse {
+  base.ResponseHeader response_header = 1;
+  repeated OCRResults results = 2;
+}

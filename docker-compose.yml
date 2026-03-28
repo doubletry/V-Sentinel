@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: v-sentinel-mediamtx
+    ports:
+      - "8554:8554"      # RTSP
+      - "8889:8889"      # WebRTC HTTP
+      - "8890:8890/udp"  # WebRTC UDP
+      - "1935:1935"      # RTMP
+    environment:
+      - MTX_PROTOCOLS=tcp
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: v-sentinel-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MEDIAMTX_RTSP_ADDR=rtsp://mediamtx:8554
+      - MEDIAMTX_WEBRTC_ADDR=http://mediamtx:8889
+      - DETECTION_ADDR=vengine-detection:50051
+      - CLASSIFICATION_ADDR=vengine-classification:50052
+      - ACTION_ADDR=vengine-action:50053
+      - OCR_ADDR=vengine-ocr:50054
+      - UPLOAD_ADDR=vengine-upload:50050
+    volumes:
+      - ./v_sentinel.db:/app/v_sentinel.db
+    depends_on:
+      - mediamtx
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: v-sentinel-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

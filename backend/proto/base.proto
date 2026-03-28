@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+package base;
+
+enum StatusCode {
+  STATUS_OK = 0;
+  STATUS_INVALID_REQUEST = 1;
+  STATUS_MODEL_NOT_FOUND = 2;
+  STATUS_INFERENCE_ERROR = 3;
+  STATUS_INTERNAL_ERROR = 4;
+}
+
+message RequestHeader {
+  double request_timestamp = 1;
+  string request_id = 2;
+  string client_id = 3;
+}
+
+message ResponseHeader {
+  string request_id = 1;
+  double response_timestamp = 2;
+  StatusCode status_code = 3;
+  string error_message = 4;
+  float latency_ms = 5;
+}
+
+message Point {
+  float x = 1;
+  float y = 2;
+}
+
+message Polygon {
+  repeated Point points = 1;
+}
+
+message InferenceParams {
+  string model_name = 1;
+  string model_version = 2;
+  Polygon region_of_interest = 3;
+  bool use_image_roi = 4;
+  bool use_model_roi = 5;
+}
+
+message ShapeInfo {
+  repeated int32 dims = 1;
+}
+
+message ImageCacheInfo {
+  string key = 1;
+  bool hit = 2;
+  string id = 3;
+  int64 size = 4;
+}
+
+message Image {
+  oneof input {
+    bytes data = 1;
+    string key = 2;
+  }
+  int64 id = 3;
+  ShapeInfo shape = 4;
+  Polygon region_of_interest = 5;
+}
+
+message ImageSequence {
+  repeated Image images = 1;
+  int64 sequence_id = 2;
+}
+
+message Video {
+  bytes data = 1;
+  string key = 2;
+}
+
+message LoadModelRequest {
+  RequestHeader request_header = 1;
+  string model_name = 2;
+  string model_version = 3;
+  int32 device_id = 4;
+  bool set_default = 5;
+}
+
+message UnloadModelRequest {
+  RequestHeader request_header = 1;
+  string model_name = 2;
+  string model_version = 3;
+  int32 device_id = 4;
+}
+
+message ModelInfo {
+  string name = 1;
+  string version = 2;
+  int32 device_id = 3;
+  bool is_default = 4;
+  string status = 5;
+}
+
+message ModelResponse {
+  ResponseHeader response_header = 1;
+  ModelInfo model_info = 2;
+}
+
+message ListModelsRequest {
+  RequestHeader request_header = 1;
+  string name_filter = 2;
+}
+
+message ListModelsResponse {
+  ResponseHeader response_header = 1;
+  repeated ModelInfo models = 2;
+}
+
+message HealthCheckRequest {
+  RequestHeader request_header = 1;
+}
+
+message HealthCheckResponse {
+  ResponseHeader response_header = 1;
+  string service_name = 2;
+  string version = 3;
+}

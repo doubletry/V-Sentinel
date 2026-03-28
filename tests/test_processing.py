@@ -1,0 +1,151 @@
+"""Tests for ProcessorManager and BaseVideoProcessor."""
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import numpy as np
+import pytest
+
+from backend.api.ws import WSManager
+from backend.config import DEFAULT_APP_SETTINGS
+from backend.models.schemas import ROI, ROIPoint
+from backend.processing.base import AnalysisResult, BaseVideoProcessor
+from backend.processing.manager import ProcessorManager
+
+
+# ── Concrete subclass for testing ─────────────────────────────────────────────
+
+class DummyProcessor(BaseVideoProcessor):
+    """Minimal concrete processor for tests (no real RTSP or gRPC)."""
+
+    async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+        return AnalysisResult()
+
+
+class TestAnalysisResult:
+    def test_defaults(self):
+        r = AnalysisResult()
+        assert r.detections == []
+        assert r.classifications == []
+        assert r.ocr_texts == []
+        assert r.actions == []
+        assert r.messages == []
+        assert r.annotated_frame is None
+        assert r.extra == {}
+
+
+class TestBaseVideoProcessor:
+    def _make_processor(self) -> DummyProcessor:
+        ws = WSManager()
+        vengine = MagicMock()
+        roi = ROI(
+            id="r1",
+            type="rectangle",
+            points=[ROIPoint(x=0.1, y=0.2), ROIPoint(x=0.9, y=0.8)],
+            tag="zone",
+        )
+        return DummyProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            rois=[roi],
+            vengine_client=vengine,
+            ws_manager=ws,
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+
+    def test_init(self):
+        proc = self._make_processor()
+        assert proc.source_id == "s1"
+        assert proc.status == "stopped"
+        assert proc.started_at is None
+
+    def test_stream_key(self):
+        proc = self._make_processor()
+        assert proc._stream_key() == "cam1"
+
+    def test_stream_key_trailing_slash(self):
+        proc = self._make_processor()
+        proc.rtsp_url = "rtsp://host:8554/stream/"
+        assert proc._stream_key() == "stream"
+
+    def test_normalize_rois(self):
+        proc = self._make_processor()
+        result = proc._normalize_rois_to_pixels(1920, 1080)
+        assert len(result) == 1
+        pts = result[0]
+        assert pts[0] == {"x": int(0.1 * 1920), "y": int(0.2 * 1080)}
+        assert pts[1] == {"x": int(0.9 * 1920), "y": int(0.8 * 1080)}
+
+    def test_draw_on_frame_empty(self):
+        proc = self._make_processor()
+        frame = np.zeros((100, 200, 3), dtype=np.uint8)
+        result = AnalysisResult()
+        out = proc.draw_on_frame(frame, result)
+        assert out.shape == frame.shape
+        # Original frame should not be modified
+        assert np.array_equal(frame, np.zeros((100, 200, 3), dtype=np.uint8))
+
+    def test_draw_on_frame_detections(self):
+        proc = self._make_processor()
+        frame = np.zeros((100, 200, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[
+                {
+                    "x_min": 10,
+                    "y_min": 20,
+                    "x_max": 50,
+                    "y_max": 60,
+                    "confidence": 0.95,
+                    "label": "person",
+                }
+            ]
+        )
+        out = proc.draw_on_frame(frame, result)
+        # Some pixels should now be non-zero due to drawing
+        assert out.sum() > 0
+
+    async def test_start_stop(self):
+        proc = self._make_processor()
+        # Patch _run_loop to avoid real RTSP connection
+        proc._run_loop = AsyncMock()
+        await proc.start()
+        assert proc.status == "running"
+        assert proc.started_at is not None
+
+        await proc.stop()
+        assert proc.status == "stopped"
+
+    async def test_start_twice(self):
+        proc = self._make_processor()
+        proc._run_loop = AsyncMock()
+        await proc.start()
+        # Starting again should not raise
+        await proc.start()
+        await proc.stop()
+
+
+class TestProcessorManager:
+    def _make_manager(self) -> ProcessorManager:
+        vengine = MagicMock()
+        ws = WSManager()
+        return ProcessorManager(vengine_client=vengine, ws_manager=ws, app_settings=dict(DEFAULT_APP_SETTINGS))
+
+    async def test_status_empty(self):
+        mgr = self._make_manager()
+        assert mgr.get_all_status() == []
+
+    async def test_stop_not_running(self):
+        mgr = self._make_manager()
+        result = await mgr.stop_processor("nonexistent")
+        assert result["status"] == "not_running"
+
+    async def test_start_nonexistent_source(self, init_db):
+        mgr = self._make_manager()
+        with pytest.raises(ValueError, match="Source not found"):
+            await mgr.start_processor("nonexistent")
+
+    async def test_stop_all_empty(self):
+        mgr = self._make_manager()
+        await mgr.stop_all()  # Should not raise

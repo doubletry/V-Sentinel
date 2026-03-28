@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package upload;
+
+import "base.proto";
+
+service Upload {
+  rpc UploadImage(UploadImageRequest) returns (UploadResponse);
+  rpc UploadVideo(UploadVideoRequest) returns (UploadResponse);
+  rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
+}
+
+message UploadImageRequest {
+  base.RequestHeader request_header = 1;
+  bytes data = 2;
+  string filename = 3;
+}
+
+message UploadVideoRequest {
+  base.RequestHeader request_header = 1;
+  bytes data = 2;
+  string filename = 3;
+}
+
+message UploadResult {
+  string key = 1;
+  bool hit = 2;
+  string id = 3;
+  int64 size = 4;
+}
+
+message UploadResponse {
+  base.ResponseHeader response_header = 1;
+  repeated UploadResult results = 2;
+}

@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package classification;
+
+import "base.proto";
+
+service ImageClassification {
+  rpc Predict(ClassificationRequest) returns (ClassificationResponse);
+  rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
+}
+
+message ClassificationParams {
+  base.InferenceParams base = 1;
+}
+
+message ClassificationResult {
+  string label = 1;
+  float confidence = 2;
+  int64 image_id = 3;
+  base.ImageCacheInfo cache_info = 4;
+  int32 class_id = 5;
+}
+
+message ClassificationRequest {
+  base.RequestHeader request_header = 1;
+  repeated base.Image images = 2;
+  ClassificationParams params = 3;
+}
+
+message ClassificationResponse {
+  base.ResponseHeader response_header = 1;
+  repeated ClassificationResult results = 2;
+}

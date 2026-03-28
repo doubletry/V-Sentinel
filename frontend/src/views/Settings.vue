@@ -18,6 +18,94 @@
         v-loading="loading"
       >
         <section class="settings-section">
+          <h2>{{ t('settings.interface') }}</h2>
+          <el-form-item :label="t('settings.systemLanguage')">
+            <el-select v-model="form.ui_language" style="width: 100%">
+              <el-option
+                v-for="option in languageOptions"
+                :key="option.value"
+                :label="t(option.labelKey)"
+                :value="option.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('settings.siteTitle')">
+            <el-input v-model="form.site_title" :placeholder="t('settings.siteTitle')" />
+          </el-form-item>
+          <el-form-item :label="t('settings.siteDescription')">
+            <el-input
+              v-model="form.site_description"
+              :placeholder="t('settings.siteDescription')"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.faviconUrl')">
+            <el-input v-model="form.favicon_url" placeholder="/favicon.ico" />
+          </el-form-item>
+          <el-form-item :label="t('settings.brandIcon')">
+            <el-select v-model="form.brand_icon" style="width: 100%">
+              <el-option
+                v-for="option in iconOptions"
+                :key="option.value"
+                :label="t(option.labelKey)"
+                :value="option.value"
+              >
+                <div class="icon-option">
+                  <el-icon><component :is="option.value" /></el-icon>
+                  <span>{{ t(option.labelKey) }}</span>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+
+          <h3>{{ t('settings.tabbarIcons') }}</h3>
+          <el-form-item :label="t('settings.videoWallIcon')">
+            <el-select v-model="form.nav_icon_video_wall" style="width: 100%">
+              <el-option
+                v-for="option in iconOptions"
+                :key="`wall-${option.value}`"
+                :label="t(option.labelKey)"
+                :value="option.value"
+              >
+                <div class="icon-option">
+                  <el-icon><component :is="option.value" /></el-icon>
+                  <span>{{ t(option.labelKey) }}</span>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('settings.messagesIcon')">
+            <el-select v-model="form.nav_icon_messages" style="width: 100%">
+              <el-option
+                v-for="option in iconOptions"
+                :key="`msg-${option.value}`"
+                :label="t(option.labelKey)"
+                :value="option.value"
+              >
+                <div class="icon-option">
+                  <el-icon><component :is="option.value" /></el-icon>
+                  <span>{{ t(option.labelKey) }}</span>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('settings.settingsIcon')">
+            <el-select v-model="form.nav_icon_settings" style="width: 100%">
+              <el-option
+                v-for="option in iconOptions"
+                :key="`settings-${option.value}`"
+                :label="t(option.labelKey)"
+                :value="option.value"
+              >
+                <div class="icon-option">
+                  <el-icon><component :is="option.value" /></el-icon>
+                  <span>{{ t(option.labelKey) }}</span>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+        </section>
+
+        <section class="settings-section">
           <h2>{{ t('settings.vengineServices') }}</h2>
           <el-form-item :label="t('settings.vengineHost')">
             <el-input v-model="form.vengine_host" placeholder="localhost" />
@@ -77,12 +165,25 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { settingsApi } from '../api/index.js'
+import { localeOptions } from '../i18n/index.js'
+import { APP_ICON_OPTIONS, useAppSettingsStore } from '../stores/appSettings.js'
 
 const { t } = useI18n()
+const appSettingsStore = useAppSettingsStore()
+const languageOptions = localeOptions
+const iconOptions = APP_ICON_OPTIONS
+
 const loading = ref(false)
 const saving = ref(false)
 const form = ref({
+  ui_language: 'zh-CN',
+  site_title: '',
+  site_description: '',
+  favicon_url: '/favicon.ico',
+  brand_icon: 'VideoCamera',
+  nav_icon_video_wall: 'Monitor',
+  nav_icon_messages: 'Bell',
+  nav_icon_settings: 'Setting',
   vengine_host: '',
   detection_port: '',
   classification_port: '',
@@ -99,7 +200,7 @@ const form = ref({
 async function reload() {
   loading.value = true
   try {
-    const data = await settingsApi.get()
+    const data = await appSettingsStore.fetchSettings(true)
     Object.assign(form.value, data)
   } catch (err) {
     ElMessage.error(t('settings.failedToLoad', { message: err.message }))
@@ -111,8 +212,9 @@ async function reload() {
 async function save() {
   saving.value = true
   try {
-    const data = await settingsApi.update(form.value)
+    const data = await appSettingsStore.updateSettings(form.value)
     Object.assign(form.value, data)
+    appSettingsStore.applyLanguage(form.value.ui_language)
     ElMessage.success(t('settings.settingsSaved'))
   } catch (err) {
     ElMessage.error(t('settings.failedToSave', { message: err.message }))
@@ -184,6 +286,19 @@ onMounted(reload)
   font-size: 14px;
   color: #9ab2df;
   margin-bottom: 10px;
+}
+
+.settings-section h3 {
+  margin: 8px 0 12px;
+  color: #7f95bf;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.icon-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-actions {

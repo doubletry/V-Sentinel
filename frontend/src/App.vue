@@ -3,9 +3,11 @@
     <el-container class="app-container">
       <el-header class="app-header">
         <div class="header-brand">
-          <el-icon :size="22" color="#409EFF"><VideoCamera /></el-icon>
-          <span class="brand-name">{{ config.siteName }}</span>
-          <span class="brand-desc">{{ config.siteDescription }}</span>
+          <el-icon :size="22" color="#409EFF">
+            <component :is="appSettingsStore.brandIcon" />
+          </el-icon>
+          <span class="brand-name">{{ appSettingsStore.siteTitle }}</span>
+          <span class="brand-desc">{{ appSettingsStore.siteDescription }}</span>
         </div>
         <el-menu
           mode="horizontal"
@@ -17,15 +19,15 @@
           class="header-nav"
         >
           <el-menu-item index="/">
-            <el-icon><Monitor /></el-icon>
+            <el-icon><component :is="appSettingsStore.navIcons.videoWall" /></el-icon>
             {{ t('nav.videoWall') }}
           </el-menu-item>
           <el-menu-item index="/messages">
-            <el-icon><Bell /></el-icon>
+            <el-icon><component :is="appSettingsStore.navIcons.messages" /></el-icon>
             {{ t('nav.messages') }}
           </el-menu-item>
           <el-menu-item index="/settings">
-            <el-icon><Setting /></el-icon>
+            <el-icon><component :is="appSettingsStore.navIcons.settings" /></el-icon>
             {{ t('nav.settings') }}
           </el-menu-item>
         </el-menu>
@@ -50,18 +52,57 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import config from './config.js'
-import { localeOptions, setI18nLocale } from './i18n/index.js'
+import { localeOptions, LOCALE_STORAGE_KEY, setI18nLocale } from './i18n/index.js'
+import { useAppSettingsStore } from './stores/appSettings.js'
 
 const { t, locale } = useI18n()
+const appSettingsStore = useAppSettingsStore()
 
 const localeModel = computed({
   get: () => locale.value,
   set: (value) => {
     setI18nLocale(value)
+    appSettingsStore.patchSettings({ ui_language: value })
   },
+})
+
+function syncDocumentTitle(title) {
+  if (typeof document !== 'undefined' && title) {
+    document.title = title
+  }
+}
+
+function syncFavicon(href) {
+  if (typeof document === 'undefined') return
+
+  const iconHref = href || '/favicon.ico'
+  let link = document.querySelector("link[rel*='icon']")
+  if (!link) {
+    link = document.createElement('link')
+    link.setAttribute('rel', 'icon')
+    document.head.appendChild(link)
+  }
+  link.setAttribute('href', iconHref)
+}
+
+watch(() => appSettingsStore.siteTitle, syncDocumentTitle, { immediate: true })
+watch(() => appSettingsStore.faviconUrl, syncFavicon, { immediate: true })
+
+onMounted(async () => {
+  try {
+    await appSettingsStore.fetchSettings()
+
+    if (typeof window !== 'undefined') {
+      const hasSavedLocale = Boolean(window.localStorage.getItem(LOCALE_STORAGE_KEY))
+      if (!hasSavedLocale) {
+        setI18nLocale(appSettingsStore.uiLanguage)
+      }
+    }
+  } catch (_) {
+    // Keep local defaults when settings API is unavailable.
+  }
 })
 </script>
 

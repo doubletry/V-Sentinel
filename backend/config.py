@@ -23,6 +23,15 @@ class Settings(BaseSettings):
 
 # Default values for DB-backed settings (used when no DB record exists)
 DEFAULT_APP_SETTINGS: dict[str, str] = {
+    # UI
+    "ui_language": "zh-CN",
+    "site_title": "V-Sentinel",
+    "site_description": "AI Video Surveillance Analysis Platform",
+    "favicon_url": "/favicon.ico",
+    "brand_icon": "VideoCamera",
+    "nav_icon_video_wall": "Monitor",
+    "nav_icon_messages": "Bell",
+    "nav_icon_settings": "Setting",
     # Shared V-Engine host
     "vengine_host": "localhost",
     # Per-service ports

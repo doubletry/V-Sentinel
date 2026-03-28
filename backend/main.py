@@ -15,12 +15,30 @@ from backend.api import sources as sources_router
 from backend.api import ws as ws_module
 from backend.config import settings
 from backend.db.database import get_all_settings, init_db
+from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
 
 # Configure loguru
 logger.remove()
 logger.add(sys.stderr, level="INFO", colorize=True)
+
+
+def _processing_log_sink(message) -> None:
+    record = message.record
+    processing_log_buffer.append(
+        timestamp=record["time"].isoformat(),
+        level=record["level"].name,
+        module=record["name"],
+        message=record["message"],
+    )
+
+
+logger.add(
+    _processing_log_sink,
+    level="INFO",
+    filter=lambda record: str(record["name"]).startswith("backend.processing"),
+)
 
 # Module-level singletons (accessed by API routers)
 ws_manager: ws_module.WSManager

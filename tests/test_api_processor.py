@@ -41,3 +41,29 @@ class TestProcessorGlobalControl:
         data = resp.json()
         assert data["status"] == "not_running"
         assert data["stopped"] == 0
+
+
+class TestProcessorLogs:
+    async def test_get_processing_logs_page(self, async_client: AsyncClient):
+        resp = await async_client.get(
+            "/api/processor/logs",
+            params={"page": 1, "page_size": 10},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert "items" in data
+        assert "page" in data
+        assert "page_size" in data
+        assert "total" in data
+        assert "total_pages" in data
+        assert data["page"] == 1
+        assert data["page_size"] == 10
+        assert isinstance(data["items"], list)
+
+        if data["items"]:
+            first = data["items"][0]
+            assert "timestamp" in first
+            assert "level" in first
+            assert "module" in first
+            assert "message" in first

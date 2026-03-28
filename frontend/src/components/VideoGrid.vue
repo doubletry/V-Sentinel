@@ -256,6 +256,9 @@ function onDrop(event, cellIdx) {
   justify-content: flex-end;
   gap: 6px;
   z-index: 10;
+  padding: 4px;
+  border-radius: 8px;
+  background: rgba(10, 12, 24, 0.55);
 }
 
 .cell-controls :deep(.el-button span) {

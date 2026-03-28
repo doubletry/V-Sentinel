@@ -2,6 +2,7 @@ export default {
   nav: {
     videoWall: '视频墙',
     messages: '消息',
+    processingLogs: '处理日志',
     settings: '设置',
   },
   language: {
@@ -78,6 +79,7 @@ export default {
     noTagOptions: '请先在设置页添加 ROI 标签候选词',
     tagRequired: '每个 ROI 都必须选择标签',
     pointOutside: '请在视频有效区域内绘制 ROI',
+    videoNotReady: '视频未就绪，请稍后再绘制 ROI',
     roisSaved: 'ROI 已保存',
     saveFailed: '保存失败',
   },
@@ -91,6 +93,17 @@ export default {
     disconnected: '未连接',
     allSources: '全部视频源',
     clear: '清空',
+  },
+  processingLogs: {
+    title: 'Processing 运行日志',
+    subtitle: '仅展示后台 processing 服务运行日志，供运维与后端排障使用。',
+    refresh: '刷新日志',
+    noLogs: '暂无日志',
+    logTime: '时间',
+    logLevel: '级别',
+    logModule: '模块',
+    logMessage: '日志内容',
+    failedLoad: '加载日志失败：{message}',
   },
   messageList: {
     summary: '汇总',

@@ -2,6 +2,7 @@ export default {
   nav: {
     videoWall: 'Video Wall',
     messages: 'Messages',
+    processingLogs: 'Processing Logs',
     settings: 'Settings',
   },
   language: {
@@ -78,6 +79,7 @@ export default {
     noTagOptions: 'Please add ROI tag candidates in Settings first',
     tagRequired: 'Each ROI must have a selected tag',
     pointOutside: 'Please draw ROI inside the visible video area',
+    videoNotReady: 'Video is not ready yet, please draw ROI later',
     roisSaved: 'ROIs saved',
     saveFailed: 'Save failed',
   },
@@ -91,6 +93,17 @@ export default {
     disconnected: 'Disconnected',
     allSources: 'All sources',
     clear: 'Clear',
+  },
+  processingLogs: {
+    title: 'Processing Runtime Logs',
+    subtitle: 'Shows backend processing service runtime logs for ops and backend troubleshooting.',
+    refresh: 'Refresh Logs',
+    noLogs: 'No logs available',
+    logTime: 'Time',
+    logLevel: 'Level',
+    logModule: 'Module',
+    logMessage: 'Message',
+    failedLoad: 'Failed to load logs: {message}',
   },
   messageList: {
     summary: 'Summary',

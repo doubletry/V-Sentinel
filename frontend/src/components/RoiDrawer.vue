@@ -140,7 +140,12 @@ function getCanvasPos(event) {
 }
 
 function getVideoElement() {
-  return canvasEl.value?.parentElement?.querySelector('video.video-element') || null
+  const overlayRoot = overlayEl.value || canvasEl.value?.parentElement || null
+  if (!overlayRoot) return null
+
+  // RoiDrawer is a sibling of VideoPlayer inside the same grid cell, not its parent.
+  const gridCell = overlayRoot.closest('.grid-cell') || overlayRoot.parentElement
+  return gridCell?.querySelector('video.video-element') || null
 }
 
 function getVideoRect() {
@@ -402,6 +407,12 @@ function finishPolygon() {
 function onMouseDown(event) {
   if (props.readOnly) return
 
+  const videoEl = getVideoElement()
+  if (!videoEl) {
+    ElMessage.warning(t('roi.videoNotReady'))
+    return
+  }
+
   overlayEl.value?.focus()
   const pos = getCanvasPos(event)
   pointerPos.value = pos
@@ -577,7 +588,7 @@ function loadExistingRois() {
   const rois = source?.rois || props.source.rois || []
   shapes.value = rois.map((roi) => ({
     type: roi.type,
-    points: roi.points.map((point) => ({ x: point.x, y: point.y })),
+    points: roi.points.map((point) => clampNorm({ x: point.x, y: point.y })),
     tag: roi.tag || '',
   }))
   selectedIdx.value = null
@@ -636,13 +647,18 @@ onBeforeUnmount(() => {
 
 .roi-toolbar {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  right: 8px;
+  bottom: 8px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 6px;
   z-index: 110;
+  max-width: min(95%, 520px);
+  background: rgba(0, 0, 0, 0.62);
+  padding: 6px;
+  border-radius: 8px;
 }
 
 .roi-toolbar :deep(.el-button span) {
@@ -651,15 +667,17 @@ onBeforeUnmount(() => {
 
 .tag-editor {
   position: absolute;
-  bottom: 8px;
-  left: 8px;
+  right: 8px;
+  bottom: 56px;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   z-index: 110;
   background: rgba(0, 0, 0, 0.72);
   padding: 6px;
   border-radius: 6px;
+  max-width: min(90%, 420px);
 }
 
 .tag-select {
@@ -668,7 +686,7 @@ onBeforeUnmount(() => {
 
 .draw-hint {
   position: absolute;
-  right: 8px;
+  left: 8px;
   bottom: 8px;
   z-index: 110;
   background: rgba(0, 0, 0, 0.68);

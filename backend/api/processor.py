@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from backend.models.schemas import ProcessorStartRequest, ProcessorStopRequest, ProcessorStatus
+from backend.processing.log_buffer import processing_log_buffer
 
 router = APIRouter(prefix="/api/processor", tags=["processor"])
 
@@ -54,3 +55,12 @@ async def get_status() -> list[ProcessorStatus]:
     from backend.main import processor_manager
 
     return processor_manager.get_all_status()
+
+
+@router.get("/logs")
+async def get_processing_logs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+) -> dict:
+    """Get paginated runtime logs produced by backend processing modules."""
+    return processing_log_buffer.list(page=page, page_size=page_size)

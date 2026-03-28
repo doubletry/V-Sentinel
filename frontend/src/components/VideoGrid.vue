@@ -76,8 +76,10 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useSourceStore } from '../stores/source.js'
+import { useAppSettingsStore } from '../stores/appSettings.js'
 import VideoPlayer from './VideoPlayer.vue'
 import RoiDrawer from './RoiDrawer.vue'
+import { extractRoutePath } from '../utils/sourceAddress.js'
 
 const GRID_LAYOUT_STORAGE_KEY = 'v-sentinel.layout.cols'
 const ALLOWED_LAYOUTS = [1, 2, 3, 4]
@@ -92,6 +94,7 @@ function loadInitialLayout() {
 }
 
 const store = useSourceStore()
+const appSettingsStore = useAppSettingsStore()
 const { t } = useI18n()
 const currentCols = ref(loadInitialLayout())
 const roiCellIndex = ref(null)
@@ -125,8 +128,7 @@ function setLayout(cols) {
 }
 
 function getStreamPath(source) {
-  // Derive stream path from RTSP URL
-  return source.rtsp_url?.split('/').pop() || source.id
+  return extractRoutePath(source.rtsp_url, appSettingsStore.mediamtxRtspAddr) || source.id
 }
 
 function toggleRoi(cellIdx) {

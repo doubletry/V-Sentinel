@@ -1,13 +1,24 @@
 import config from '../config.js'
 
+function normalizeBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '')
+}
+
+function normalizeRoutePath(value) {
+  return String(value || '').trim().replace(/^\/+/, '').replace(/\/+$/, '')
+}
+
 /**
  * Connect to a MediaMTX stream via WebRTC (WHEP protocol).
  * @param {string} streamPath - The stream path on MediaMTX (e.g. "camera1")
  * @param {HTMLVideoElement} videoEl - The video element to attach to
+ * @param {string} webrtcBaseUrl - MediaMTX WebRTC base address from settings
  * @returns {object} - { pc: RTCPeerConnection, stop: Function }
  */
-export async function connectWebRTC(streamPath, videoEl) {
-  const whepUrl = `${config.mediamtxWebrtcUrl}/${streamPath}/whep`
+export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl) {
+  const base = normalizeBaseUrl(webrtcBaseUrl || config.mediamtxWebrtcUrl)
+  const route = normalizeRoutePath(streamPath)
+  const whepUrl = `${base}/${route}/whep`
 
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],

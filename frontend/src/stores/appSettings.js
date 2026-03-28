@@ -9,6 +9,8 @@ const DEFAULT_UI_SETTINGS = {
   site_title: config.siteName,
   site_description: config.siteDescription,
   favicon_url: '/favicon.ico',
+  mediamtx_rtsp_addr: 'rtsp://localhost:8554',
+  mediamtx_webrtc_addr: config.mediamtxWebrtcUrl || 'http://localhost:8889',
 }
 
 function withDefaults(data = {}) {
@@ -28,6 +30,12 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
   const uiLanguage = computed(() => settings.value.ui_language || DEFAULT_UI_SETTINGS.ui_language)
   const faviconUrl = computed(() => settings.value.favicon_url || DEFAULT_UI_SETTINGS.favicon_url)
   const siteIconUrl = computed(() => faviconUrl.value)
+  const mediamtxRtspAddr = computed(
+    () => settings.value.mediamtx_rtsp_addr || DEFAULT_UI_SETTINGS.mediamtx_rtsp_addr
+  )
+  const mediamtxWebrtcAddr = computed(
+    () => settings.value.mediamtx_webrtc_addr || DEFAULT_UI_SETTINGS.mediamtx_webrtc_addr
+  )
 
   async function fetchSettings(force = false) {
     if (loaded.value && !force) {
@@ -73,6 +81,8 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     uiLanguage,
     faviconUrl,
     siteIconUrl,
+    mediamtxRtspAddr,
+    mediamtxWebrtcAddr,
     fetchSettings,
     updateSettings,
     patchSettings,

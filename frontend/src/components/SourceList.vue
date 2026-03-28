@@ -25,7 +25,7 @@
             />
             {{ source.name }}
           </div>
-          <div class="source-url">{{ source.rtsp_url }}</div>
+          <div class="source-url">{{ getSourceRoute(source) }}</div>
         </div>
         <div class="source-actions">
           <el-button
@@ -71,13 +71,13 @@
         <el-form-item :label="t('sourceList.name')" required>
           <el-input v-model="form.name" :placeholder="t('sourceList.name')" />
         </el-form-item>
-        <el-form-item :label="t('sourceList.rtspUrl')" required>
+        <el-form-item :label="t('sourceList.routePath')" required>
           <el-input
-            v-model="form.rtsp_url"
-            placeholder="rtsp://..."
-            type="url"
+            v-model="form.route_path"
+            :placeholder="t('sourceList.routePlaceholder')"
           />
         </el-form-item>
+        <div class="route-hint">{{ t('sourceList.routeHint', { base: appSettingsStore.mediamtxRtspAddr }) }}</div>
       </el-form>
       <template #footer>
         <el-button @click="showAddDialog = false">{{ t('common.cancel') }}</el-button>
@@ -98,13 +98,13 @@
         <el-form-item :label="t('sourceList.name')" required>
           <el-input v-model="editForm.name" :placeholder="t('sourceList.name')" />
         </el-form-item>
-        <el-form-item :label="t('sourceList.rtspUrl')" required>
+        <el-form-item :label="t('sourceList.routePath')" required>
           <el-input
-            v-model="editForm.rtsp_url"
-            placeholder="rtsp://..."
-            type="url"
+            v-model="editForm.route_path"
+            :placeholder="t('sourceList.routePlaceholder')"
           />
         </el-form-item>
+        <div class="route-hint">{{ t('sourceList.routeHint', { base: appSettingsStore.mediamtxRtspAddr }) }}</div>
       </el-form>
       <template #footer>
         <el-button @click="showEditDialog = false">{{ t('common.cancel') }}</el-button>
@@ -117,12 +117,15 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useSourceStore } from '../stores/source.js'
+import { useAppSettingsStore } from '../stores/appSettings.js'
+import { buildRtspUrl, extractRoutePath, normalizeRoutePath } from '../utils/sourceAddress.js'
 
 const store = useSourceStore()
+const appSettingsStore = useAppSettingsStore()
 const { t } = useI18n()
 const showAddDialog = ref(false)
 const showEditDialog = ref(false)
@@ -131,8 +134,8 @@ const editLoading = ref(false)
 const actionLoading = reactive({})
 const editingSourceId = ref('')
 
-const form = reactive({ name: '', rtsp_url: '' })
-const editForm = reactive({ name: '', rtsp_url: '' })
+const form = reactive({ name: '', route_path: '' })
+const editForm = reactive({ name: '', route_path: '' })
 
 function onDragStart(event, source) {
   event.dataTransfer.setData('source-id', source.id)
@@ -140,16 +143,24 @@ function onDragStart(event, source) {
 }
 
 async function addSource() {
-  if (!form.name || !form.rtsp_url) {
+  const routePath = normalizeRoutePath(form.route_path)
+  const rtspUrl = buildRtspUrl(appSettingsStore.mediamtxRtspAddr, routePath)
+
+  if (!form.name || !routePath) {
     ElMessage.warning(t('sourceList.fillAllFields'))
     return
   }
+  if (!rtspUrl) {
+    ElMessage.warning(t('sourceList.missingRtspBase'))
+    return
+  }
+
   addLoading.value = true
   try {
-    await store.createSource({ name: form.name, rtsp_url: form.rtsp_url })
+    await store.createSource({ name: form.name, rtsp_url: rtspUrl })
     showAddDialog.value = false
     form.name = ''
-    form.rtsp_url = ''
+    form.route_path = ''
     ElMessage.success(t('sourceList.sourceAdded'))
   } catch (err) {
     ElMessage.error(err.message || t('sourceList.failedToAdd'))
@@ -174,14 +185,22 @@ async function toggleAnalysis(source) {
 function openEditDialog(source) {
   editingSourceId.value = source.id
   editForm.name = source.name
-  editForm.rtsp_url = source.rtsp_url
+  editForm.route_path = extractRoutePath(source.rtsp_url, appSettingsStore.mediamtxRtspAddr)
   showEditDialog.value = true
 }
 
 async function saveEdit() {
   if (!editingSourceId.value) return
-  if (!editForm.name || !editForm.rtsp_url) {
+
+  const routePath = normalizeRoutePath(editForm.route_path)
+  const rtspUrl = buildRtspUrl(appSettingsStore.mediamtxRtspAddr, routePath)
+
+  if (!editForm.name || !routePath) {
     ElMessage.warning(t('sourceList.fillAllFields'))
+    return
+  }
+  if (!rtspUrl) {
+    ElMessage.warning(t('sourceList.missingRtspBase'))
     return
   }
 
@@ -189,7 +208,7 @@ async function saveEdit() {
   try {
     await store.updateSource(editingSourceId.value, {
       name: editForm.name,
-      rtsp_url: editForm.rtsp_url,
+      rtsp_url: rtspUrl,
     })
     showEditDialog.value = false
     ElMessage.success(t('sourceList.sourceUpdated'))
@@ -217,6 +236,18 @@ async function confirmDelete(source) {
     // User cancelled
   }
 }
+
+function getSourceRoute(source) {
+  return extractRoutePath(source.rtsp_url, appSettingsStore.mediamtxRtspAddr) || source.rtsp_url
+}
+
+onMounted(async () => {
+  if (!appSettingsStore.loaded) {
+    await appSettingsStore.fetchSettings().catch(() => {
+      // Keep fallback defaults when settings API is unavailable.
+    })
+  }
+})
 </script>
 
 <style scoped>
@@ -272,6 +303,12 @@ async function confirmDelete(source) {
   font-size: 11px;
   color: #666;
   word-break: break-all;
+}
+
+.route-hint {
+  margin-top: 2px;
+  color: #7587af;
+  font-size: 12px;
 }
 
 .source-actions {

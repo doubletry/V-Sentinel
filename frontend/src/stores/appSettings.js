@@ -9,8 +9,35 @@ const DEFAULT_UI_SETTINGS = {
   site_title: config.siteName,
   site_description: config.siteDescription,
   favicon_url: '/favicon.ico',
+  roi_tag_options: '["person","vehicle","intrusion"]',
   mediamtx_rtsp_addr: 'rtsp://localhost:8554',
   mediamtx_webrtc_addr: config.mediamtxWebrtcUrl || 'http://localhost:8889',
+}
+
+function parseRoiTagOptions(raw) {
+  if (Array.isArray(raw)) {
+    return Array.from(
+      new Set(raw.map((item) => String(item || '').trim()).filter(Boolean))
+    )
+  }
+
+  const text = String(raw || '').trim()
+  if (!text) return []
+
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) {
+      return Array.from(
+        new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean))
+      )
+    }
+  } catch (_) {
+    // Fallback to comma-separated parsing for backward compatibility.
+  }
+
+  return Array.from(
+    new Set(text.split(',').map((item) => item.trim()).filter(Boolean))
+  )
 }
 
 function withDefaults(data = {}) {
@@ -30,6 +57,9 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
   const uiLanguage = computed(() => settings.value.ui_language || DEFAULT_UI_SETTINGS.ui_language)
   const faviconUrl = computed(() => settings.value.favicon_url || DEFAULT_UI_SETTINGS.favicon_url)
   const siteIconUrl = computed(() => faviconUrl.value)
+  const roiTagOptions = computed(
+    () => parseRoiTagOptions(settings.value.roi_tag_options || DEFAULT_UI_SETTINGS.roi_tag_options)
+  )
   const mediamtxRtspAddr = computed(
     () => settings.value.mediamtx_rtsp_addr || DEFAULT_UI_SETTINGS.mediamtx_rtsp_addr
   )
@@ -81,6 +111,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     uiLanguage,
     faviconUrl,
     siteIconUrl,
+    roiTagOptions,
     mediamtxRtspAddr,
     mediamtxWebrtcAddr,
     fetchSettings,

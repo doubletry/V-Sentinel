@@ -50,15 +50,12 @@ async def init_db() -> None:
         await db.execute(CREATE_SOURCES_TABLE)
         await db.execute(CREATE_ROIS_TABLE)
         await db.execute(CREATE_SETTINGS_TABLE)
-        # Seed default settings if table is empty
-        async with db.execute("SELECT COUNT(*) FROM app_settings") as cursor:
-            row = await cursor.fetchone()
-        if row and row[0] == 0:
-            for key, value in DEFAULT_APP_SETTINGS.items():
-                await db.execute(
-                    "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
-                    (key, value),
-                )
+        # Ensure all default keys exist, while preserving user-modified values.
+        for key, value in DEFAULT_APP_SETTINGS.items():
+            await db.execute(
+                "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
         await db.commit()
     logger.info("Database initialized at {}", _DB_PATH)
 

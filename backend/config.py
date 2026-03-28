@@ -28,6 +28,7 @@ DEFAULT_APP_SETTINGS: dict[str, str] = {
     "site_title": "V-Sentinel",
     "site_description": "AI Video Surveillance Analysis Platform",
     "favicon_url": "/favicon.ico",
+    "roi_tag_options": "[\"person\", \"vehicle\", \"intrusion\"]",
     # Shared V-Engine host
     "vengine_host": "localhost",
     # Per-service ports

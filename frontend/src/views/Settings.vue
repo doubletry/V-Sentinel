@@ -58,6 +58,35 @@
           <el-form-item :label="t('settings.iconPath')">
             <el-input v-model="form.favicon_url" placeholder="/favicon.ico" />
           </el-form-item>
+          <el-form-item :label="t('settings.roiTagCandidates')">
+            <div class="roi-tags-editor">
+              <el-tag
+                v-for="tag in roiTagList"
+                :key="tag"
+                closable
+                type="info"
+                effect="dark"
+                class="roi-tag-item"
+                @close="removeRoiTag(tag)"
+              >
+                {{ tag }}
+              </el-tag>
+              <span v-if="!roiTagList.length" class="roi-tag-empty">
+                {{ t('settings.noRoiTags') }}
+              </span>
+            </div>
+            <div class="roi-tag-input-row">
+              <el-input
+                v-model="roiTagInput"
+                :placeholder="t('settings.roiTagInputPlaceholder')"
+                @keyup.enter="addRoiTag"
+              />
+              <el-button type="primary" @click="addRoiTag">
+                {{ t('settings.addRoiTag') }}
+              </el-button>
+            </div>
+            <p class="roi-tag-hint">{{ t('settings.roiTagHint') }}</p>
+          </el-form-item>
         </section>
 
         <section class="settings-section">
@@ -162,11 +191,14 @@ const languageOptions = localeOptions
 const loading = ref(false)
 const saving = ref(false)
 const serviceAction = ref('')
+const roiTagInput = ref('')
+const roiTagList = ref([])
 const form = ref({
   ui_language: 'zh-CN',
   site_title: '',
   site_description: '',
   favicon_url: '/favicon.ico',
+  roi_tag_options: '[]',
   vengine_host: '',
   detection_port: '',
   classification_port: '',
@@ -180,11 +212,58 @@ const form = ref({
   max_cpu_workers: '',
 })
 
+function parseRoiTagOptions(raw) {
+  if (Array.isArray(raw)) {
+    return Array.from(new Set(raw.map((item) => String(item || '').trim()).filter(Boolean)))
+  }
+
+  const text = String(raw || '').trim()
+  if (!text) return []
+
+  try {
+    const parsed = JSON.parse(text)
+    if (Array.isArray(parsed)) {
+      return Array.from(
+        new Set(parsed.map((item) => String(item || '').trim()).filter(Boolean))
+      )
+    }
+  } catch (_) {
+    // Fallback for legacy comma-separated values.
+  }
+
+  return Array.from(new Set(text.split(',').map((item) => item.trim()).filter(Boolean)))
+}
+
+function syncRoiTagOptionsToForm() {
+  form.value.roi_tag_options = JSON.stringify(roiTagList.value)
+}
+
+function addRoiTag() {
+  const tag = roiTagInput.value.trim()
+  if (!tag) return
+
+  if (roiTagList.value.includes(tag)) {
+    ElMessage.warning(t('settings.roiTagExists'))
+    return
+  }
+
+  roiTagList.value.push(tag)
+  roiTagInput.value = ''
+  syncRoiTagOptionsToForm()
+}
+
+function removeRoiTag(tag) {
+  roiTagList.value = roiTagList.value.filter((item) => item !== tag)
+  syncRoiTagOptionsToForm()
+}
+
 async function reload() {
   loading.value = true
   try {
     const data = await appSettingsStore.fetchSettings(true)
     Object.assign(form.value, data)
+    roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
+    syncRoiTagOptionsToForm()
   } catch (err) {
     ElMessage.error(t('settings.failedToLoad', { message: err.message }))
   } finally {
@@ -195,8 +274,10 @@ async function reload() {
 async function save() {
   saving.value = true
   try {
+    syncRoiTagOptionsToForm()
     const data = await appSettingsStore.updateSettings(form.value)
     Object.assign(form.value, data)
+    roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     appSettingsStore.applyLanguage(form.value.ui_language)
     ElMessage.success(t('settings.settingsSaved'))
   } catch (err) {
@@ -324,6 +405,34 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.roi-tags-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.roi-tag-item {
+  margin: 0;
+}
+
+.roi-tag-empty {
+  color: #7f8bad;
+  font-size: 12px;
+}
+
+.roi-tag-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.roi-tag-hint {
+  margin-top: 6px;
+  color: #8f9fbe;
+  font-size: 12px;
+}
+
 .service-control-row {
   display: flex;
   align-items: center;
@@ -390,6 +499,10 @@ onMounted(async () => {
 
   :deep(.el-form-item__content) {
     margin-left: 0 !important;
+  }
+
+  .roi-tag-input-row {
+    flex-wrap: wrap;
   }
 }
 </style>

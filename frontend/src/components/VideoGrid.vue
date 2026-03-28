@@ -39,11 +39,19 @@
           <div class="cell-controls">
             <el-button
               size="small"
+              :type="roiPreviewCellIndex === cellIdx ? 'info' : 'default'"
+              @click="toggleRoiPreview(cellIdx)"
+            >
+              <el-icon><View /></el-icon>
+              {{ roiPreviewCellIndex === cellIdx ? t('videoGrid.hideRoi') : t('videoGrid.showRoi') }}
+            </el-button>
+            <el-button
+              size="small"
               :type="roiCellIndex === cellIdx ? 'warning' : 'default'"
-              @click="toggleRoi(cellIdx)"
+              @click="toggleRoiEditor(cellIdx)"
             >
               <el-icon><Edit /></el-icon>
-              {{ t('videoGrid.roi') }}
+              {{ t('videoGrid.editRoi') }}
             </el-button>
             <el-button
               size="small"
@@ -51,13 +59,22 @@
               @click="removeCell(cellIdx)"
             >
               <el-icon><Close /></el-icon>
+              {{ t('videoGrid.removeSource') }}
             </el-button>
           </div>
-          <!-- ROI Drawer overlay -->
+
           <RoiDrawer
             v-if="roiCellIndex === cellIdx"
             :source="assignments[cellIdx]"
+            :read-only="false"
             @close="roiCellIndex = null"
+          />
+
+          <RoiDrawer
+            v-else-if="roiPreviewCellIndex === cellIdx"
+            :source="assignments[cellIdx]"
+            :read-only="true"
+            @close="roiPreviewCellIndex = null"
           />
         </template>
         <template v-else>
@@ -98,6 +115,7 @@ const appSettingsStore = useAppSettingsStore()
 const { t } = useI18n()
 const currentCols = ref(loadInitialLayout())
 const roiCellIndex = ref(null)
+const roiPreviewCellIndex = ref(null)
 const dragOverCell = ref(null)
 
 const layouts = [
@@ -112,6 +130,8 @@ const totalCells = computed(() => currentCols.value * currentCols.value)
 const gridStyle = computed(() => ({
   display: 'grid',
   gridTemplateColumns: `repeat(${currentCols.value}, 1fr)`,
+  gridTemplateRows: `repeat(${currentCols.value}, minmax(0, 1fr))`,
+  height: '100%',
   gap: '4px',
   flex: 1,
 }))
@@ -131,13 +151,26 @@ function getStreamPath(source) {
   return extractRoutePath(source.rtsp_url, appSettingsStore.mediamtxRtspAddr) || source.id
 }
 
-function toggleRoi(cellIdx) {
-  roiCellIndex.value = roiCellIndex.value === cellIdx ? null : cellIdx
+function toggleRoiEditor(cellIdx) {
+  const opening = roiCellIndex.value !== cellIdx
+  roiCellIndex.value = opening ? cellIdx : null
+  if (opening) {
+    roiPreviewCellIndex.value = null
+  }
+}
+
+function toggleRoiPreview(cellIdx) {
+  const opening = roiPreviewCellIndex.value !== cellIdx
+  roiPreviewCellIndex.value = opening ? cellIdx : null
+  if (opening && roiCellIndex.value === cellIdx) {
+    roiCellIndex.value = null
+  }
 }
 
 function removeCell(cellIdx) {
   store.removeFromCell(cellIdx)
   if (roiCellIndex.value === cellIdx) roiCellIndex.value = null
+  if (roiPreviewCellIndex.value === cellIdx) roiPreviewCellIndex.value = null
 }
 
 function onDrop(event, cellIdx) {
@@ -178,6 +211,7 @@ function onDrop(event, cellIdx) {
 
 .video-grid {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   padding: 4px;
 }
@@ -188,7 +222,7 @@ function onDrop(event, cellIdx) {
   border: 2px solid #333;
   border-radius: 4px;
   overflow: hidden;
-  min-height: 120px;
+  min-height: 0;
   transition: border-color 0.2s;
 }
 
@@ -218,7 +252,13 @@ function onDrop(event, cellIdx) {
   top: 4px;
   right: 4px;
   display: flex;
-  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
   z-index: 10;
+}
+
+.cell-controls :deep(.el-button span) {
+  white-space: nowrap;
 }
 </style>

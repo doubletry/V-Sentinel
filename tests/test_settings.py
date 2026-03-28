@@ -15,6 +15,7 @@ class TestSettingsDB:
         assert all_settings["ui_language"] == "zh-CN"
         assert all_settings["site_title"] == "V-Sentinel"
         assert all_settings["favicon_url"] == "/favicon.ico"
+        assert "roi_tag_options" in all_settings
         assert all_settings["vengine_host"] == "localhost"
         assert all_settings["detection_port"] == "50051"
         assert all_settings["ocr_port"] == "50054"
@@ -62,6 +63,7 @@ class TestSettingsAPI:
                 "vengine_host": "10.0.0.1",
                 "detection_port": "9999",
                 "site_title": "My Sentinel",
+                "roi_tag_options": "[\"person\",\"vehicle\"]",
             },
         )
         assert resp.status_code == 200
@@ -69,6 +71,7 @@ class TestSettingsAPI:
         assert data["vengine_host"] == "10.0.0.1"
         assert data["detection_port"] == "9999"
         assert data["site_title"] == "My Sentinel"
+        assert data["roi_tag_options"] == "[\"person\",\"vehicle\"]"
 
     async def test_update_empty(self, async_client: AsyncClient):
         """Empty update should return current settings."""

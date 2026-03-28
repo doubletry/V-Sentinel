@@ -38,7 +38,15 @@
           </el-button>
           <el-button
             size="small"
+            :title="t('common.edit')"
+            @click="openEditDialog(source)"
+          >
+            <el-icon><EditPen /></el-icon>
+          </el-button>
+          <el-button
+            size="small"
             type="danger"
+            :title="t('common.delete')"
             @click="confirmDelete(source)"
           >
             <el-icon><Delete /></el-icon>
@@ -78,6 +86,33 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- Edit Source Dialog -->
+    <el-dialog
+      v-model="showEditDialog"
+      :title="t('sourceList.editSource')"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="editForm" label-width="80px" @submit.prevent="saveEdit">
+        <el-form-item :label="t('sourceList.name')" required>
+          <el-input v-model="editForm.name" :placeholder="t('sourceList.name')" />
+        </el-form-item>
+        <el-form-item :label="t('sourceList.rtspUrl')" required>
+          <el-input
+            v-model="editForm.rtsp_url"
+            placeholder="rtsp://..."
+            type="url"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showEditDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="editLoading" @click="saveEdit">
+          {{ t('common.save') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -90,10 +125,14 @@ import { useSourceStore } from '../stores/source.js'
 const store = useSourceStore()
 const { t } = useI18n()
 const showAddDialog = ref(false)
+const showEditDialog = ref(false)
 const addLoading = ref(false)
+const editLoading = ref(false)
 const actionLoading = reactive({})
+const editingSourceId = ref('')
 
 const form = reactive({ name: '', rtsp_url: '' })
+const editForm = reactive({ name: '', rtsp_url: '' })
 
 function onDragStart(event, source) {
   event.dataTransfer.setData('source-id', source.id)
@@ -129,6 +168,35 @@ async function toggleAnalysis(source) {
     }
   } finally {
     delete actionLoading[source.id]
+  }
+}
+
+function openEditDialog(source) {
+  editingSourceId.value = source.id
+  editForm.name = source.name
+  editForm.rtsp_url = source.rtsp_url
+  showEditDialog.value = true
+}
+
+async function saveEdit() {
+  if (!editingSourceId.value) return
+  if (!editForm.name || !editForm.rtsp_url) {
+    ElMessage.warning(t('sourceList.fillAllFields'))
+    return
+  }
+
+  editLoading.value = true
+  try {
+    await store.updateSource(editingSourceId.value, {
+      name: editForm.name,
+      rtsp_url: editForm.rtsp_url,
+    })
+    showEditDialog.value = false
+    ElMessage.success(t('sourceList.sourceUpdated'))
+  } catch (err) {
+    ElMessage.error(err.message || t('sourceList.failedToUpdate'))
+  } finally {
+    editLoading.value = false
   }
 }
 

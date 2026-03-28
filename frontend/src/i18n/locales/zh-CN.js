@@ -76,6 +76,7 @@ export default {
   },
   settings: {
     title: '平台设置',
+    subtitle: '本页面为独立设置页面，可直接滚动查看并修改所有系统参数。',
     vengineServices: 'V-Engine 服务',
     vengineHost: 'V-Engine 主机',
     detectionPort: '检测端口',

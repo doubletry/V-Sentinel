@@ -76,6 +76,7 @@ export default {
   },
   settings: {
     title: 'Platform Settings',
+    subtitle: 'This standalone page supports full vertical scrolling for all settings.',
     vengineServices: 'V-Engine Services',
     vengineHost: 'V-Engine Host',
     detectionPort: 'Detection Port',

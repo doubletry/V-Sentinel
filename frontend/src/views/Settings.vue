@@ -1,72 +1,75 @@
 <template>
   <div class="settings-page">
-    <el-card class="settings-card">
-      <template #header>
-        <div class="card-header">
+    <div class="settings-shell">
+      <div class="settings-head">
+        <div class="title-line">
           <el-icon :size="20"><Setting /></el-icon>
-          <span>{{ t('settings.title') }}</span>
+          <h1>{{ t('settings.title') }}</h1>
         </div>
-      </template>
+        <p>{{ t('settings.subtitle') }}</p>
+      </div>
 
       <el-form
         ref="formRef"
         :model="form"
-        label-width="180px"
+        class="settings-form"
+        label-width="210px"
         label-position="right"
         v-loading="loading"
       >
-        <!-- V-Engine Host -->
-        <el-divider content-position="left">{{ t('settings.vengineServices') }}</el-divider>
-        <el-form-item :label="t('settings.vengineHost')">
-          <el-input v-model="form.vengine_host" placeholder="localhost" />
-        </el-form-item>
+        <section class="settings-section">
+          <h2>{{ t('settings.vengineServices') }}</h2>
+          <el-form-item :label="t('settings.vengineHost')">
+            <el-input v-model="form.vengine_host" placeholder="localhost" />
+          </el-form-item>
+          <el-form-item :label="t('settings.detectionPort')">
+            <el-input v-model="form.detection_port" placeholder="50051" />
+          </el-form-item>
+          <el-form-item :label="t('settings.classificationPort')">
+            <el-input v-model="form.classification_port" placeholder="50052" />
+          </el-form-item>
+          <el-form-item :label="t('settings.actionPort')">
+            <el-input v-model="form.action_port" placeholder="50053" />
+          </el-form-item>
+          <el-form-item :label="t('settings.ocrPort')">
+            <el-input v-model="form.ocr_port" placeholder="50054" />
+          </el-form-item>
+          <el-form-item :label="t('settings.uploadPort')">
+            <el-input v-model="form.upload_port" placeholder="50050" />
+          </el-form-item>
+        </section>
 
-        <!-- Per-service ports -->
-        <el-form-item :label="t('settings.detectionPort')">
-          <el-input v-model="form.detection_port" placeholder="50051" />
-        </el-form-item>
-        <el-form-item :label="t('settings.classificationPort')">
-          <el-input v-model="form.classification_port" placeholder="50052" />
-        </el-form-item>
-        <el-form-item :label="t('settings.actionPort')">
-          <el-input v-model="form.action_port" placeholder="50053" />
-        </el-form-item>
-        <el-form-item :label="t('settings.ocrPort')">
-          <el-input v-model="form.ocr_port" placeholder="50054" />
-        </el-form-item>
-        <el-form-item :label="t('settings.uploadPort')">
-          <el-input v-model="form.upload_port" placeholder="50050" />
-        </el-form-item>
+        <section class="settings-section">
+          <h2>{{ t('settings.mediamtx') }}</h2>
+          <el-form-item :label="t('settings.rtspAddress')">
+            <el-input v-model="form.mediamtx_rtsp_addr" placeholder="rtsp://localhost:8554" />
+          </el-form-item>
+          <el-form-item :label="t('settings.webrtcAddress')">
+            <el-input v-model="form.mediamtx_webrtc_addr" placeholder="http://localhost:8889" />
+          </el-form-item>
+        </section>
 
-        <!-- MediaMTX -->
-        <el-divider content-position="left">{{ t('settings.mediamtx') }}</el-divider>
-        <el-form-item :label="t('settings.rtspAddress')">
-          <el-input v-model="form.mediamtx_rtsp_addr" placeholder="rtsp://localhost:8554" />
-        </el-form-item>
-        <el-form-item :label="t('settings.webrtcAddress')">
-          <el-input v-model="form.mediamtx_webrtc_addr" placeholder="http://localhost:8889" />
-        </el-form-item>
+        <section class="settings-section">
+          <h2>{{ t('settings.threadPools') }}</h2>
+          <el-form-item :label="t('settings.maxPullWorkers')">
+            <el-input v-model="form.max_pull_workers" placeholder="20" />
+          </el-form-item>
+          <el-form-item :label="t('settings.maxPushWorkers')">
+            <el-input v-model="form.max_push_workers" placeholder="10" />
+          </el-form-item>
+          <el-form-item :label="t('settings.maxCpuWorkers')">
+            <el-input v-model="form.max_cpu_workers" placeholder="16" />
+          </el-form-item>
+        </section>
 
-        <!-- Thread pools -->
-        <el-divider content-position="left">{{ t('settings.threadPools') }}</el-divider>
-        <el-form-item :label="t('settings.maxPullWorkers')">
-          <el-input v-model="form.max_pull_workers" placeholder="20" />
-        </el-form-item>
-        <el-form-item :label="t('settings.maxPushWorkers')">
-          <el-input v-model="form.max_push_workers" placeholder="10" />
-        </el-form-item>
-        <el-form-item :label="t('settings.maxCpuWorkers')">
-          <el-input v-model="form.max_cpu_workers" placeholder="16" />
-        </el-form-item>
-
-        <el-form-item>
+        <div class="settings-actions">
+          <el-button @click="reload">{{ t('common.reset') }}</el-button>
           <el-button type="primary" @click="save" :loading="saving">
             {{ t('settings.saveSettings') }}
           </el-button>
-          <el-button @click="reload">{{ t('common.reset') }}</el-button>
-        </el-form-item>
+        </div>
       </el-form>
-    </el-card>
+    </div>
   </div>
 </template>
 
@@ -123,27 +126,108 @@ onMounted(reload)
 
 <style scoped>
 .settings-page {
-  padding: 24px;
-  max-width: 700px;
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px 24px 28px;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(64, 158, 255, 0.13), transparent 42%),
+    radial-gradient(circle at 100% 100%, rgba(0, 178, 169, 0.12), transparent 40%),
+    #0d0d1a;
+}
+
+.settings-shell {
+  max-width: 980px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.settings-card {
-  background: #1a1a2e;
-  border: 1px solid #333;
+.settings-head {
+  padding: 4px 4px 0;
 }
 
-.card-header {
+.title-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #eee;
+  gap: 10px;
 }
 
-:deep(.el-divider__text) {
-  background: #1a1a2e;
-  color: #888;
+.title-line h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e9f0ff;
+}
+
+.settings-head p {
+  margin-top: 6px;
+  color: #9ba8be;
+  font-size: 13px;
+}
+
+.settings-form {
+  background: rgba(16, 21, 37, 0.92);
+  border: 1px solid #26314d;
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.settings-section {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #30364d;
+  border-radius: 12px;
+  padding: 16px 12px 6px;
+  margin-bottom: 14px;
+}
+
+.settings-section h2 {
+  font-size: 14px;
+  color: #9ab2df;
+  margin-bottom: 10px;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  padding-bottom: 4px;
+  background: linear-gradient(to bottom, rgba(16, 21, 37, 0), rgba(16, 21, 37, 0.96) 26%);
+}
+
+:deep(.el-form-item__label) {
+  color: #aab7d2;
+}
+
+@media (max-width: 768px) {
+  .settings-page {
+    padding: 12px 12px 20px;
+  }
+
+  .settings-form {
+    padding: 12px;
+  }
+
+  .title-line h1 {
+    font-size: 18px;
+  }
+
+  :deep(.el-form-item) {
+    margin-bottom: 14px;
+  }
+
+  :deep(.el-form-item__label) {
+    width: 100% !important;
+    justify-content: flex-start;
+    margin-bottom: 4px;
+    line-height: 1.4;
+  }
+
+  :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
 }
 </style>

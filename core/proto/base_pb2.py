@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Stub protobuf classes for base.proto
-# Run backend/proto/generate.sh to regenerate from source with grpc_tools.protoc
+# 基础 proto 的存根类（规范位置：core/proto/）
 from __future__ import annotations
 
 

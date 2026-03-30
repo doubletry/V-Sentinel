@@ -27,8 +27,8 @@ class ExampleProcessor(BaseVideoProcessor):
     4. Frame annotation via cv2
     """
 
-    DETECTION_MODEL = "yolov8n"
-    CLASSIFICATION_MODEL = "resnet50"
+    DETECTION_MODEL = "huotai"
+    CLASSIFICATION_MODEL = "huotai"
     OCR_MODEL = "paddleocr"
 
     def __init__(

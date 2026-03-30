@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import cv2
 import numpy as np
 from loguru import logger
-from turbojpeg import TurboJPEG
+from turbojpeg import TurboJPEG, TJPF_RGB
 
 from backend.models.schemas import AnalysisMessage, ROI
 from backend.processing.base import AnalysisResult, BaseVideoProcessor
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from backend.processing.agent import AnalysisAgent
 
 # Module-level TurboJPEG instance (thread-safe, reusable).
+# 模块级 TurboJPEG 实例（线程安全，可复用）。
 _jpeg = TurboJPEG()
 
 
@@ -110,8 +111,9 @@ class ExampleProcessor(BaseVideoProcessor):
             if x2 <= x1 or y2 <= y1:
                 continue
             crop = frame[y1:y2, x1:x2]
-            crop_bgr = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
-            crop_bytes = _jpeg.encode(crop_bgr, quality=85)
+            # Encode crop as RGB JPEG directly (no BGR conversion)
+            # 直接以 RGB 编码裁剪区域（无需 BGR 转换）
+            crop_bytes = _jpeg.encode(crop, quality=85, pixel_format=TJPF_RGB)
             crop_shape = (y2 - y1, x2 - x1, 3)
 
             # Upload crop and use cache key for classification
@@ -184,7 +186,8 @@ class ExampleProcessor(BaseVideoProcessor):
     def _encode_thumbnail(
         self, frame: np.ndarray | None, max_width: int = 320
     ) -> str | None:
-        """Encode a frame as a base64 JPEG thumbnail using TurboJPEG."""
+        """Encode a frame as a base64 JPEG thumbnail using TurboJPEG (RGB).
+        使用 TurboJPEG 将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
         if frame is None:
             return None
 
@@ -194,6 +197,7 @@ class ExampleProcessor(BaseVideoProcessor):
             frame = cv2.resize(
                 frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
             )
-        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        encoded = _jpeg.encode(bgr, quality=60)
+        # Encode RGB directly — no BGR conversion needed
+        # 直接编码 RGB — 无需 BGR 转换
+        encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
         return base64.b64encode(encoded).decode()

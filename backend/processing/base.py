@@ -192,16 +192,26 @@ class BaseVideoProcessor(ABC):
 
     def _frame_reader(self, loop: asyncio.AbstractEventLoop) -> None:
         """Read frames from RTSP stream using PyAV (blocking I/O, runs in thread).
+        使用 PyAV 从 RTSP 流读取帧（阻塞 I/O，在线程中运行）。
 
-        Parameters
+        Parameters / 参数
         ----------
         loop:
             The running asyncio event loop (passed from ``_run_loop`` so we
             don't need to call ``asyncio.get_event_loop()`` inside a worker
             thread which would raise ``RuntimeError`` on Python 3.10+).
+            运行中的 asyncio 事件循环（从 ``_run_loop`` 传入，避免在工作线程中
+            调用 ``asyncio.get_event_loop()``，该调用在 Python 3.10+ 会抛出
+            ``RuntimeError``）。
+
+        Image data is encoded once here as RGB JPEG bytes via TurboJPEG.
+        Downstream code (process_frame, gRPC calls) should reuse these bytes
+        without re-encoding.
+        图像在此处使用 TurboJPEG 编码为 RGB JPEG 字节（仅编码一次）。
+        下游代码（process_frame、gRPC 调用）应复用这些字节，无需重新编码。
         """
         import av
-        from turbojpeg import TurboJPEG
+        from turbojpeg import TurboJPEG, TJPF_RGB
 
         jpeg = TurboJPEG()
 
@@ -219,12 +229,15 @@ class BaseVideoProcessor(ABC):
                 for av_frame in packet.decode():
                     if self._stop_event.is_set():
                         break
-                    # Convert to numpy RGB → BGR for TurboJPEG
+                    # Get RGB numpy array (no BGR conversion needed)
+                    # 获取 RGB numpy 数组（无需 BGR 转换）
                     rgb = av_frame.to_ndarray(format="rgb24")
-                    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                    encoded = jpeg.encode(bgr, quality=85)
+                    # Encode RGB directly — single encode, reused downstream
+                    # 直接编码 RGB — 仅编码一次，下游复用
+                    encoded = jpeg.encode(rgb, quality=85, pixel_format=TJPF_RGB)
 
                     # Put into queue with backpressure: drop old frame if full
+                    # 放入队列，满时丢弃旧帧（背压机制）
                     if self._frame_queue.full():
                         try:
                             self._frame_queue.get_nowait()
@@ -241,7 +254,7 @@ class BaseVideoProcessor(ABC):
             if not self._stop_event.is_set():
                 logger.exception("Frame reader error for {}: {}", self.rtsp_url, exc)
         finally:
-            # Signal end of stream
+            # Signal end of stream / 发送流结束信号
             try:
                 loop.call_soon_threadsafe(self._frame_queue.put_nowait, None)
             except Exception:

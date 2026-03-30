@@ -191,7 +191,13 @@ class BaseVideoProcessor(ABC):
     # ── Frame Reader (runs in thread) ─────────────────────────────────────
 
     def _frame_reader(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Read frames from RTSP stream using PyAV (blocking I/O, runs in thread)."""
+        """Read frames from RTSP stream using PyAV (blocking I/O, runs in thread).
+        使用 PyAV 从 RTSP 流读取帧（阻塞 I/O，在线程中运行）。
+
+        Images are encoded once as RGB JPEG. Downstream code should reuse
+        the encoded bytes without re-encoding.
+        图像仅编码一次为 RGB JPEG。下游代码应复用编码字节，无需重新编码。
+        """
         import av
 
         logger.info("Frame reader started for {}", self.rtsp_url)
@@ -207,13 +213,17 @@ class BaseVideoProcessor(ABC):
                         break
                     rgb = av_frame.to_ndarray(format="rgb24")
 
-                    # Encode using TurboJPEG if available, else cv2
+                    # Encode RGB directly — single encode, reused downstream
+                    # 直接编码 RGB — 仅编码一次，下游复用
                     if _jpeg is not None:
-                        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                        encoded = _jpeg.encode(bgr, quality=85)
+                        from turbojpeg import TJPF_RGB
+                        encoded = _jpeg.encode(rgb, quality=85, pixel_format=TJPF_RGB)
                     else:
+                        # Fallback: cv2.imencode expects BGR, so convert
+                        # 回退：cv2.imencode 需要 BGR，因此转换
+                        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                         ok, buf = cv2.imencode(
-                            ".jpg", rgb, [cv2.IMWRITE_JPEG_QUALITY, 85]
+                            ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85]
                         )
                         encoded = buf.tobytes() if ok else b""
 

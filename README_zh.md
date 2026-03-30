@@ -1,147 +1,146 @@
-[中文文档](README_zh.md)
+[English](README.md)
 
 # V-Sentinel
 
-**AI Video Surveillance Analysis Platform**
+**AI 视频监控分析平台**
 
-V-Sentinel is a full-stack video surveillance AI analysis platform that integrates with the [V-Engine](https://github.com/doubletry/V-Engine) gRPC AI inference microservice. It provides a Vue 3 frontend for live video monitoring and a high-concurrency FastAPI backend for real-time multi-camera AI analysis.
+V-Sentinel 是一个全栈视频监控 AI 分析平台，与 [V-Engine](https://github.com/doubletry/V-Engine) gRPC AI 推理微服务深度集成。平台提供基于 Vue 3 的实时视频监控前端，以及高并发的 FastAPI 异步后端，支持多路摄像头实时 AI 分析。
 
 ---
 
-## Architecture
+## 系统架构
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                        V-Sentinel Platform                           │
+│                        V-Sentinel 平台                                │
 │                                                                      │
 │  ┌─────────────────┐         ┌──────────────────────────────────┐   │
-│  │  Vue 3 Frontend │◄──WS────│         FastAPI Backend          │   │
+│  │  Vue 3 前端     │◄──WS────│         FastAPI 后端              │   │
 │  │  (Element Plus) │◄──REST──│    (uvicorn, asyncio, grpc.aio)  │   │
 │  └────────┬────────┘         └──────────────┬───────────────────┘   │
 │           │                                 │                       │
-│           │ WebRTC (WHEP)                   │ gRPC (async)          │
+│           │ WebRTC (WHEP)                   │ gRPC (异步)           │
 │           ▼                                 ▼                       │
 │  ┌─────────────────┐         ┌──────────────────────────────────┐   │
 │  │    MediaMTX     │         │          V-Engine                │   │
-│  │  (RTSP→WebRTC)  │         │  Detection / Classification /   │   │
-│  └─────────────────┘         │  Action / OCR / Upload           │   │
+│  │  (RTSP→WebRTC)  │         │  检测 / 分类 / 行为分析 /        │   │
+│  └─────────────────┘         │  OCR / 上传                       │   │
 │                               └──────────────────────────────────┘   │
 │                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  core/  — Standalone Processor SDK                           │   │
-│  │  Develop & test processors independently, then plug into     │   │
-│  │  the full backend with zero code changes.                    │   │
+│  │  core/  — 独立处理器 SDK                                      │   │
+│  │  可独立开发和测试处理器，完成后直接接入后端，无需修改代码。       │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────┘
 
-Backend Async Processing Architecture:
+后端异步处理架构：
 ┌─────────────────────────────────────────────────────────────────┐
-│  Thread Pool: RTSP Frame Pulling (1 thread per camera)          │
+│  线程池：RTSP 帧拉取（每个摄像头一个线程）                        │
 │  ┌─────────────────────────────────────────────────┐            │
-│  │ av.open(rtsp) → decode → TurboJPEG.encode → Q  │            │
+│  │ av.open(rtsp) → 解码 → TurboJPEG.encode → 队列 │            │
 │  └─────────────────────┬───────────────────────────┘            │
-│                        │ frames via asyncio.Queue               │
+│                        │ 帧数据通过 asyncio.Queue 传递           │
 │                        ▼                                        │
-│  AsyncIO Event Loop (single thread, all coroutines)             │
+│  AsyncIO 事件循环（单线程，所有协程）                              │
 │  ┌─────────────────────────────────────────────────┐            │
-│  │ Camera-1: await process_frame()                 │            │
+│  │ 摄像头-1: await process_frame()                 │            │
 │  │   ├─ await vengine.detect()   (gRPC I/O)        │            │
 │  │   ├─ await vengine.ocr()      (gRPC I/O)        │            │
-│  │   ├─ asyncio.gather(detect, ocr) — concurrent  │            │
+│  │   ├─ asyncio.gather(detect, ocr) — 并发执行     │            │
 │  │   └─ ws_manager.broadcast()                     │            │
-│  │ Camera-2: (interleaved)                         │            │
-│  │ Camera-N: ...                                   │            │
+│  │ 摄像头-2: (交错执行)                             │            │
+│  │ 摄像头-N: ...                                   │            │
 │  └─────────────────────────────────────────────────┘            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Tech Stack
+## 技术栈
 
-| Layer | Technology |
+| 层级 | 技术 |
 |---|---|
-| Frontend | Vue 3 + Element Plus + Vite |
-| Backend | FastAPI (Python, fully async) |
-| Video Streaming | MediaMTX (RTSP → WebRTC) |
-| AI Inference | V-Engine gRPC microservices |
-| JPEG Encoding | TurboJPEG (via PyTurboJPEG) |
-| RTSP Push | Persistent av container per camera |
-| gRPC Client | grpc.aio (async gRPC) |
-| Real-time | WebSocket |
-| ROI Config | YAML import/export (pyyaml) |
-| Python Env | uv + pyproject.toml |
-| Database | SQLite via aiosqlite |
-| Processor SDK | `core/` standalone package |
+| 前端 | Vue 3 + Element Plus + Vite |
+| 后端 | FastAPI（Python，全异步） |
+| 视频流 | MediaMTX（RTSP → WebRTC） |
+| AI 推理 | V-Engine gRPC 微服务 |
+| JPEG 编码 | TurboJPEG（通过 PyTurboJPEG） |
+| RTSP 推流 | 每路摄像头维持持久化 av 容器 |
+| gRPC 客户端 | grpc.aio（异步 gRPC） |
+| 实时通信 | WebSocket |
+| ROI 配置 | YAML 导入/导出（pyyaml） |
+| Python 环境 | uv + pyproject.toml |
+| 数据库 | SQLite（通过 aiosqlite） |
+| 处理器 SDK | `core/` 独立包 |
 
 ---
 
-## Prerequisites
+## 前置要求
 
 - **Node.js** >= 18
 - **Python** >= 3.11
-- **uv** — [install](https://docs.astral.sh/uv/getting-started/installation/)
-- **libturbojpeg** — required by PyTurboJPEG (`apt install libturbojpeg0-dev` on Debian/Ubuntu)
-- **MediaMTX** — [download](https://github.com/bluenviron/mediamtx/releases) or use Docker
-- **V-Engine** — running gRPC microservices (see [V-Engine repo](https://github.com/doubletry/V-Engine))
+- **uv** — [安装指南](https://docs.astral.sh/uv/getting-started/installation/)
+- **libturbojpeg** — PyTurboJPEG 依赖（Debian/Ubuntu 下：`apt install libturbojpeg0-dev`）
+- **MediaMTX** — [下载](https://github.com/bluenviron/mediamtx/releases) 或使用 Docker
+- **V-Engine** — 运行中的 gRPC 微服务（参见 [V-Engine 仓库](https://github.com/doubletry/V-Engine)）
 
 ---
 
-## Quick Start
+## 快速开始
 
-### 1. Clone and install dependencies
+### 1. 克隆并安装依赖
 
 ```bash
 git clone https://github.com/doubletry/V-Sentinel.git
 cd V-Sentinel
 
-# Install Python dependencies (includes PyTurboJPEG, pyyaml, and all others)
+# 安装 Python 依赖（包含 PyTurboJPEG、pyyaml 等所有依赖）
 uv sync
 ```
 
-### 2. Start the backend
+### 2. 启动后端
 
 ```bash
-# Default port 8000 — use any port you like
+# 默认端口 8000 — 可使用任意端口
 uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API documentation: `http://localhost:<port>/docs`
+API 文档地址：`http://localhost:<端口>/docs`
 
-### 3. Start the frontend (dev mode)
+### 3. 启动前端（开发模式）
 
 ```bash
 cd frontend
 npm install
 
-# The Vite dev proxy defaults to backend port 8000.
-# Override with VITE_BACKEND_PORT if your backend runs on a different port:
+# Vite 开发代理默认指向后端 8000 端口。
+# 如果后端运行在其他端口，可通过 VITE_BACKEND_PORT 覆盖：
 #   VITE_BACKEND_PORT=9000 npm run dev
 npm run dev
 ```
 
-The frontend will be available at http://localhost:5173
+前端地址：http://localhost:5173
 
-> **Note:** The frontend uses relative URLs for all API and WebSocket calls, so it
-> works with any backend port — no hardcoded addresses.
+> **说明：** 前端所有 API 和 WebSocket 调用均使用相对 URL，因此可以配合任意后端端口
+> 使用，无需硬编码地址。
 
-### 4. Build frontend for production
+### 4. 构建生产版本前端
 
 ```bash
 cd frontend
 npm run build
 ```
 
-FastAPI automatically serves the built frontend from `/` when `frontend/dist/` exists.
+当 `frontend/dist/` 目录存在时，FastAPI 会自动从 `/` 提供构建后的前端静态文件。
 
 ---
 
-## Configuration
+## 配置
 
-Create a `.env` file in the project root to override defaults:
+在项目根目录创建 `.env` 文件以覆盖默认配置：
 
 ```dotenv
-# V-Engine service addresses
+# V-Engine 服务地址
 DETECTION_ADDR=localhost:50051
 CLASSIFICATION_ADDR=localhost:50052
 ACTION_ADDR=localhost:50053
@@ -152,15 +151,14 @@ UPLOAD_ADDR=localhost:50050
 MEDIAMTX_RTSP_ADDR=rtsp://localhost:8554
 MEDIAMTX_WEBRTC_ADDR=http://localhost:8889
 
-# Database
+# 数据库
 DB_PATH=./v_sentinel.db
 ```
 
-### Frontend proxy port
+### 前端代理端口
 
-During development, the Vite dev server proxies `/api` and `/ws` requests to the
-backend. The target port is read from the `VITE_BACKEND_PORT` environment variable
-(defaults to `8000`):
+在开发模式下，Vite 开发服务器会将 `/api` 和 `/ws` 请求代理到后端。目标端口通过
+`VITE_BACKEND_PORT` 环境变量读取（默认为 `8000`）：
 
 ```bash
 VITE_BACKEND_PORT=9000 npm run dev
@@ -168,31 +166,31 @@ VITE_BACKEND_PORT=9000 npm run dev
 
 ---
 
-## Core Package — Standalone Processor SDK
+## Core 包 — 独立处理器 SDK
 
-The `core/` directory is a self-contained Python package (`v-sentinel-core`) that
-lets you develop and test video processors **independently** of the full backend.
+`core/` 目录是一个独立的 Python 包（`v-sentinel-core`），可让您在**不依赖完整后端**
+的情况下开发和测试视频处理器。
 
-### Install
+### 安装
 
 ```bash
-pip install ./core            # minimal install
-pip install ./core[grpc]      # with V-Engine gRPC support
+pip install ./core            # 最小安装
+pip install ./core[grpc]      # 包含 V-Engine gRPC 支持
 ```
 
-### Usage
+### 使用方法
 
 ```python
 from core.base_processor import BaseVideoProcessor, AnalysisResult
 
 class MyProcessor(BaseVideoProcessor):
     async def process_frame(self, frame, encoded, shape, roi_pixel_points):
-        # Your AI logic here
+        # 在此编写 AI 逻辑
         annotated = self.draw_on_frame(frame, AnalysisResult())
         return AnalysisResult(annotated_frame=annotated)
 ```
 
-Run standalone:
+独立运行：
 
 ```python
 from core.runner import run_processor
@@ -205,16 +203,16 @@ run_processor(
 )
 ```
 
-Once ready, drop your processor into `backend/processing/` and register it in
-`ProcessorManager` — no code changes needed.
+开发完成后，将处理器放入 `backend/processing/` 并在 `ProcessorManager` 中注册即可——
+无需修改代码。
 
-See [`core/README.md`](core/README.md) for full details.
+详见 [`core/README.md`](core/README.md)。
 
 ---
 
-## Proto Generation
+## Proto 生成
 
-The repository includes pre-generated stub files in `backend/proto/`. To regenerate from source `.proto` files:
+仓库已包含预生成的桩文件，位于 `backend/proto/`。如需从 `.proto` 源文件重新生成：
 
 ```bash
 cd backend/proto
@@ -223,9 +221,9 @@ cd backend/proto
 
 ---
 
-## Creating a Custom Processor
+## 自定义处理器
 
-Subclass `BaseVideoProcessor` in `backend/processing/`:
+在 `backend/processing/` 中继承 `BaseVideoProcessor`：
 
 ```python
 from backend.processing.base import BaseVideoProcessor, AnalysisResult
@@ -253,43 +251,43 @@ class MyProcessor(BaseVideoProcessor):
         return result
 ```
 
-Register it in `ProcessorManager.start_processor()`.
+在 `ProcessorManager.start_processor()` 中注册即可。
 
 ---
 
-## API Reference
+## API 参考
 
-### Sources
+### 视频源
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| `POST` | `/api/sources` | Create video source |
-| `GET` | `/api/sources` | List all sources |
-| `GET` | `/api/sources/{id}` | Get source with ROIs |
-| `PUT` | `/api/sources/{id}` | Update source and ROIs |
-| `DELETE` | `/api/sources/{id}` | Delete source |
-| `GET` | `/api/sources/by-rtsp?rtsp_url=` | Get source by RTSP URL |
+| `POST` | `/api/sources` | 创建视频源 |
+| `GET` | `/api/sources` | 获取所有视频源 |
+| `GET` | `/api/sources/{id}` | 获取视频源及 ROI 信息 |
+| `PUT` | `/api/sources/{id}` | 更新视频源和 ROI |
+| `DELETE` | `/api/sources/{id}` | 删除视频源 |
+| `GET` | `/api/sources/by-rtsp?rtsp_url=` | 根据 RTSP URL 查询视频源 |
 
-### ROI Import / Export
+### ROI 导入 / 导出
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| `GET` | `/api/sources/{id}/rois/export` | Export ROIs as YAML |
-| `POST` | `/api/sources/{id}/rois/import` | Import ROIs from YAML (with tag validation) |
+| `GET` | `/api/sources/{id}/rois/export` | 导出 ROI 为 YAML |
+| `POST` | `/api/sources/{id}/rois/import` | 从 YAML 导入 ROI（含标签验证） |
 
-### Processor
+### 处理器
 
-| Method | Path | Description |
+| 方法 | 路径 | 描述 |
 |--------|------|-------------|
-| `POST` | `/api/processor/start` | Start AI analysis |
-| `POST` | `/api/processor/stop` | Stop AI analysis |
-| `GET` | `/api/processor/status` | Get all processor statuses |
+| `POST` | `/api/processor/start` | 启动 AI 分析 |
+| `POST` | `/api/processor/stop` | 停止 AI 分析 |
+| `GET` | `/api/processor/status` | 获取所有处理器状态 |
 
 ### WebSocket
 
-| Path | Description |
+| 路径 | 描述 |
 |------|-------------|
-| `/ws/messages` | Real-time analysis message stream |
+| `/ws/messages` | 实时分析消息流 |
 
 ---
 
@@ -301,6 +299,6 @@ docker-compose up mediamtx
 
 ---
 
-## License
+## 许可证
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT 许可证 — 详见 [LICENSE](LICENSE)。

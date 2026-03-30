@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -85,7 +86,6 @@ class BaseVideoProcessor(ABC):
         self.status: str = "stopped"
 
         # Persistent RTSP output state (managed by _push_frame / _close_push_container)
-        import threading
         self._push_lock = threading.Lock()
         self._push_container = None  # av.container.OutputContainer | None
         self._push_stream = None     # av.stream.Stream | None

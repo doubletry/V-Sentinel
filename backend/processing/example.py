@@ -25,12 +25,19 @@ _jpeg = TurboJPEG()
 
 class ExampleProcessor(BaseVideoProcessor):
     """Example processor that runs detection + OCR concurrently, then classifies crops.
+    示例处理器，并发执行检测 + OCR，然后对裁剪区域进行分类。
 
     Pipeline:
     1. ``asyncio.gather(detect, ocr)`` — concurrent detection + OCR
     2. Serial classification on each detection crop
     3. Message assembly and WebSocket broadcast
     4. Frame annotation via cv2
+
+    流水线：
+    1. ``asyncio.gather(detect, ocr)`` — 并发检测 + OCR
+    2. 对每个检测裁剪区域串行分类
+    3. 消息组装与 WebSocket 广播
+    4. 通过 cv2 进行帧标注
     """
 
     DETECTION_MODEL = "huotai"
@@ -67,16 +74,19 @@ class ExampleProcessor(BaseVideoProcessor):
         shape: tuple[int, int, int],
         roi_pixel_points: list[list[dict]],
     ) -> AnalysisResult:
-        """Process one frame: upload → concurrent detection + OCR by key → serial classify."""
+        """Process one frame: upload → concurrent detection + OCR by key → serial classify.
+        处理单帧：上传 → 按 key 并发检测 + OCR → 串行分类。"""
         self._frame_count += 1
 
-        # Use first ROI for inference if available
+        # Use first ROI for inference if available / 如果有 ROI 则使用第一个进行推理
         primary_roi = roi_pixel_points[0] if roi_pixel_points else None
 
         # 0. Upload frame to cache to avoid duplicate transmission
+        # 0. 上传帧到缓存以避免重复传输
         image_key = await self.vengine.upload_and_get_key(encoded)
 
         # Build kwargs: prefer cache key, fall back to raw bytes
+        # 构建参数：优先使用缓存 key，回退到原始字节
         img_kwargs: dict = {}
         if image_key:
             img_kwargs["image_key"] = image_key
@@ -84,6 +94,7 @@ class ExampleProcessor(BaseVideoProcessor):
             img_kwargs["image_bytes"] = encoded
 
         # 1. Run detection and OCR concurrently (both use the same key)
+        # 1. 并发运行检测和 OCR（两者使用同一 key）
         detect_coro = self.vengine.detect(
             shape=shape,
             model_name=self.DETECTION_MODEL,
@@ -101,6 +112,7 @@ class ExampleProcessor(BaseVideoProcessor):
         detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)
 
         # 2. Classify each detected crop (serial to avoid overwhelming the service)
+        # 2. 对每个检测裁剪区域进行分类（串行执行以避免服务过载）
         classifications: list[dict] = []
         h, w = shape[:2]
         for det in detections:
@@ -111,12 +123,12 @@ class ExampleProcessor(BaseVideoProcessor):
             if x2 <= x1 or y2 <= y1:
                 continue
             crop = frame[y1:y2, x1:x2]
-            # Encode crop as RGB JPEG directly (no BGR conversion)
-            # 直接以 RGB 编码裁剪区域（无需 BGR 转换）
+            # Encode crop as RGB JPEG directly (no BGR conversion) / 直接以 RGB 编码裁剪区域（无需 BGR 转换）
             crop_bytes = _jpeg.encode(crop, quality=85, pixel_format=TJPF_RGB)
             crop_shape = (y2 - y1, x2 - x1, 3)
 
             # Upload crop and use cache key for classification
+            # 上传裁剪区域并使用缓存 key 进行分类
             crop_key = await self.vengine.upload_and_get_key(crop_bytes)
             crop_kwargs: dict = {}
             if crop_key:
@@ -140,7 +152,7 @@ class ExampleProcessor(BaseVideoProcessor):
                     }
                 )
 
-        # 3. Annotate frame
+        # 3. Annotate frame / 3. 标注帧
         result = AnalysisResult(
             detections=detections,
             classifications=classifications,
@@ -150,7 +162,7 @@ class ExampleProcessor(BaseVideoProcessor):
             self.draw_on_frame, frame, result
         )
 
-        # 4. Assemble messages
+        # 4. Assemble messages / 4. 组装消息
         messages: list[AnalysisMessage] = []
         now = datetime.now(timezone.utc).isoformat()
 
@@ -197,7 +209,6 @@ class ExampleProcessor(BaseVideoProcessor):
             frame = cv2.resize(
                 frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
             )
-        # Encode RGB directly — no BGR conversion needed
-        # 直接编码 RGB — 无需 BGR 转换
+        # Encode RGB directly — no BGR conversion needed / 直接编码 RGB — 无需 BGR 转换
         encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
         return base64.b64encode(encoded).decode()

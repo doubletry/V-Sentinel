@@ -10,25 +10,29 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 @router.get("")
 async def get_settings() -> dict[str, str]:
-    """Get all application settings."""
+    """Get all application settings.
+    获取所有应用设置。"""
     return await db.get_all_settings()
 
 
 @router.put("")
 async def update_settings(data: AppSettingsUpdate, request: Request) -> dict[str, str]:
     """Update application settings.
+    更新应用设置。
 
     After saving, the V-Engine gRPC client is reconnected with the new
     addresses so changes take effect immediately.
+    保存后重新连接 V-Engine gRPC 客户端以使新地址立即生效。
     """
     # Build dict of only the fields that were actually provided
+    # 仅构建实际提供了值的字段字典
     updates = {k: v for k, v in data.model_dump().items() if v is not None}
     if not updates:
         return await db.get_all_settings()
 
     result = await db.update_settings(updates)
 
-    # Reconnect V-Engine client with new addresses
+    # Reconnect V-Engine client with new addresses / 使用新地址重连 V-Engine 客户端
     vengine_client = request.app.state.vengine_client
     await vengine_client.reconnect_from_settings(result)
 

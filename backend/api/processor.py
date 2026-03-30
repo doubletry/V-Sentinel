@@ -10,7 +10,8 @@ router = APIRouter(prefix="/api/processor", tags=["processor"])
 
 @router.post("/start", status_code=200)
 async def start_processor(request: ProcessorStartRequest) -> dict:
-    """Start AI analysis processing for a video source."""
+    """Start AI analysis processing for a video source.
+    为视频源启动 AI 分析处理。"""
     from backend.main import processor_manager  # avoid circular imports at module level
 
     try:
@@ -24,7 +25,8 @@ async def start_processor(request: ProcessorStartRequest) -> dict:
 
 @router.post("/stop", status_code=200)
 async def stop_processor(request: ProcessorStopRequest) -> dict:
-    """Stop AI analysis processing for a video source."""
+    """Stop AI analysis processing for a video source.
+    停止视频源的 AI 分析处理。"""
     from backend.main import processor_manager
 
     result = await processor_manager.stop_processor(request.source_id)
@@ -33,7 +35,8 @@ async def stop_processor(request: ProcessorStopRequest) -> dict:
 
 @router.post("/start-all", status_code=200)
 async def start_all_processors() -> dict:
-    """Start AI analysis for all configured sources."""
+    """Start AI analysis for all configured sources.
+    为所有已配置的视频源启动 AI 分析。"""
     from backend.main import processor_manager
 
     result = await processor_manager.start_all_processors()
@@ -42,7 +45,8 @@ async def start_all_processors() -> dict:
 
 @router.post("/stop-all", status_code=200)
 async def stop_all_processors() -> dict:
-    """Stop AI analysis for all running sources."""
+    """Stop AI analysis for all running sources.
+    停止所有正在运行的视频源 AI 分析。"""
     from backend.main import processor_manager
 
     result = await processor_manager.stop_all_processors()
@@ -51,7 +55,8 @@ async def stop_all_processors() -> dict:
 
 @router.get("/status", response_model=list[ProcessorStatus])
 async def get_status() -> list[ProcessorStatus]:
-    """Get status of all running processors."""
+    """Get status of all running processors.
+    获取所有运行中处理器的状态。"""
     from backend.main import processor_manager
 
     return processor_manager.get_all_status()
@@ -62,5 +67,6 @@ async def get_processing_logs(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=200),
 ) -> dict:
-    """Get paginated runtime logs produced by backend processing modules."""
+    """Get paginated runtime logs produced by backend processing modules.
+    获取后台处理模块产生的分页运行日志。"""
     return processing_log_buffer.list(page=page, page_size=page_size)

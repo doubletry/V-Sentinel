@@ -19,12 +19,14 @@ from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
 
-# Configure loguru
+# Configure loguru / 配置 loguru 日志
 logger.remove()
 logger.add(sys.stderr, level="INFO", colorize=True)
 
 
 def _processing_log_sink(message) -> None:
+    """Forward processing logs to the in-memory ring buffer.
+    将处理日志转发到内存环形缓冲区。"""
     record = message.record
     processing_log_buffer.append(
         timestamp=record["time"].isoformat(),
@@ -40,7 +42,7 @@ logger.add(
     filter=lambda record: str(record["name"]).startswith("backend.processing"),
 )
 
-# Module-level singletons (accessed by API routers)
+# Module-level singletons (accessed by API routers) / 模块级单例（供 API 路由使用）
 ws_manager: ws_module.WSManager
 vengine_client: AsyncVEngineClient
 processor_manager: ProcessorManager
@@ -48,26 +50,28 @@ processor_manager: ProcessorManager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan: initialize and teardown resources."""
+    """Application lifespan: initialize and teardown resources.
+    应用生命周期：初始化与销毁资源。"""
     global ws_manager, vengine_client, processor_manager
 
     logger.info("Starting {} ...", settings.app_name)
 
-    # Initialize WebSocket manager
+    # Initialize WebSocket manager / 初始化 WebSocket 管理器
     ws_manager = ws_module.WSManager()
 
-    # Initialize database
+    # Initialize database / 初始化数据库
     await init_db()
 
     # Initialize V-Engine async gRPC client (addresses from DB settings)
+    # 初始化 V-Engine 异步 gRPC 客户端（地址来自数据库设置）
     app_settings = await get_all_settings()
     vengine_client = AsyncVEngineClient(settings)
     await vengine_client.connect(app_settings)
 
-    # Store on app.state for dependency-injection in API routes
+    # Store on app.state for dependency-injection in API routes / 存储到 app.state 以便 API 路由依赖注入
     app.state.vengine_client = vengine_client
 
-    # Initialize ProcessorManager (includes AnalysisAgent)
+    # Initialize ProcessorManager (includes AnalysisAgent) / 初始化处理器管理器（含分析代理）
     processor_manager = ProcessorManager(
         vengine_client=vengine_client,
         ws_manager=ws_manager,
@@ -78,7 +82,7 @@ async def lifespan(app: FastAPI):
     logger.info("{} started successfully", settings.app_name)
     yield
 
-    # ── Shutdown ──────────────────────────────────────────────────────────
+    # ── Shutdown / 关闭 ─────────────────────────────────────────────────
     logger.info("Shutting down {} ...", settings.app_name)
 
     await processor_manager.stop_all()
@@ -113,11 +117,12 @@ app.include_router(ws_module.router)
 
 @app.get("/api/health")
 async def health() -> dict:
-    """Health check endpoint."""
+    """Health check endpoint.
+    健康检查端点。"""
     return {"status": "ok", "app": settings.app_name}
 
 
-# ── Static files (production: serve built frontend) ───────────────────────────
+# ── Static files (production: serve built frontend) / 静态文件（生产环境：托管构建后的前端） ──
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if _frontend_dist.exists():
     app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")

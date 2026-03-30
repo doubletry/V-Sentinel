@@ -19,7 +19,8 @@ router = APIRouter(prefix="/api/sources", tags=["sources"])
 
 @router.post("", response_model=VideoSource, status_code=201)
 async def create_source(source: VideoSourceCreate) -> VideoSource:
-    """Create a new video source."""
+    """Create a new video source.
+    创建新的视频源。"""
     try:
         return await db.create_source(source)
     except Exception as exc:
@@ -32,13 +33,15 @@ async def create_source(source: VideoSourceCreate) -> VideoSource:
 
 @router.get("", response_model=list[VideoSource])
 async def list_sources() -> list[VideoSource]:
-    """List all video sources."""
+    """List all video sources.
+    列出所有视频源。"""
     return await db.list_sources()
 
 
 @router.get("/by-rtsp", response_model=VideoSource)
 async def get_source_by_rtsp(rtsp_url: str) -> VideoSource:
-    """Get a video source by its RTSP URL."""
+    """Get a video source by its RTSP URL.
+    按 RTSP URL 获取视频源。"""
     source = await db.get_source_by_rtsp(rtsp_url)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -47,7 +50,8 @@ async def get_source_by_rtsp(rtsp_url: str) -> VideoSource:
 
 @router.get("/{source_id}", response_model=VideoSource)
 async def get_source(source_id: str) -> VideoSource:
-    """Get a single video source with its ROIs."""
+    """Get a single video source with its ROIs.
+    获取单个视频源及其 ROI。"""
     source = await db.get_source(source_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -56,7 +60,8 @@ async def get_source(source_id: str) -> VideoSource:
 
 @router.put("/{source_id}", response_model=VideoSource)
 async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource:
-    """Update a video source (name, rtsp_url, and/or ROIs)."""
+    """Update a video source (name, rtsp_url, and/or ROIs).
+    更新视频源（名称、RTSP URL 和/或 ROI）。"""
     source = await db.update_source(source_id, data)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -65,18 +70,20 @@ async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource:
 
 @router.delete("/{source_id}", status_code=204)
 async def delete_source(source_id: str) -> None:
-    """Delete a video source."""
+    """Delete a video source.
+    删除视频源。"""
     deleted = await db.delete_source(source_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Source not found")
 
 
-# ── ROI Import / Export (YAML) ────────────────────────────────────────────────
+# ── ROI Import / Export (YAML) / ROI 导入/导出 (YAML) ──────────────────────────
 
 
 @router.get("/{source_id}/rois/export")
 async def export_rois_yaml(source_id: str) -> Response:
-    """Export ROIs for a video source as a downloadable YAML file."""
+    """Export ROIs for a video source as a downloadable YAML file.
+    将视频源的 ROI 导出为可下载的 YAML 文件。"""
     source = await db.get_source(source_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -94,7 +101,7 @@ async def export_rois_yaml(source_id: str) -> Response:
         "rois": rois_data,
     }
     yaml_content = yaml.dump(payload, allow_unicode=True, sort_keys=False)
-    # Sanitize source name for use in filename
+    # Sanitize source name for use in filename / 清理源名称以用于文件名
     safe_name = re.sub(r'[^\w\-. ]', '_', source.name) or "rois"
     filename = f"{safe_name}_rois.yaml"
     return Response(
@@ -107,15 +114,18 @@ async def export_rois_yaml(source_id: str) -> Response:
 @router.post("/{source_id}/rois/import")
 async def import_rois_yaml(source_id: str, file: UploadFile = File(...)) -> VideoSource:
     """Import ROIs from a YAML file into a video source.
+    从 YAML 文件导入 ROI 到视频源。
 
     Validates that every ``tag`` in the YAML is present in the current
     system ``roi_tag_options``.  Rejects the import if any tag is unknown.
+    验证 YAML 中的每个标签是否存在于当前系统 ``roi_tag_options`` 中，
+    如有未知标签则拒绝导入。
     """
     source = await db.get_source(source_id)
     if source is None:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    # Read and parse YAML
+    # Read and parse YAML / 读取并解析 YAML
     try:
         raw = await file.read()
         data = yaml.safe_load(raw)
@@ -132,7 +142,7 @@ async def import_rois_yaml(source_id: str, file: UploadFile = File(...)) -> Vide
     if not isinstance(rois_raw, list):
         raise HTTPException(status_code=400, detail='"rois" must be a list')
 
-    # Load current tag options from DB settings
+    # Load current tag options from DB settings / 从数据库设置加载当前标签选项
     app_settings = await db.get_all_settings()
     tag_options_str = app_settings.get("roi_tag_options", "[]")
     try:
@@ -144,7 +154,7 @@ async def import_rois_yaml(source_id: str, file: UploadFile = File(...)) -> Vide
     except (json.JSONDecodeError, TypeError):
         valid_tags = set(tag_options_str.split(",")) if tag_options_str else set()
 
-    # Validate each ROI entry
+    # Validate each ROI entry / 验证每个 ROI 条目
     validated_rois: list[dict] = []
     for idx, roi in enumerate(rois_raw):
         if not isinstance(roi, dict):
@@ -190,7 +200,7 @@ async def import_rois_yaml(source_id: str, file: UploadFile = File(...)) -> Vide
             {"type": roi_type, "tag": tag, "points": validated_points}
         )
 
-    # Update source with imported ROIs
+    # Update source with imported ROIs / 使用导入的 ROI 更新视频源
     update_data = VideoSourceUpdate(rois=validated_rois)
     updated_source = await db.update_source(source_id, update_data)
     if updated_source is None:

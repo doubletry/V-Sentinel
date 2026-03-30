@@ -1,4 +1,5 @@
-"""Tests for the core minimal package."""
+"""Tests for the core minimal package.
+测试 core 最小包。"""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,8 @@ from core.base_processor import (
 
 
 class DummyCoreProcessor(BaseVideoProcessor):
-    """Concrete processor for testing the core package."""
+    """Concrete processor for testing the core package.
+    用于测试 core 包的具体处理器。"""
 
     async def process_frame(self, frame, encoded, shape, roi_pixel_points):
         return AnalysisResult(extra={"tested": True})
@@ -78,3 +80,22 @@ class TestCoreBaseVideoProcessor:
         assert proc.status == "running"
         await proc.stop()
         assert proc.status == "stopped"
+
+
+class TestCoreBackendInheritance:
+    """Verify backend.processing.base inherits from core.base_processor.
+    验证 backend.processing.base 继承自 core.base_processor。"""
+
+    def test_backend_inherits_from_core(self):
+        """Backend BaseVideoProcessor should be a subclass of core's.
+        后台 BaseVideoProcessor 应为 core 的子类。"""
+        from backend.processing.base import BaseVideoProcessor as BackendBVP
+        from core.base_processor import BaseVideoProcessor as CoreBVP
+        assert issubclass(BackendBVP, CoreBVP)
+
+    def test_analysis_result_is_same(self):
+        """Backend's AnalysisResult should be the same class as core's.
+        后台的 AnalysisResult 应与 core 的为同一类。"""
+        from backend.processing.base import AnalysisResult as BackendAR
+        from core.base_processor import AnalysisResult as CoreAR
+        assert BackendAR is CoreAR

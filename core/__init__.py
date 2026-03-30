@@ -1,8 +1,15 @@
-"""V-Sentinel Core — minimal standalone package for Processor development.
+"""V-Sentinel Core — single source of truth for video processing logic.
+V-Sentinel Core — 视频处理逻辑的唯一代码来源。
 
-This package provides the ``BaseVideoProcessor`` abstraction and a lightweight
-runner so that custom processors can be developed and tested independently
-of the full V-Sentinel backend.
+This package contains the shared ``BaseVideoProcessor``, ``AnalysisResult``,
+and data classes used by both the standalone core runner and the full
+V-Sentinel backend.  The backend's ``backend.processing.base`` inherits from
+``core.base_processor.BaseVideoProcessor`` and adds WebSocket broadcast /
+agent aggregation integration.  This eliminates code duplication.
+本包包含共享的 ``BaseVideoProcessor``、``AnalysisResult`` 等类，
+被独立运行器和完整 V-Sentinel 后台共同使用。后台的
+``backend.processing.base`` 继承自本包并添加 WebSocket/代理集成，
+从而消除代码重复。
 
 Typical usage::
 

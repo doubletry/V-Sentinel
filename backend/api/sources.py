@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import json
+
+import yaml
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import Response
 
 from backend.db import database as db
 from backend.models.schemas import (
@@ -64,3 +68,128 @@ async def delete_source(source_id: str) -> None:
     deleted = await db.delete_source(source_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Source not found")
+
+
+# ── ROI Import / Export (YAML) ────────────────────────────────────────────────
+
+
+@router.get("/{source_id}/rois/export")
+async def export_rois_yaml(source_id: str) -> Response:
+    """Export ROIs for a video source as a downloadable YAML file."""
+    source = await db.get_source(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    rois_data = [
+        {
+            "type": roi.type,
+            "tag": roi.tag,
+            "points": [{"x": round(p.x, 6), "y": round(p.y, 6)} for p in roi.points],
+        }
+        for roi in source.rois
+    ]
+    payload = {
+        "source_name": source.name,
+        "rois": rois_data,
+    }
+    yaml_content = yaml.dump(payload, allow_unicode=True, sort_keys=False)
+    filename = f"{source.name}_rois.yaml"
+    return Response(
+        content=yaml_content,
+        media_type="application/x-yaml",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{source_id}/rois/import")
+async def import_rois_yaml(source_id: str, file: UploadFile = File(...)) -> VideoSource:
+    """Import ROIs from a YAML file into a video source.
+
+    Validates that every ``tag`` in the YAML is present in the current
+    system ``roi_tag_options``.  Rejects the import if any tag is unknown.
+    """
+    source = await db.get_source(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Read and parse YAML
+    try:
+        raw = await file.read()
+        data = yaml.safe_load(raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML file: {exc}")
+
+    if not isinstance(data, dict) or "rois" not in data:
+        raise HTTPException(
+            status_code=400,
+            detail='YAML must contain a top-level "rois" list',
+        )
+
+    rois_raw = data["rois"]
+    if not isinstance(rois_raw, list):
+        raise HTTPException(status_code=400, detail='"rois" must be a list')
+
+    # Load current tag options from DB settings
+    app_settings = await db.get_all_settings()
+    tag_options_str = app_settings.get("roi_tag_options", "[]")
+    try:
+        parsed = json.loads(tag_options_str)
+        if isinstance(parsed, list):
+            valid_tags = set(str(t).strip() for t in parsed if t)
+        else:
+            valid_tags = set()
+    except (json.JSONDecodeError, TypeError):
+        valid_tags = set(tag_options_str.split(",")) if tag_options_str else set()
+
+    # Validate each ROI entry
+    validated_rois: list[dict] = []
+    for idx, roi in enumerate(rois_raw):
+        if not isinstance(roi, dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"ROI at index {idx} is not an object",
+            )
+        roi_type = roi.get("type", "polygon")
+        if roi_type not in ("polygon", "rectangle"):
+            raise HTTPException(
+                status_code=400,
+                detail=f'ROI at index {idx}: type must be "polygon" or "rectangle"',
+            )
+        tag = str(roi.get("tag", "")).strip()
+        if not tag:
+            raise HTTPException(
+                status_code=400,
+                detail=f"ROI at index {idx}: tag is required",
+            )
+        if tag not in valid_tags:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f'ROI at index {idx}: tag "{tag}" is not in the '
+                    f"system's configured tag options: {sorted(valid_tags)}"
+                ),
+            )
+        points = roi.get("points", [])
+        if not isinstance(points, list) or len(points) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail=f"ROI at index {idx}: must have at least 2 points",
+            )
+        validated_points = []
+        for pidx, p in enumerate(points):
+            if not isinstance(p, dict) or "x" not in p or "y" not in p:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"ROI {idx}, point {pidx}: must have x and y",
+                )
+            validated_points.append({"x": float(p["x"]), "y": float(p["y"])})
+        validated_rois.append(
+            {"type": roi_type, "tag": tag, "points": validated_points}
+        )
+
+    # Update source with imported ROIs
+    update_data = VideoSourceUpdate(rois=validated_rois)
+    updated_source = await db.update_source(source_id, update_data)
+    if updated_source is None:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return updated_source

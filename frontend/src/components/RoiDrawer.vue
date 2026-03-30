@@ -51,6 +51,21 @@
           <el-icon><Check /></el-icon>
           {{ t('roi.saveRois') }}
         </el-button>
+        <el-button size="small" @click="exportRois">
+          <el-icon><Download /></el-icon>
+          {{ t('roi.exportRois') }}
+        </el-button>
+        <el-button size="small" @click="triggerImport">
+          <el-icon><Upload /></el-icon>
+          {{ t('roi.importRois') }}
+        </el-button>
+        <input
+          ref="importInputEl"
+          type="file"
+          accept=".yaml,.yml"
+          style="display: none"
+          @change="handleImportFile"
+        />
         <el-button size="small" @click="emit('close')">
           <el-icon><Close /></el-icon>
           {{ t('roi.exitEdit') }}
@@ -93,6 +108,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { useSourceStore } from '../stores/source.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
+import { sourcesApi } from '../api/index.js'
 
 const props = defineProps({
   source: {
@@ -112,6 +128,7 @@ const { t } = useI18n()
 
 const canvasEl = ref(null)
 const overlayEl = ref(null)
+const importInputEl = ref(null)
 const mode = ref('polygon')
 const saving = ref(false)
 
@@ -580,6 +597,55 @@ async function save() {
     ElMessage.error(err.message || t('roi.saveFailed'))
   } finally {
     saving.value = false
+  }
+}
+
+// ── ROI Export / Import ───────────────────────────────────────────────────
+
+async function exportRois() {
+  try {
+    const blob = await sourcesApi.exportRois(props.source.id)
+    const url = URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${props.source.name || 'rois'}_rois.yaml`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    ElMessage.success(t('roi.exportSuccess'))
+  } catch (err) {
+    ElMessage.error(err.message || t('roi.exportFailed'))
+  }
+}
+
+function triggerImport() {
+  importInputEl.value?.click()
+}
+
+async function handleImportFile(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const result = await sourcesApi.importRois(props.source.id, file)
+    // Reload shapes from the result returned by the server
+    const rois = result?.rois || []
+    shapes.value = rois.map((roi) => ({
+      type: roi.type,
+      points: (roi.points || []).map((point) => clampNorm({ x: point.x, y: point.y })),
+      tag: roi.tag || '',
+    }))
+    selectedIdx.value = null
+    clearDrawingState()
+    render()
+    // Refresh the store to keep data consistent
+    await store.fetchSources()
+    ElMessage.success(t('roi.importSuccess'))
+  } catch (err) {
+    ElMessage.error(err.message || t('roi.importFailed'))
+  } finally {
+    // Reset file input so the same file can be imported again
+    if (importInputEl.value) importInputEl.value.value = ''
   }
 }
 

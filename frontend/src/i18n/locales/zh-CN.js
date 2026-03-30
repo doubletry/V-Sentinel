@@ -82,6 +82,12 @@ export default {
     videoNotReady: '视频未就绪，请稍后再绘制 ROI',
     roisSaved: 'ROI 已保存',
     saveFailed: '保存失败',
+    exportRois: '导出 ROI',
+    importRois: '导入 ROI',
+    exportSuccess: 'ROI 已导出为 YAML 文件',
+    exportFailed: '导出 ROI 失败',
+    importSuccess: 'ROI 导入成功',
+    importFailed: '导入 ROI 失败',
   },
   videoPlayer: {
     connecting: '连接中...',

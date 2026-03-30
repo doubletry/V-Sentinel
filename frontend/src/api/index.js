@@ -29,6 +29,15 @@ export const sourcesApi = {
   create: (data) => api.post('/api/sources', data),
   update: (id, data) => api.put(`/api/sources/${id}`, data),
   delete: (id) => api.delete(`/api/sources/${id}`),
+  exportRois: (id) =>
+    api.get(`/api/sources/${id}/rois/export`, { responseType: 'blob' }),
+  importRois: (id, file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post(`/api/sources/${id}/rois/import`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
 }
 
 // Processor API

@@ -82,6 +82,12 @@ export default {
     videoNotReady: 'Video is not ready yet, please draw ROI later',
     roisSaved: 'ROIs saved',
     saveFailed: 'Save failed',
+    exportRois: 'Export ROIs',
+    importRois: 'Import ROIs',
+    exportSuccess: 'ROIs exported as YAML file',
+    exportFailed: 'Failed to export ROIs',
+    importSuccess: 'ROIs imported successfully',
+    importFailed: 'Failed to import ROIs',
   },
   videoPlayer: {
     connecting: 'Connecting...',

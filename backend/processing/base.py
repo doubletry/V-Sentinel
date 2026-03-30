@@ -12,6 +12,18 @@ from loguru import logger
 
 from backend.models.schemas import AnalysisMessage, ROI
 
+OPTIONS = {
+    "analyzeduration": "10000000",  # 设置analyzeduration选项为10秒
+    "probesize": "5000000",  # 设置probesize选项为5000000字节
+    "rtsp_transport": "udp",  # 设置RTSP传输协议, 可以是"tcp"或"udp"
+    "max_delay": "10",  # 设置最大延迟
+    "stimeout": "1000000",  # 设置超时时间, 单位是微秒
+    # "buffer_size": "设置缓冲区大小, 单位是字节。",
+    # "allowed_media_types": '设置允许的媒体类型, 例如["audio", "video"]',
+    # "muxdelay": "设置最大复用延迟。",
+    # "probesize2": "设置探测大小。",
+}
+
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
@@ -177,13 +189,9 @@ class BaseVideoProcessor(ABC):
         try:
             container = av.open(
                 self.rtsp_url,
-                options={
-                    "rtsp_transport": "tcp",
-                    "stimeout": "5000000",
-                },
+                options=OPTIONS,
             )
             video_stream = container.streams.video[0]
-            video_stream.codec_context.skip_frame = "NONKEY"
 
             loop = asyncio.get_event_loop()
 
@@ -193,10 +201,10 @@ class BaseVideoProcessor(ABC):
                 for av_frame in packet.decode():
                     if self._stop_event.is_set():
                         break
-                    # Convert to numpy BGR
-                    bgr = av_frame.to_ndarray(format="bgr24")
+                    # Convert to numpy RGB
+                    rgb = av_frame.to_ndarray(format="rgb24")
                     # JPEG encode
-                    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    ok, buf = cv2.imencode(".jpg", rgb, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     if not ok:
                         continue
                     encoded = buf.tobytes()
@@ -209,14 +217,14 @@ class BaseVideoProcessor(ABC):
                             pass
                     try:
                         loop.call_soon_threadsafe(
-                            self._frame_queue.put_nowait, (bgr, encoded)
+                            self._frame_queue.put_nowait, (rgb, encoded)
                         )
                     except asyncio.QueueFull:
                         pass
 
         except Exception as exc:
             if not self._stop_event.is_set():
-                logger.error("Frame reader error for {}: {}", self.rtsp_url, exc)
+                logger.exception("Frame reader error for {}: {}", self.rtsp_url, exc)
         finally:
             # Signal end of stream
             try:
@@ -293,7 +301,7 @@ class BaseVideoProcessor(ABC):
             stream.height = frame.shape[0]
             stream.pix_fmt = "yuv420p"
 
-            av_frame = av.VideoFrame.from_ndarray(frame, format="bgr24")
+            av_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
             av_frame = av_frame.reformat(format=stream.pix_fmt)
             for packet in stream.encode(av_frame):
                 container.mux(packet)

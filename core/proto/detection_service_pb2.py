@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # Generated stubs for detection_service.proto
+# 检测服务的生成存根
 from __future__ import annotations
 
-from backend.proto.base_pb2 import (  # noqa: F401
+from core.proto.base_pb2 import (  # noqa: F401
     _SimpleMessage,
     ResponseHeader,
     ImageCacheInfo,

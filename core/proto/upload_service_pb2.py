@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # Generated stubs for upload_service.proto
+# 上传服务的生成存根
 from __future__ import annotations
 
-from backend.proto.base_pb2 import _SimpleMessage, ResponseHeader
+from core.proto.base_pb2 import _SimpleMessage, ResponseHeader
 
 
 class UploadImageRequest(_SimpleMessage):

@@ -1,37 +1,39 @@
 # -*- coding: utf-8 -*-
-# gRPC stub for OpticalCharacterRecognition service
+# gRPC stub for ActionRecognition service
+# 行为识别服务的 gRPC 存根
 from __future__ import annotations
 
 import grpc
 import grpc.aio
 
 
-class OpticalCharacterRecognitionStub:
-    """Async gRPC stub for OpticalCharacterRecognition service."""
+class ActionRecognitionStub:
+    """Async gRPC stub for ActionRecognition service.
+    行为识别服务的异步 gRPC 存根。"""
 
     def __init__(self, channel: grpc.aio.Channel) -> None:
         self.Predict = channel.unary_unary(
-            "/ocr.OpticalCharacterRecognition/Predict",
+            "/action.ActionRecognition/Predict",
             request_serializer=None,
             response_deserializer=None,
         )
         self.LoadModel = channel.unary_unary(
-            "/ocr.OpticalCharacterRecognition/LoadModel",
+            "/action.ActionRecognition/LoadModel",
             request_serializer=None,
             response_deserializer=None,
         )
         self.UnloadModel = channel.unary_unary(
-            "/ocr.OpticalCharacterRecognition/UnloadModel",
+            "/action.ActionRecognition/UnloadModel",
             request_serializer=None,
             response_deserializer=None,
         )
         self.ListModels = channel.unary_unary(
-            "/ocr.OpticalCharacterRecognition/ListModels",
+            "/action.ActionRecognition/ListModels",
             request_serializer=None,
             response_deserializer=None,
         )
         self.HealthCheck = channel.unary_unary(
-            "/ocr.OpticalCharacterRecognition/HealthCheck",
+            "/action.ActionRecognition/HealthCheck",
             request_serializer=None,
             response_deserializer=None,
         )

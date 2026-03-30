@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # Generated stubs for action_service.proto
+# 行为识别服务的生成存根
 from __future__ import annotations
 
-from backend.proto.base_pb2 import _SimpleMessage, ResponseHeader, ImageCacheInfo
+from core.proto.base_pb2 import _SimpleMessage, ResponseHeader, ImageCacheInfo
 
 
 class ActionParams(_SimpleMessage):

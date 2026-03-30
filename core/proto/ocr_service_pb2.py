@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # Generated stubs for ocr_service.proto
+# OCR 服务的生成存根
 from __future__ import annotations
 
-from backend.proto.base_pb2 import _SimpleMessage, ResponseHeader, ImageCacheInfo, Point
+from core.proto.base_pb2 import _SimpleMessage, ResponseHeader, ImageCacheInfo, Point
 
 
 class OCRParams(_SimpleMessage):

@@ -5,8 +5,10 @@ import base64
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+import cv2
 import numpy as np
 from loguru import logger
+from turbojpeg import TurboJPEG
 
 from backend.models.schemas import AnalysisMessage, ROI
 from backend.processing.base import AnalysisResult, BaseVideoProcessor
@@ -15,6 +17,9 @@ if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
     from backend.processing.agent import AnalysisAgent
+
+# Module-level TurboJPEG instance (thread-safe, reusable).
+_jpeg = TurboJPEG()
 
 
 class ExampleProcessor(BaseVideoProcessor):
@@ -105,11 +110,8 @@ class ExampleProcessor(BaseVideoProcessor):
             if x2 <= x1 or y2 <= y1:
                 continue
             crop = frame[y1:y2, x1:x2]
-            import cv2
-            ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if not ok:
-                continue
-            crop_bytes = buf.tobytes()
+            crop_bgr = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
+            crop_bytes = _jpeg.encode(crop_bgr, quality=85)
             crop_shape = (y2 - y1, x2 - x1, 3)
 
             # Upload crop and use cache key for classification
@@ -182,10 +184,9 @@ class ExampleProcessor(BaseVideoProcessor):
     def _encode_thumbnail(
         self, frame: np.ndarray | None, max_width: int = 320
     ) -> str | None:
-        """Encode a frame as a base64 JPEG thumbnail."""
+        """Encode a frame as a base64 JPEG thumbnail using TurboJPEG."""
         if frame is None:
             return None
-        import cv2
 
         h, w = frame.shape[:2]
         if w > max_width:
@@ -193,7 +194,6 @@ class ExampleProcessor(BaseVideoProcessor):
             frame = cv2.resize(
                 frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
             )
-        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
-        if not ok:
-            return None
-        return base64.b64encode(buf.tobytes()).decode()
+        bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        encoded = _jpeg.encode(bgr, quality=60)
+        return base64.b64encode(encoded).decode()

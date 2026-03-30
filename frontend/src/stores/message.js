@@ -17,7 +17,13 @@ export const useMessageStore = defineStore('message', () => {
   function connectWS() {
     if (_ws && _ws.readyState === WebSocket.OPEN) return
 
-    const url = `${config.wsBaseUrl}/ws/messages`
+    // Build WebSocket URL: if wsBaseUrl is empty (relative), derive from current page
+    let wsBase = config.wsBaseUrl
+    if (!wsBase) {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      wsBase = `${proto}//${window.location.host}`
+    }
+    const url = `${wsBase}/ws/messages`
     _ws = new WebSocket(url)
 
     _ws.onopen = () => {

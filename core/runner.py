@@ -112,7 +112,9 @@ def run_processor(
 
         # Graceful shutdown on SIGINT / SIGTERM
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda: asyncio.ensure_future(processor.stop()))
+            loop.add_signal_handler(
+                sig, lambda s=sig: asyncio.ensure_future(processor.stop())
+            )
 
         logger.info(
             "Starting {} for input={}", processor_class.__name__, rtsp_input

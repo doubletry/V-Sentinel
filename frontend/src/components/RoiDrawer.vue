@@ -604,8 +604,9 @@ async function save() {
 
 async function exportRois() {
   try {
-    const blob = await sourcesApi.exportRois(props.source.id)
-    const url = URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob]))
+    const data = await sourcesApi.exportRois(props.source.id)
+    const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/x-yaml' })
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
     a.download = `${props.source.name || 'rois'}_rois.yaml`

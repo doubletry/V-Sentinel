@@ -21,8 +21,13 @@ from loguru import logger
 try:
     from turbojpeg import TurboJPEG
     _jpeg = TurboJPEG()
-except Exception:
+except (ImportError, RuntimeError) as _exc:
     _jpeg = None
+    import warnings
+    warnings.warn(
+        f"TurboJPEG unavailable ({_exc}), falling back to cv2.imencode",
+        stacklevel=1,
+    )
 
 # PyAV RTSP reader options (identical to backend defaults)
 RTSP_OPTIONS = {

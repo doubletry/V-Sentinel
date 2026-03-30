@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import yaml
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -93,7 +94,9 @@ async def export_rois_yaml(source_id: str) -> Response:
         "rois": rois_data,
     }
     yaml_content = yaml.dump(payload, allow_unicode=True, sort_keys=False)
-    filename = f"{source.name}_rois.yaml"
+    # Sanitize source name for use in filename
+    safe_name = re.sub(r'[^\w\-. ]', '_', source.name) or "rois"
+    filename = f"{safe_name}_rois.yaml"
     return Response(
         content=yaml_content,
         media_type="application/x-yaml",

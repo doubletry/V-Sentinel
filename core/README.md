@@ -1,0 +1,71 @@
+# V-Sentinel Core
+
+**Minimal standalone package for independent Processor development.**
+
+The `core` package provides a self-contained `BaseVideoProcessor` and a
+simple runner so you can develop, test, and iterate on a video processor
+without importing or running the full V-Sentinel backend.
+
+Once your processor works in standalone mode, drop it into
+`backend/processing/` and register it in `ProcessorManager` — no code
+changes needed.
+
+## Quick Start
+
+```bash
+# From the V-Sentinel root directory
+pip install ./core            # or:  pip install ./core[grpc]
+
+# Run the example
+python -m core.example_processor --input rtsp://localhost:8554/cam1
+```
+
+## Writing a Custom Processor
+
+```python
+from core.base_processor import BaseVideoProcessor, AnalysisResult
+
+class MyProcessor(BaseVideoProcessor):
+    async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+        # Your AI logic here — call gRPC, run OpenCV, etc.
+        annotated = self.draw_on_frame(frame, AnalysisResult())
+        return AnalysisResult(annotated_frame=annotated)
+```
+
+## Running Standalone
+
+```python
+from core.runner import run_processor
+from my_processor import MyProcessor
+
+run_processor(
+    MyProcessor,
+    rtsp_input="rtsp://localhost:8554/cam1",
+    mediamtx_rtsp_addr="rtsp://localhost:8554",
+)
+```
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| numpy | Frame arrays |
+| opencv-python-headless | Drawing, color conversion |
+| PyTurboJPEG | Fast JPEG encoding |
+| av (PyAV) | RTSP reading/writing |
+| loguru | Logging |
+| grpcio (optional) | V-Engine gRPC calls |
+
+## Architecture
+
+```
+RTSP Input ──► Frame Reader Thread ──► asyncio.Queue ──► process_frame()
+                                                              │
+                                                    annotated_frame
+                                                              │
+                                                    Push Thread ──► MediaMTX RTSP Output
+```
+
+## License
+
+MIT — same as the main V-Sentinel project.

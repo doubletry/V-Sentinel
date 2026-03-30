@@ -162,6 +162,7 @@ export default {
     actionPort: 'Action Port',
     ocrPort: 'OCR Port',
     uploadPort: 'Upload Port',
+    serviceToggleTip: 'Turn off the switch for services that are not deployed. Disabled services will not attempt to connect.',
     mediamtx: 'MediaMTX',
     rtspAddress: 'RTSP Address',
     webrtcAddress: 'WebRTC Address',

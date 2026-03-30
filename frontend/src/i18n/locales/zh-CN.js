@@ -162,6 +162,7 @@ export default {
     actionPort: '行为端口',
     ocrPort: 'OCR 端口',
     uploadPort: '上传端口',
+    serviceToggleTip: '未部署的服务请关闭开关，关闭后不会尝试连接该服务。',
     mediamtx: 'MediaMTX',
     rtspAddress: 'RTSP 地址',
     webrtcAddress: 'WebRTC 地址',

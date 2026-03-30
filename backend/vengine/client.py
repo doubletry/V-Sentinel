@@ -27,24 +27,39 @@ if TYPE_CHECKING:
 
 class AsyncVEngineClient:
     """Async gRPC client for all V-Engine services.
+    V-Engine 全服务异步 gRPC 客户端。
 
     All channels are shared across all camera processors.
     HTTP/2 multiplexing handles concurrent requests automatically.
+    所有通道在所有摄像头处理器间共享。HTTP/2 多路复用自动处理并发请求。
 
     Service addresses are read from the DB-backed ``app_settings`` table.
     The ``reconnect_from_settings`` method allows hot-reloading addresses.
+    服务地址从数据库 ``app_settings`` 表中读取。
+    ``reconnect_from_settings`` 方法允许热重载地址。
+
+    Individual services can be disabled via ``<service>_enabled`` settings.
+    When a service is disabled, no channel is created and calling its methods
+    returns an empty result gracefully.
+    可通过 ``<service>_enabled`` 设置禁用单个服务。禁用后不创建通道，
+    调用其方法时会优雅地返回空结果。
     """
+
+    # Names of all V-Engine services / 所有 V-Engine 服务名称
+    SERVICE_NAMES = ("detection", "classification", "action", "ocr", "upload")
 
     def __init__(self, config: "Settings") -> None:
         self._config = config
         self._channels: dict[str, grpc.aio.Channel] = {}
         self._stubs: dict[str, object] = {}
+        self._enabled: dict[str, bool] = {s: True for s in self.SERVICE_NAMES}
 
-    # ── Address resolution ────────────────────────────────────────────────────
+    # ── Address resolution / 地址解析 ────────────────────────────────────────
 
     @staticmethod
     def _build_addresses(app_settings: dict[str, str]) -> dict[str, str]:
-        """Build ``{service: host:port}`` from DB settings dict."""
+        """Build ``{service: host:port}`` from DB settings dict.
+        从数据库设置字典构建 ``{服务名: 主机:端口}`` 映射。"""
         host = app_settings.get("vengine_host", "localhost")
         return {
             "detection": f"{host}:{app_settings.get('detection_port', '50051')}",
@@ -54,55 +69,78 @@ class AsyncVEngineClient:
             "upload": f"{host}:{app_settings.get('upload_port', '50050')}",
         }
 
-    # ── Connect / reconnect ───────────────────────────────────────────────────
+    @staticmethod
+    def _parse_enabled(app_settings: dict[str, str]) -> dict[str, bool]:
+        """Parse ``<service>_enabled`` flags from DB settings.
+        从数据库设置解析各服务启用/禁用标志。"""
+        def _is_true(val: str) -> bool:
+            return str(val).strip().lower() in ("true", "1", "yes")
+
+        return {
+            "detection": _is_true(app_settings.get("detection_enabled", "true")),
+            "classification": _is_true(app_settings.get("classification_enabled", "true")),
+            "action": _is_true(app_settings.get("action_enabled", "true")),
+            "ocr": _is_true(app_settings.get("ocr_enabled", "true")),
+            "upload": _is_true(app_settings.get("upload_enabled", "true")),
+        }
+
+    def is_service_enabled(self, service: str) -> bool:
+        """Check whether a specific V-Engine service is enabled.
+        检查指定的 V-Engine 服务是否已启用。"""
+        return self._enabled.get(service, False)
+
+    # ── Connect / reconnect / 连接与重连 ─────────────────────────────────────
 
     async def connect(self, app_settings: dict[str, str] | None = None) -> None:
-        """Create grpc.aio channels and stubs for all services.
+        """Create grpc.aio channels and stubs for enabled services only.
+        仅为已启用的服务创建 gRPC 通道和存根。
 
         If *app_settings* is ``None``, defaults from ``config.DEFAULT_APP_SETTINGS``
         are used (typically during first startup before DB is ready).
+        若 *app_settings* 为 ``None``，则使用默认设置（通常在数据库就绪前首次启动时）。
         """
         from backend.config import DEFAULT_APP_SETTINGS
 
         if app_settings is None:
             app_settings = DEFAULT_APP_SETTINGS
 
+        self._enabled = self._parse_enabled(app_settings)
         addrs = self._build_addresses(app_settings)
         self._create_channels_and_stubs(addrs)
-        logger.info("AsyncVEngineClient connected to all V-Engine services")
+
+        enabled_list = [s for s, e in self._enabled.items() if e]
+        disabled_list = [s for s, e in self._enabled.items() if not e]
+        logger.info(
+            "AsyncVEngineClient connected — enabled: {}, disabled: {}",
+            enabled_list or "(none)",
+            disabled_list or "(none)",
+        )
 
     async def reconnect_from_settings(self, app_settings: dict[str, str]) -> None:
-        """Close existing channels and reconnect with new addresses."""
+        """Close existing channels and reconnect with new addresses/flags.
+        关闭现有通道并使用新地址/标志重新连接。"""
         await self.close()
         await self.connect(app_settings)
         logger.info("AsyncVEngineClient reconnected with updated settings")
 
     def _create_channels_and_stubs(self, addrs: dict[str, str]) -> None:
-        self._channels["detection"] = grpc.aio.insecure_channel(addrs["detection"])
-        self._channels["classification"] = grpc.aio.insecure_channel(addrs["classification"])
-        self._channels["action"] = grpc.aio.insecure_channel(addrs["action"])
-        self._channels["ocr"] = grpc.aio.insecure_channel(addrs["ocr"])
-        self._channels["upload"] = grpc.aio.insecure_channel(addrs["upload"])
-
-        self._stubs["detection"] = detection_service_pb2_grpc.ObjectDetectionStub(
-            self._channels["detection"]
-        )
-        self._stubs[
-            "classification"
-        ] = classification_service_pb2_grpc.ImageClassificationStub(
-            self._channels["classification"]
-        )
-        self._stubs["action"] = action_service_pb2_grpc.ActionRecognitionStub(
-            self._channels["action"]
-        )
-        self._stubs[
-            "ocr"
-        ] = ocr_service_pb2_grpc.OpticalCharacterRecognitionStub(
-            self._channels["ocr"]
-        )
-        self._stubs["upload"] = upload_service_pb2_grpc.UploadStub(
-            self._channels["upload"]
-        )
+        """Create gRPC channels and stubs for enabled services only.
+        仅为已启用的服务创建 gRPC 通道和存根。"""
+        # Mapping: service name → (stub class, channel address)
+        stub_map = {
+            "detection": detection_service_pb2_grpc.ObjectDetectionStub,
+            "classification": classification_service_pb2_grpc.ImageClassificationStub,
+            "action": action_service_pb2_grpc.ActionRecognitionStub,
+            "ocr": ocr_service_pb2_grpc.OpticalCharacterRecognitionStub,
+            "upload": upload_service_pb2_grpc.UploadStub,
+        }
+        for service, stub_cls in stub_map.items():
+            if self._enabled.get(service, False):
+                channel = grpc.aio.insecure_channel(addrs[service])
+                self._channels[service] = channel
+                self._stubs[service] = stub_cls(channel)
+            else:
+                logger.debug("Skipping disabled service: {}", service)
 
     async def close(self) -> None:
         """Close all gRPC channels."""
@@ -160,19 +198,23 @@ class AsyncVEngineClient:
             kwargs["key"] = image_key
         return base_pb2.Image(**kwargs)
 
-    # ── Upload + cache key ────────────────────────────────────────────────────
+    # ── Upload + cache key / 上传与缓存键 ────────────────────────────────────
 
     async def upload_and_get_key(self, image_bytes: bytes, filename: str = "frame.jpg") -> str | None:
         """Upload an image to the cache and return its key.
+        上传图像到缓存并返回其键。
 
-        Returns ``None`` on failure so callers can fall back to raw bytes.
+        Returns ``None`` if upload service is disabled or on failure.
+        若上传服务被禁用或失败，则返回 ``None``。
         """
+        if not self._enabled.get("upload", False):
+            return None
         results = await self.upload_image(image_bytes, filename)
         if results:
             return results[0].get("key")
         return None
 
-    # ── Detection ─────────────────────────────────────────────────────────────
+    # ── Detection / 检测 ──────────────────────────────────────────────────────
 
     async def detect(
         self,
@@ -185,11 +227,16 @@ class AsyncVEngineClient:
         image_bytes: bytes | None = None,
         image_key: str | None = None,
     ) -> list[dict]:
-        """Async object detection.
+        """Async object detection. 异步目标检测。
 
         Pass either *image_bytes* (raw JPEG) or *image_key* (cache key from upload).
+        传入 *image_bytes*（原始 JPEG）或 *image_key*（上传后的缓存键）。
         Returns list of {x_min, y_min, x_max, y_max, confidence, class_id, label}.
+        Returns empty list when service is disabled.
+        服务禁用时返回空列表。
         """
+        if not self._enabled.get("detection", False):
+            return []
         try:
             image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
             params = detection_service_pb2.DetectionParams(
@@ -229,7 +276,7 @@ class AsyncVEngineClient:
             logger.error("Detection unexpected error: {}", exc)
             return []
 
-    # ── Classification ────────────────────────────────────────────────────────
+    # ── Classification / 分类 ────────────────────────────────────────────────
 
     async def classify(
         self,
@@ -240,11 +287,14 @@ class AsyncVEngineClient:
         image_bytes: bytes | None = None,
         image_key: str | None = None,
     ) -> list[dict]:
-        """Async image classification.
+        """Async image classification. 异步图像分类。
 
-        Pass either *image_bytes* or *image_key*.
         Returns list of {label, confidence, class_id}.
+        Returns empty list when service is disabled.
+        服务禁用时返回空列表。
         """
+        if not self._enabled.get("classification", False):
+            return []
         try:
             image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
             params = classification_service_pb2.ClassificationParams(
@@ -279,7 +329,7 @@ class AsyncVEngineClient:
             logger.error("Classification unexpected error: {}", exc)
             return []
 
-    # ── OCR ───────────────────────────────────────────────────────────────────
+    # ── OCR / 文字识别 ──────────────────────────────────────────────────────
 
     async def ocr(
         self,
@@ -291,11 +341,14 @@ class AsyncVEngineClient:
         image_bytes: bytes | None = None,
         image_key: str | None = None,
     ) -> list[dict]:
-        """Async OCR.
+        """Async OCR. 异步文字识别。
 
-        Pass either *image_bytes* or *image_key*.
         Returns list of {text, confidence, points}.
+        Returns empty list when service is disabled.
+        服务禁用时返回空列表。
         """
+        if not self._enabled.get("ocr", False):
+            return []
         try:
             image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
             params = ocr_service_pb2.OCRParams(
@@ -333,7 +386,7 @@ class AsyncVEngineClient:
             logger.error("OCR unexpected error: {}", exc)
             return []
 
-    # ── Action Recognition ────────────────────────────────────────────────────
+    # ── Action Recognition / 行为识别 ────────────────────────────────────────
 
     async def recognize_action(
         self,
@@ -342,10 +395,14 @@ class AsyncVEngineClient:
         model_name: str,
         roi_points: list[dict] | None = None,
     ) -> list[dict]:
-        """Async action recognition.
+        """Async action recognition. 异步行为识别。
 
         Returns list of {label, confidence, class_id}.
+        Returns empty list when service is disabled.
+        服务禁用时返回空列表。
         """
+        if not self._enabled.get("action", False):
+            return []
         try:
             images = [
                 base_pb2.Image(
@@ -391,13 +448,17 @@ class AsyncVEngineClient:
             logger.error("Action unexpected error: {}", exc)
             return []
 
-    # ── Upload ────────────────────────────────────────────────────────────────
+    # ── Upload / 上传 ────────────────────────────────────────────────────────
 
     async def upload_image(self, image_bytes: bytes, filename: str = "image.jpg") -> list[dict]:
-        """Async image upload.
+        """Async image upload. 异步图像上传。
 
         Returns list of {key, hit, id, size}.
+        Returns empty list when service is disabled.
+        服务禁用时返回空列表。
         """
+        if not self._enabled.get("upload", False):
+            return []
         try:
             request = upload_service_pb2.UploadImageRequest(
                 request_header=self._make_header(),
@@ -425,10 +486,14 @@ class AsyncVEngineClient:
             return []
 
     async def upload_video(self, video_bytes: bytes, filename: str = "video.mp4") -> list[dict]:
-        """Async video upload.
+        """Async video upload. 异步视频上传。
 
         Returns list of {key, hit, id, size}.
+        Returns empty list when service is disabled.
+        服务禁用时返回空列表。
         """
+        if not self._enabled.get("upload", False):
+            return []
         try:
             request = upload_service_pb2.UploadVideoRequest(
                 request_header=self._make_header(),

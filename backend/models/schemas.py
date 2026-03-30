@@ -65,7 +65,8 @@ class AnalysisMessage(BaseModel):
 
 
 class AppSettingsUpdate(BaseModel):
-    """Partial update for app settings (all fields optional)."""
+    """Partial update for app settings (all fields optional).
+    部分更新应用设置（所有字段可选）。"""
 
     ui_language: str | None = None
     site_title: str | None = None
@@ -79,6 +80,13 @@ class AppSettingsUpdate(BaseModel):
     action_port: str | None = None
     ocr_port: str | None = None
     upload_port: str | None = None
+    # Per-service enable/disable switches / 各服务启用/禁用开关
+    detection_enabled: str | None = None
+    classification_enabled: str | None = None
+    action_enabled: str | None = None
+    ocr_enabled: str | None = None
+    upload_enabled: str | None = None
+
     mediamtx_rtsp_addr: str | None = None
     mediamtx_webrtc_addr: str | None = None
     max_pull_workers: str | None = None

@@ -32,11 +32,19 @@ DEFAULT_APP_SETTINGS: dict[str, str] = {
     # Shared V-Engine host
     "vengine_host": "localhost",
     # Per-service ports
+    # 各服务端口
     "detection_port": "50051",
     "classification_port": "50052",
     "action_port": "50053",
     "ocr_port": "50054",
     "upload_port": "50050",
+    # Per-service enable/disable switches (JSON booleans as strings)
+    # 各服务启用/禁用开关（字符串形式的布尔值）
+    "detection_enabled": "true",
+    "classification_enabled": "true",
+    "action_enabled": "true",
+    "ocr_enabled": "true",
+    "upload_enabled": "true",
     # MediaMTX
     "mediamtx_rtsp_addr": "rtsp://localhost:8554",
     "mediamtx_webrtc_addr": "http://localhost:8889",

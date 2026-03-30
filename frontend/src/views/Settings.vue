@@ -125,20 +125,36 @@
             <el-input v-model="form.vengine_host" placeholder="localhost" />
           </el-form-item>
           <el-form-item :label="t('settings.detectionPort')">
-            <el-input v-model="form.detection_port" placeholder="50051" />
+            <div class="port-switch-row">
+              <el-input v-model="form.detection_port" placeholder="50051" :disabled="form.detection_enabled !== 'true'" />
+              <el-switch v-model="form.detection_enabled" active-value="true" inactive-value="false" />
+            </div>
           </el-form-item>
           <el-form-item :label="t('settings.classificationPort')">
-            <el-input v-model="form.classification_port" placeholder="50052" />
+            <div class="port-switch-row">
+              <el-input v-model="form.classification_port" placeholder="50052" :disabled="form.classification_enabled !== 'true'" />
+              <el-switch v-model="form.classification_enabled" active-value="true" inactive-value="false" />
+            </div>
           </el-form-item>
           <el-form-item :label="t('settings.actionPort')">
-            <el-input v-model="form.action_port" placeholder="50053" />
+            <div class="port-switch-row">
+              <el-input v-model="form.action_port" placeholder="50053" :disabled="form.action_enabled !== 'true'" />
+              <el-switch v-model="form.action_enabled" active-value="true" inactive-value="false" />
+            </div>
           </el-form-item>
           <el-form-item :label="t('settings.ocrPort')">
-            <el-input v-model="form.ocr_port" placeholder="50054" />
+            <div class="port-switch-row">
+              <el-input v-model="form.ocr_port" placeholder="50054" :disabled="form.ocr_enabled !== 'true'" />
+              <el-switch v-model="form.ocr_enabled" active-value="true" inactive-value="false" />
+            </div>
           </el-form-item>
           <el-form-item :label="t('settings.uploadPort')">
-            <el-input v-model="form.upload_port" placeholder="50050" />
+            <div class="port-switch-row">
+              <el-input v-model="form.upload_port" placeholder="50050" :disabled="form.upload_enabled !== 'true'" />
+              <el-switch v-model="form.upload_enabled" active-value="true" inactive-value="false" />
+            </div>
           </el-form-item>
+          <p class="service-tip">{{ t('settings.serviceToggleTip') }}</p>
         </section>
 
         <section class="settings-section">
@@ -205,6 +221,11 @@ const form = ref({
   action_port: '',
   ocr_port: '',
   upload_port: '',
+  detection_enabled: 'true',
+  classification_enabled: 'true',
+  action_enabled: 'true',
+  ocr_enabled: 'true',
+  upload_enabled: 'true',
   mediamtx_rtsp_addr: '',
   mediamtx_webrtc_addr: '',
   max_pull_workers: '',
@@ -452,6 +473,17 @@ onMounted(async () => {
   color: #8f9fbe;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.port-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.port-switch-row .el-input {
+  flex: 1;
 }
 
 .settings-actions {

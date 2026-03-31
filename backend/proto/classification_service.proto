@@ -4,33 +4,46 @@ package classification;
 
 import "base.proto";
 
+
+// Image Classification Service.
 service ImageClassification {
+  // Run classification on one or more images.
   rpc Predict(ClassificationRequest) returns (ClassificationResponse);
+  // Load a classification model onto a device.
   rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  // Unload a classification model from a device.
   rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  // List loaded classification models.
   rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  // Health check.
   rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
 }
 
+// Parameters specific to image classification inference.
 message ClassificationParams {
   base.InferenceParams base = 1;
 }
 
+// Per-image classification result.
 message ClassificationResult {
   string label = 1;
   float confidence = 2;
-  int64 image_id = 3;
+  int32 image_id = 3;
   base.ImageCacheInfo cache_info = 4;
-  int32 class_id = 5;
+  int32 class_id = 5;             // Predicted class index
 }
 
+// Request for image classification inference.
 message ClassificationRequest {
   base.RequestHeader request_header = 1;
   repeated base.Image images = 2;
   ClassificationParams params = 3;
 }
 
+// Response containing classification results.
 message ClassificationResponse {
   base.ResponseHeader response_header = 1;
   repeated ClassificationResult results = 2;
+  string model_name = 3;
+  string model_version = 4;
 }

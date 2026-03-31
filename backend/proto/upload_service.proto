@@ -4,32 +4,30 @@ package upload;
 
 import "base.proto";
 
+// Image and Video Upload Service.
 service Upload {
+  // Upload one or more images for caching.
   rpc UploadImage(UploadImageRequest) returns (UploadResponse);
+  // Upload one or more videos for frame extraction and caching.
   rpc UploadVideo(UploadVideoRequest) returns (UploadResponse);
+  // Health check.
   rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
 }
 
+// Request to upload images.
 message UploadImageRequest {
   base.RequestHeader request_header = 1;
-  bytes data = 2;
-  string filename = 3;
+  repeated base.Image images = 2;
 }
 
+// Request to upload videos.
 message UploadVideoRequest {
   base.RequestHeader request_header = 1;
-  bytes data = 2;
-  string filename = 3;
+  repeated base.Video videos = 2;
 }
 
-message UploadResult {
-  string key = 1;
-  bool hit = 2;
-  string id = 3;
-  int64 size = 4;
-}
-
+// Response containing cache metadata for uploaded items.
 message UploadResponse {
   base.ResponseHeader response_header = 1;
-  repeated UploadResult results = 2;
+  repeated base.ImageCacheInfo cache_infos = 2;
 }

@@ -4,40 +4,53 @@ package ocr;
 
 import "base.proto";
 
+// Optical Character Recognition Service.
 service OpticalCharacterRecognition {
+  // Run OCR on one or more images.
   rpc Predict(OCRRequest) returns (OCRResponse);
+  // Load an OCR model onto a device.
   rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  // Unload an OCR model from a device.
   rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  // List loaded OCR models.
   rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  // Health check.
   rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
 }
 
+// Parameters specific to OCR inference.
 message OCRParams {
   base.InferenceParams base = 1;
-  float confidence_threshold = 2;
-  string language_hint = 3;
+  double confidence_threshold = 2; // Minimum OCR text confidence
+  string language_hint = 3;        // Optional language hint for the OCR engine
 }
 
+// A single OCR text block with polygon boundary.
 message TextBlock {
-  repeated base.Point points = 1;
-  string text = 2;
-  float confidence = 3;
-  string language = 4;
+  repeated base.Point points = 1;  // Polygon vertices of the text region
+  string text = 2;                 // Recognized text
+  float confidence = 3;            // Recognition confidence
+  string language = 4;             // Detected language
 }
 
+// Per-image OCR results.
 message OCRResults {
   repeated TextBlock blocks = 1;
-  int64 image_id = 2;
+  int32 image_id = 2;
   base.ImageCacheInfo cache_info = 3;
 }
 
+// Request for OCR inference.
 message OCRRequest {
   base.RequestHeader request_header = 1;
   repeated base.Image images = 2;
   OCRParams params = 3;
 }
 
+// Response containing OCR results.
 message OCRResponse {
   base.ResponseHeader response_header = 1;
   repeated OCRResults results = 2;
+  string model_name = 3;
+  string model_version = 4;
 }

@@ -112,8 +112,8 @@ class ExampleProcessor(BaseVideoProcessor):
         )
         detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)
 
-        # 2. Batch classify detected person ROIs in one request
-        # 2. 在一次请求中批量分类检测到的 person ROI
+        # 2. Batch classify detected person detection ROIs in one request
+        # 2. 在一次请求中批量分类检测到的 person 检测 ROI
         classifications: list[dict] = []
         h, w = shape[:2]
         person_detections: list[dict] = []

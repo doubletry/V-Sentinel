@@ -214,11 +214,12 @@ See [`core/README.md`](core/README.md) for full details.
 
 ## Proto Generation
 
-The repository includes pre-generated stub files in `backend/proto/`. To regenerate from source `.proto` files:
+The `.proto` sources live in `backend/proto/` and the generated Python stubs
+(`*_pb2.py`, `*_pb2_grpc.py`) are written to the canonical `core/proto/`
+package. To regenerate from the latest proto files:
 
 ```bash
-cd backend/proto
-./generate.sh
+bash backend/proto/generate.sh
 ```
 
 ---
@@ -236,8 +237,16 @@ from datetime import datetime, timezone
 class MyProcessor(BaseVideoProcessor):
     async def process_frame(self, frame, encoded, shape, roi_pixel_points):
         detections, ocr = await asyncio.gather(
-            self.vengine.detect(encoded, shape, "yolov8n"),
-            self.vengine.ocr(encoded, shape, "paddleocr"),
+            self.vengine.detect(
+                shape=shape,
+                model_name="yolov8n",
+                image_bytes=encoded,
+            ),
+            self.vengine.ocr(
+                shape=shape,
+                model_name="paddleocr",
+                image_bytes=encoded,
+            ),
         )
         messages = []
         if detections:

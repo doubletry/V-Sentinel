@@ -27,7 +27,8 @@ if _version_not_supported:
 
 
 class OpticalCharacterRecognitionStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """Optical Character Recognition Service.
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -63,34 +64,40 @@ class OpticalCharacterRecognitionStub(object):
 
 
 class OpticalCharacterRecognitionServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """Optical Character Recognition Service.
+    """
 
     def Predict(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Run OCR on one or more images.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def LoadModel(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Load an OCR model onto a device.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def UnloadModel(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Unload an OCR model from a device.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def ListModels(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """List loaded OCR models.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def HealthCheck(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Health check.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -132,7 +139,8 @@ def add_OpticalCharacterRecognitionServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class OpticalCharacterRecognition(object):
-    """Missing associated documentation comment in .proto file."""
+    """Optical Character Recognition Service.
+    """
 
     @staticmethod
     def Predict(request,

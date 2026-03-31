@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 from core.proto import base_pb2 as base__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14upload_service.proto\x12\x06upload\x1a\nbase.proto\"a\n\x12UploadImageRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\x10\n\x08\x66ilename\x18\x03 \x01(\t\"a\n\x12UploadVideoRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x0c\n\x04\x64\x61ta\x18\x02 \x01(\x0c\x12\x10\n\x08\x66ilename\x18\x03 \x01(\t\"B\n\x0cUploadResult\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x0b\n\x03hit\x18\x02 \x01(\x08\x12\n\n\x02id\x18\x03 \x01(\t\x12\x0c\n\x04size\x18\x04 \x01(\x03\"f\n\x0eUploadResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\x12%\n\x07results\x18\x02 \x03(\x0b\x32\x14.upload.UploadResult2\xd2\x01\n\x06Upload\x12\x41\n\x0bUploadImage\x12\x1a.upload.UploadImageRequest\x1a\x16.upload.UploadResponse\x12\x41\n\x0bUploadVideo\x12\x1a.upload.UploadVideoRequest\x1a\x16.upload.UploadResponse\x12\x42\n\x0bHealthCheck\x12\x18.base.HealthCheckRequest\x1a\x19.base.HealthCheckResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14upload_service.proto\x12\x06upload\x1a\nbase.proto\"^\n\x12UploadImageRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x1b\n\x06images\x18\x02 \x03(\x0b\x32\x0b.base.Image\"^\n\x12UploadVideoRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x1b\n\x06videos\x18\x02 \x03(\x0b\x32\x0b.base.Video\"j\n\x0eUploadResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\x12)\n\x0b\x63\x61\x63he_infos\x18\x02 \x03(\x0b\x32\x14.base.ImageCacheInfo2\xd2\x01\n\x06Upload\x12\x41\n\x0bUploadImage\x12\x1a.upload.UploadImageRequest\x1a\x16.upload.UploadResponse\x12\x41\n\x0bUploadVideo\x12\x1a.upload.UploadVideoRequest\x1a\x16.upload.UploadResponse\x12\x42\n\x0bHealthCheck\x12\x18.base.HealthCheckRequest\x1a\x19.base.HealthCheckResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,13 +33,11 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'upload_service_pb2', _globa
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_UPLOADIMAGEREQUEST']._serialized_start=44
-  _globals['_UPLOADIMAGEREQUEST']._serialized_end=141
-  _globals['_UPLOADVIDEOREQUEST']._serialized_start=143
-  _globals['_UPLOADVIDEOREQUEST']._serialized_end=240
-  _globals['_UPLOADRESULT']._serialized_start=242
-  _globals['_UPLOADRESULT']._serialized_end=308
-  _globals['_UPLOADRESPONSE']._serialized_start=310
-  _globals['_UPLOADRESPONSE']._serialized_end=412
-  _globals['_UPLOAD']._serialized_start=415
-  _globals['_UPLOAD']._serialized_end=625
+  _globals['_UPLOADIMAGEREQUEST']._serialized_end=138
+  _globals['_UPLOADVIDEOREQUEST']._serialized_start=140
+  _globals['_UPLOADVIDEOREQUEST']._serialized_end=234
+  _globals['_UPLOADRESPONSE']._serialized_start=236
+  _globals['_UPLOADRESPONSE']._serialized_end=342
+  _globals['_UPLOAD']._serialized_start=345
+  _globals['_UPLOAD']._serialized_end=555
 # @@protoc_insertion_point(module_scope)

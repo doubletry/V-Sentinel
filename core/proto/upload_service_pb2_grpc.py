@@ -27,7 +27,8 @@ if _version_not_supported:
 
 
 class UploadStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """Image and Video Upload Service.
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -53,22 +54,26 @@ class UploadStub(object):
 
 
 class UploadServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """Image and Video Upload Service.
+    """
 
     def UploadImage(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Upload one or more images for caching.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def UploadVideo(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Upload one or more videos for frame extraction and caching.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def HealthCheck(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Health check.
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -100,7 +105,8 @@ def add_UploadServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class Upload(object):
-    """Missing associated documentation comment in .proto file."""
+    """Image and Video Upload Service.
+    """
 
     @staticmethod
     def UploadImage(request,

@@ -174,8 +174,8 @@ class TestCoreVEngineClient:
         client = AsyncVEngineClient()
         poly = client._make_roi_polygon([{"x": 10, "y": 20}, {"x": 30, "y": 40}])
         assert len(poly.points) == 2
-        assert poly.points[0].x == 10.0
-        assert poly.points[1].y == 40.0
+        assert poly.points[0].x == 10
+        assert poly.points[1].y == 40
 
     def test_make_image_from_bytes(self):
         """_make_image with image_bytes should set data field.

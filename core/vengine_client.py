@@ -188,7 +188,7 @@ class AsyncVEngineClient:
     ) -> base_pb2.Polygon:
         """Convert ROI points [{x, y}, ...] to Polygon (pixel coords).
         将 ROI 点 [{x, y}, ...] 转换为 Polygon（像素坐标）。"""
-        points = [base_pb2.Point(x=float(p["x"]), y=float(p["y"])) for p in roi_points]
+        points = [base_pb2.Point(x=int(p["x"]), y=int(p["y"])) for p in roi_points]
         return base_pb2.Polygon(points=points)
 
     def _make_image(
@@ -232,6 +232,12 @@ class AsyncVEngineClient:
 
         Returns ``None`` if upload service is disabled or on failure.
         若上传服务被禁用或失败，则返回 ``None``。
+
+        The latest V-Engine proto sends uploads as ``repeated base.Image``
+        without a filename field.  ``filename`` is accepted only for backward
+        compatibility and is ignored by the RPC payload.
+        最新版 V-Engine proto 使用 ``repeated base.Image`` 上传，不再包含
+        文件名字段。这里保留 ``filename`` 参数仅用于向后兼容，RPC 负载中不会使用。
         """
         if not self._enabled.get("upload", False):
             return None
@@ -443,7 +449,7 @@ class AsyncVEngineClient:
                 for img in images:
                     img.region_of_interest = roi_polygon
 
-            sequence = base_pb2.ImageSequence(images=images, sequence_id=0)
+            sequence = base_pb2.ImageSequence(images=images, id=0)
             params = action_service_pb2.ActionParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
@@ -482,19 +488,30 @@ class AsyncVEngineClient:
         Returns list of {key, hit, id, size}.
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
+
+        The latest upload proto accepts ``repeated base.Image`` and no longer
+        includes a filename field.  ``filename`` remains in the Python API for
+        backward compatibility but is not transmitted.
+        最新上传 proto 接收 ``repeated base.Image``，不再包含文件名字段。
+        Python API 中保留 ``filename`` 仅为了向后兼容，但不会实际发送。
         """
         if not self._enabled.get("upload", False):
             return []
         try:
             request = upload_service_pb2.UploadImageRequest(
                 request_header=self._make_header(),
-                data=image_bytes,
-                filename=filename,
+                images=[
+                    base_pb2.Image(
+                        data=image_bytes,
+                        id=0,
+                        enable_cache=True,
+                    )
+                ],
             )
             response = await self._stubs["upload"].UploadImage(request)
             results: list[dict] = []
             if response.response_header.status_code == base_pb2.StatusCode.STATUS_OK:
-                for res in response.results:
+                for res in response.cache_infos:
                     results.append(
                         {
                             "key": res.key,
@@ -517,19 +534,29 @@ class AsyncVEngineClient:
         Returns list of {key, hit, id, size}.
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
+
+        The latest upload proto accepts ``repeated base.Video`` and no longer
+        includes a filename field.  ``filename`` remains in the Python API for
+        backward compatibility but is not transmitted.
+        最新上传 proto 接收 ``repeated base.Video``，不再包含文件名字段。
+        Python API 中保留 ``filename`` 仅为了向后兼容，但不会实际发送。
         """
         if not self._enabled.get("upload", False):
             return []
         try:
             request = upload_service_pb2.UploadVideoRequest(
                 request_header=self._make_header(),
-                data=video_bytes,
-                filename=filename,
+                videos=[
+                    base_pb2.Video(
+                        data=video_bytes,
+                        id=0,
+                    )
+                ],
             )
             response = await self._stubs["upload"].UploadVideo(request)
             results: list[dict] = []
             if response.response_header.status_code == base_pb2.StatusCode.STATUS_OK:
-                for res in response.results:
+                for res in response.cache_infos:
                     results.append(
                         {
                             "key": res.key,
@@ -559,7 +586,8 @@ class AsyncVEngineClient:
         """Load a model on the specified V-Engine service.
         在指定的 V-Engine 服务上加载模型。
 
-        Returns {name, version, device_id, is_default, status}.
+        Returns a summary containing request echo fields and response status.
+        返回包含请求回显字段和响应状态的摘要。
         """
         try:
             stub = self._stubs.get(service)
@@ -570,16 +598,19 @@ class AsyncVEngineClient:
                 model_name=model_name,
                 model_version=model_version,
                 device_id=device_id,
-                set_default=set_default,
+                set_as_default=set_default,
             )
             response = await stub.LoadModel(request)
-            mi = response.model_info
             return {
-                "name": mi.name,
-                "version": mi.version,
-                "device_id": mi.device_id,
-                "is_default": mi.is_default,
-                "status": mi.status,
+                "model_name": model_name,
+                "model_version": model_version,
+                "device_id": device_id,
+                "set_as_default": set_default,
+                "status_code": response.response_header.status_code,
+                "error_message": response.response_header.error_message,
+                # Backward-compatible aliases / 向后兼容别名
+                "name": model_name,
+                "version": model_version,
             }
         except grpc.aio.AioRpcError as exc:
             logger.error("LoadModel gRPC error: {} - {}", exc.code(), exc.details())
@@ -608,13 +639,15 @@ class AsyncVEngineClient:
                 device_id=device_id,
             )
             response = await stub.UnloadModel(request)
-            mi = response.model_info
             return {
-                "name": mi.name,
-                "version": mi.version,
-                "device_id": mi.device_id,
-                "is_default": mi.is_default,
-                "status": mi.status,
+                "model_name": model_name,
+                "model_version": model_version,
+                "device_id": device_id,
+                "status_code": response.response_header.status_code,
+                "error_message": response.response_header.error_message,
+                # Backward-compatible aliases / 向后兼容别名
+                "name": model_name,
+                "version": model_version,
             }
         except grpc.aio.AioRpcError as exc:
             logger.error("UnloadModel gRPC error: {} - {}", exc.code(), exc.details())
@@ -632,7 +665,7 @@ class AsyncVEngineClient:
                 return []
             request = base_pb2.ListModelsRequest(
                 request_header=self._make_header(),
-                name_filter=name_filter,
+                model_name_filter=name_filter,
             )
             response = await stub.ListModels(request)
             models: list[dict] = []
@@ -640,11 +673,14 @@ class AsyncVEngineClient:
                 for mi in response.models:
                     models.append(
                         {
-                            "name": mi.name,
-                            "version": mi.version,
+                            "model_name": mi.model_name,
+                            "model_version": mi.model_version,
                             "device_id": mi.device_id,
                             "is_default": mi.is_default,
                             "status": mi.status,
+                            # Backward-compatible aliases / 向后兼容别名
+                            "name": mi.model_name,
+                            "version": mi.model_version,
                         }
                     )
             return models
@@ -662,14 +698,12 @@ class AsyncVEngineClient:
             stub = self._stubs.get(service)
             if stub is None:
                 return {"error": f"Unknown service: {service}"}
-            request = base_pb2.HealthCheckRequest(
-                request_header=self._make_header()
-            )
+            request = base_pb2.HealthCheckRequest()
             response = await stub.HealthCheck(request)
             return {
-                "service_name": response.service_name,
-                "version": response.version,
-                "status_code": response.response_header.status_code,
+                "status": response.status,
+                "uptime_seconds": response.uptime_seconds,
+                "loaded_model_count": response.loaded_model_count,
             }
         except grpc.aio.AioRpcError as exc:
             logger.error(

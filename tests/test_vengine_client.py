@@ -56,8 +56,8 @@ class TestAsyncVEngineClient:
         client = AsyncVEngineClient(cfg)
         poly = client._make_roi_polygon([{"x": 10, "y": 20}, {"x": 30, "y": 40}])
         assert len(poly.points) == 2
-        assert poly.points[0].x == 10.0
-        assert poly.points[1].y == 40.0
+        assert poly.points[0].x == 10
+        assert poly.points[1].y == 40
 
 
 class TestMakeImage:
@@ -208,19 +208,20 @@ class TestUploadServiceGrpcCompatibility:
             async def UploadImage(self, request, context):
                 seen["request_id"] = request.request_header.request_id
                 seen["client_id"] = request.request_header.client_id
-                seen["filename"] = request.filename
-                seen["data"] = request.data
+                seen["images_len"] = len(request.images)
+                seen["data"] = request.images[0].data
+                seen["enable_cache"] = request.images[0].enable_cache
                 return upload_service_pb2.UploadResponse(
                     response_header=base_pb2.ResponseHeader(
                         request_id=request.request_header.request_id,
                         status_code=base_pb2.StatusCode.STATUS_OK,
                     ),
-                    results=[
-                        upload_service_pb2.UploadResult(
+                    cache_infos=[
+                        base_pb2.ImageCacheInfo(
                             key="cache-key-1",
                             hit=False,
-                            id="img-1",
-                            size=len(request.data),
+                            id=1,
+                            size=len(request.images[0].data),
                         )
                     ],
                 )
@@ -251,15 +252,109 @@ class TestUploadServiceGrpcCompatibility:
                 {
                     "key": "cache-key-1",
                     "hit": False,
-                    "id": "img-1",
+                    "id": 1,
                     "size": 12,
                 }
             ]
             assert key == "cache-key-1"
-            assert seen["filename"] == "frame.jpg"
+            assert seen["images_len"] == 1
             assert seen["data"] == b"hello-upload"
+            assert seen["enable_cache"] is True
             assert seen["client_id"] == "v-sentinel"
             assert seen["request_id"]
         finally:
             await client.close()
             await server.stop(None)
+
+
+class TestModelAndHealthProtoCompatibility:
+    async def test_load_model_uses_set_as_default_field(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def LoadModel(self, request):
+                seen["set_as_default"] = request.set_as_default
+                seen["model_name"] = request.model_name
+                return base_pb2.ModelResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    )
+                )
+
+        client._stubs["detection"] = Stub()
+        result = await client.load_model(
+            "detection",
+            model_name="detector",
+            model_version="v1",
+            device_id=2,
+            set_default=True,
+        )
+
+        assert seen == {"set_as_default": True, "model_name": "detector"}
+        assert result["model_name"] == "detector"
+        assert result["model_version"] == "v1"
+        assert result["device_id"] == 2
+        assert result["set_as_default"] is True
+        assert result["status_code"] == base_pb2.StatusCode.STATUS_OK
+
+    async def test_list_models_uses_model_name_filter_and_new_model_fields(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def ListModels(self, request):
+                seen["model_name_filter"] = request.model_name_filter
+                return base_pb2.ListModelsResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    models=[
+                        base_pb2.ModelInfo(
+                            model_name="detector",
+                            model_version="v1",
+                            device_id=1,
+                            status="loaded",
+                            is_default=True,
+                        )
+                    ],
+                )
+
+        client._stubs["detection"] = Stub()
+        result = await client.list_models("detection", name_filter="det")
+
+        assert seen == {"model_name_filter": "det"}
+        assert result == [
+            {
+                "model_name": "detector",
+                "model_version": "v1",
+                "device_id": 1,
+                "is_default": True,
+                "status": "loaded",
+                "name": "detector",
+                "version": "v1",
+            }
+        ]
+
+    async def test_health_check_uses_empty_request_and_new_response_shape(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def HealthCheck(self, request):
+                seen["request_header_set"] = request.ListFields()
+                return base_pb2.HealthCheckResponse(
+                    status="serving",
+                    uptime_seconds=42,
+                    loaded_model_count=3,
+                )
+
+        client._stubs["upload"] = Stub()
+        result = await client.health_check("upload")
+
+        assert seen == {"request_header_set": []}
+        assert result == {
+            "status": "serving",
+            "uptime_seconds": 42,
+            "loaded_model_count": 3,
+        }

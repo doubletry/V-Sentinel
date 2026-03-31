@@ -24,49 +24,49 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nbase.proto\x12\x04\x62\x61se\"Q\n\rRequestHeader\x12\x19\n\x11request_timestamp\x18\x01 \x01(\x01\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x11\n\tclient_id\x18\x03 \x01(\t\"\x92\x01\n\x0eResponseHeader\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x1a\n\x12response_timestamp\x18\x02 \x01(\x01\x12%\n\x0bstatus_code\x18\x03 \x01(\x0e\x32\x10.base.StatusCode\x12\x15\n\rerror_message\x18\x04 \x01(\t\x12\x12\n\nlatency_ms\x18\x05 \x01(\x02\"\x1d\n\x05Point\x12\t\n\x01x\x18\x01 \x01(\x02\x12\t\n\x01y\x18\x02 \x01(\x02\"&\n\x07Polygon\x12\x1b\n\x06points\x18\x01 \x03(\x0b\x32\x0b.base.Point\"\x95\x01\n\x0fInferenceParams\x12\x12\n\nmodel_name\x18\x01 \x01(\t\x12\x15\n\rmodel_version\x18\x02 \x01(\t\x12)\n\x12region_of_interest\x18\x03 \x01(\x0b\x32\r.base.Polygon\x12\x15\n\ruse_image_roi\x18\x04 \x01(\x08\x12\x15\n\ruse_model_roi\x18\x05 \x01(\x08\"\x19\n\tShapeInfo\x12\x0c\n\x04\x64ims\x18\x01 \x03(\x05\"D\n\x0eImageCacheInfo\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x0b\n\x03hit\x18\x02 \x01(\x08\x12\n\n\x02id\x18\x03 \x01(\t\x12\x0c\n\x04size\x18\x04 \x01(\x03\"\x86\x01\n\x05Image\x12\x0e\n\x04\x64\x61ta\x18\x01 \x01(\x0cH\x00\x12\r\n\x03key\x18\x02 \x01(\tH\x00\x12\n\n\x02id\x18\x03 \x01(\x03\x12\x1e\n\x05shape\x18\x04 \x01(\x0b\x32\x0f.base.ShapeInfo\x12)\n\x12region_of_interest\x18\x05 \x01(\x0b\x32\r.base.PolygonB\x07\n\x05input\"A\n\rImageSequence\x12\x1b\n\x06images\x18\x01 \x03(\x0b\x32\x0b.base.Image\x12\x13\n\x0bsequence_id\x18\x02 \x01(\x03\"\"\n\x05Video\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x12\x0b\n\x03key\x18\x02 \x01(\t\"\x92\x01\n\x10LoadModelRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x12\n\nmodel_name\x18\x02 \x01(\t\x12\x15\n\rmodel_version\x18\x03 \x01(\t\x12\x11\n\tdevice_id\x18\x04 \x01(\x05\x12\x13\n\x0bset_default\x18\x05 \x01(\x08\"\x7f\n\x12UnloadModelRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x12\n\nmodel_name\x18\x02 \x01(\t\x12\x15\n\rmodel_version\x18\x03 \x01(\t\x12\x11\n\tdevice_id\x18\x04 \x01(\x05\"a\n\tModelInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0f\n\x07version\x18\x02 \x01(\t\x12\x11\n\tdevice_id\x18\x03 \x01(\x05\x12\x12\n\nis_default\x18\x04 \x01(\x08\x12\x0e\n\x06status\x18\x05 \x01(\t\"c\n\rModelResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\x12#\n\nmodel_info\x18\x02 \x01(\x0b\x32\x0f.base.ModelInfo\"U\n\x11ListModelsRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x13\n\x0bname_filter\x18\x02 \x01(\t\"d\n\x12ListModelsResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\x12\x1f\n\x06models\x18\x02 \x03(\x0b\x32\x0f.base.ModelInfo\"A\n\x12HealthCheckRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\"k\n\x13HealthCheckResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\x12\x14\n\x0cservice_name\x18\x02 \x01(\t\x12\x0f\n\x07version\x18\x03 \x01(\t*\x8a\x01\n\nStatusCode\x12\r\n\tSTATUS_OK\x10\x00\x12\x1a\n\x16STATUS_INVALID_REQUEST\x10\x01\x12\x1a\n\x16STATUS_MODEL_NOT_FOUND\x10\x02\x12\x1a\n\x16STATUS_INFERENCE_ERROR\x10\x03\x12\x19\n\x15STATUS_INTERNAL_ERROR\x10\x04\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nbase.proto\x12\x04\x62\x61se\"Q\n\rRequestHeader\x12\x19\n\x11request_timestamp\x18\x01 \x01(\x01\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x11\n\tclient_id\x18\x03 \x01(\t\"\x92\x01\n\x0eResponseHeader\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x1a\n\x12response_timestamp\x18\x02 \x01(\x01\x12%\n\x0bstatus_code\x18\x03 \x01(\x0e\x32\x10.base.StatusCode\x12\x15\n\rerror_message\x18\x04 \x01(\t\x12\x12\n\nlatency_ms\x18\x05 \x01(\x03\"&\n\x07Polygon\x12\x1b\n\x06points\x18\x01 \x03(\x0b\x32\x0b.base.Point\"\x1d\n\x05Point\x12\t\n\x01x\x18\x01 \x01(\x05\x12\t\n\x01y\x18\x02 \x01(\x05\"\x95\x01\n\x0fInferenceParams\x12\x12\n\nmodel_name\x18\x01 \x01(\t\x12\x15\n\rmodel_version\x18\x02 \x01(\t\x12)\n\x12region_of_interest\x18\x03 \x01(\x0b\x32\r.base.Polygon\x12\x15\n\ruse_image_roi\x18\x04 \x01(\x08\x12\x15\n\ruse_model_roi\x18\x05 \x01(\x08\"\x95\x01\n\x10LoadModelRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x12\n\nmodel_name\x18\x02 \x01(\t\x12\x15\n\rmodel_version\x18\x03 \x01(\t\x12\x11\n\tdevice_id\x18\x04 \x01(\x05\x12\x16\n\x0eset_as_default\x18\x05 \x01(\x08\"\x7f\n\x12UnloadModelRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x12\n\nmodel_name\x18\x02 \x01(\t\x12\x15\n\rmodel_version\x18\x03 \x01(\t\x12\x11\n\tdevice_id\x18\x04 \x01(\x05\">\n\rModelResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\"[\n\x11ListModelsRequest\x12+\n\x0erequest_header\x18\x01 \x01(\x0b\x32\x13.base.RequestHeader\x12\x19\n\x11model_name_filter\x18\x02 \x01(\t\"m\n\tModelInfo\x12\x12\n\nmodel_name\x18\x01 \x01(\t\x12\x15\n\rmodel_version\x18\x02 \x01(\t\x12\x11\n\tdevice_id\x18\x03 \x01(\x05\x12\x0e\n\x06status\x18\x04 \x01(\t\x12\x12\n\nis_default\x18\x05 \x01(\x08\"d\n\x12ListModelsResponse\x12-\n\x0fresponse_header\x18\x01 \x01(\x0b\x32\x14.base.ResponseHeader\x12\x1f\n\x06models\x18\x02 \x03(\x0b\x32\x0f.base.ModelInfo\"\x14\n\x12HealthCheckRequest\"Y\n\x13HealthCheckResponse\x12\x0e\n\x06status\x18\x01 \x01(\t\x12\x16\n\x0euptime_seconds\x18\x02 \x01(\x03\x12\x1a\n\x12loaded_model_count\x18\x03 \x01(\x05\"\x19\n\tShapeInfo\x12\x0c\n\x04\x64ims\x18\x01 \x03(\x05\"\x9c\x01\n\x05Image\x12\x0e\n\x04\x64\x61ta\x18\x01 \x01(\x0cH\x00\x12\r\n\x03key\x18\x05 \x01(\tH\x00\x12\n\n\x02id\x18\x02 \x01(\x05\x12\x1e\n\x05shape\x18\x03 \x01(\x0b\x32\x0f.base.ShapeInfo\x12)\n\x12region_of_interest\x18\x04 \x01(\x0b\x32\r.base.Polygon\x12\x14\n\x0c\x65nable_cache\x18\x06 \x01(\x08\x42\x07\n\x05input\"8\n\rImageSequence\x12\x1b\n\x06images\x18\x01 \x03(\x0b\x32\x0b.base.Image\x12\n\n\x02id\x18\x02 \x01(\x05\"!\n\x05Video\x12\x0c\n\x04\x64\x61ta\x18\x01 \x01(\x0c\x12\n\n\x02id\x18\x02 \x01(\x05\"D\n\x0eImageCacheInfo\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x0b\n\x03hit\x18\x02 \x01(\x08\x12\n\n\x02id\x18\x03 \x01(\x05\x12\x0c\n\x04size\x18\x04 \x01(\x05*\xfe\x01\n\nStatusCode\x12\r\n\tSTATUS_OK\x10\x00\x12\x1a\n\x16STATUS_INVALID_REQUEST\x10\x01\x12\x1a\n\x16STATUS_MODEL_NOT_FOUND\x10\x02\x12\x1f\n\x1bSTATUS_MODEL_ALREADY_EXISTS\x10\x03\x12\x1d\n\x19STATUS_DEVICE_UNAVAILABLE\x10\x04\x12\x1a\n\x16STATUS_INFERENCE_ERROR\x10\n\x12\x1c\n\x18STATUS_INFERENCE_TIMEOUT\x10\x0b\x12\x16\n\x12STATUS_CODEC_ERROR\x10\x0c\x12\x17\n\x13STATUS_SERVER_ERROR\x10\rb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'base_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_STATUSCODE']._serialized_start=1656
-  _globals['_STATUSCODE']._serialized_end=1794
+  _globals['_STATUSCODE']._serialized_start=1589
+  _globals['_STATUSCODE']._serialized_end=1843
   _globals['_REQUESTHEADER']._serialized_start=20
   _globals['_REQUESTHEADER']._serialized_end=101
   _globals['_RESPONSEHEADER']._serialized_start=104
   _globals['_RESPONSEHEADER']._serialized_end=250
-  _globals['_POINT']._serialized_start=252
-  _globals['_POINT']._serialized_end=281
-  _globals['_POLYGON']._serialized_start=283
-  _globals['_POLYGON']._serialized_end=321
+  _globals['_POLYGON']._serialized_start=252
+  _globals['_POLYGON']._serialized_end=290
+  _globals['_POINT']._serialized_start=292
+  _globals['_POINT']._serialized_end=321
   _globals['_INFERENCEPARAMS']._serialized_start=324
   _globals['_INFERENCEPARAMS']._serialized_end=473
-  _globals['_SHAPEINFO']._serialized_start=475
-  _globals['_SHAPEINFO']._serialized_end=500
-  _globals['_IMAGECACHEINFO']._serialized_start=502
-  _globals['_IMAGECACHEINFO']._serialized_end=570
-  _globals['_IMAGE']._serialized_start=573
-  _globals['_IMAGE']._serialized_end=707
-  _globals['_IMAGESEQUENCE']._serialized_start=709
-  _globals['_IMAGESEQUENCE']._serialized_end=774
-  _globals['_VIDEO']._serialized_start=776
-  _globals['_VIDEO']._serialized_end=810
-  _globals['_LOADMODELREQUEST']._serialized_start=813
-  _globals['_LOADMODELREQUEST']._serialized_end=959
-  _globals['_UNLOADMODELREQUEST']._serialized_start=961
-  _globals['_UNLOADMODELREQUEST']._serialized_end=1088
-  _globals['_MODELINFO']._serialized_start=1090
-  _globals['_MODELINFO']._serialized_end=1187
-  _globals['_MODELRESPONSE']._serialized_start=1189
-  _globals['_MODELRESPONSE']._serialized_end=1288
-  _globals['_LISTMODELSREQUEST']._serialized_start=1290
-  _globals['_LISTMODELSREQUEST']._serialized_end=1375
-  _globals['_LISTMODELSRESPONSE']._serialized_start=1377
-  _globals['_LISTMODELSRESPONSE']._serialized_end=1477
-  _globals['_HEALTHCHECKREQUEST']._serialized_start=1479
-  _globals['_HEALTHCHECKREQUEST']._serialized_end=1544
-  _globals['_HEALTHCHECKRESPONSE']._serialized_start=1546
-  _globals['_HEALTHCHECKRESPONSE']._serialized_end=1653
+  _globals['_LOADMODELREQUEST']._serialized_start=476
+  _globals['_LOADMODELREQUEST']._serialized_end=625
+  _globals['_UNLOADMODELREQUEST']._serialized_start=627
+  _globals['_UNLOADMODELREQUEST']._serialized_end=754
+  _globals['_MODELRESPONSE']._serialized_start=756
+  _globals['_MODELRESPONSE']._serialized_end=818
+  _globals['_LISTMODELSREQUEST']._serialized_start=820
+  _globals['_LISTMODELSREQUEST']._serialized_end=911
+  _globals['_MODELINFO']._serialized_start=913
+  _globals['_MODELINFO']._serialized_end=1022
+  _globals['_LISTMODELSRESPONSE']._serialized_start=1024
+  _globals['_LISTMODELSRESPONSE']._serialized_end=1124
+  _globals['_HEALTHCHECKREQUEST']._serialized_start=1126
+  _globals['_HEALTHCHECKREQUEST']._serialized_end=1146
+  _globals['_HEALTHCHECKRESPONSE']._serialized_start=1148
+  _globals['_HEALTHCHECKRESPONSE']._serialized_end=1237
+  _globals['_SHAPEINFO']._serialized_start=1239
+  _globals['_SHAPEINFO']._serialized_end=1264
+  _globals['_IMAGE']._serialized_start=1267
+  _globals['_IMAGE']._serialized_end=1423
+  _globals['_IMAGESEQUENCE']._serialized_start=1425
+  _globals['_IMAGESEQUENCE']._serialized_end=1481
+  _globals['_VIDEO']._serialized_start=1483
+  _globals['_VIDEO']._serialized_end=1516
+  _globals['_IMAGECACHEINFO']._serialized_start=1518
+  _globals['_IMAGECACHEINFO']._serialized_end=1586
 # @@protoc_insertion_point(module_scope)

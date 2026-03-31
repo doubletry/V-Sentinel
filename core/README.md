@@ -56,6 +56,20 @@ run_processor(
 | loguru | Logging |
 | grpcio (optional) | V-Engine gRPC calls |
 
+## gRPC Proto Notes
+
+- The source `.proto` files live in `backend/proto/`.
+- Generated Python protobuf / gRPC files live in the canonical `core/proto/`
+  package and should be regenerated with:
+
+```bash
+bash backend/proto/generate.sh
+```
+
+- ROI polygons sent to V-Engine now use integer pixel coordinates.
+- Upload RPCs send `base.Image` / `base.Video` messages instead of raw
+  `data + filename` fields, so the client wraps upload payloads before sending.
+
 ## Architecture
 
 ```

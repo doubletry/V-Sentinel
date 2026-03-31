@@ -149,3 +149,76 @@ class TestProcessorManager:
     async def test_stop_all_empty(self):
         mgr = self._make_manager()
         await mgr.stop_all()  # Should not raise
+
+
+class TestExampleProcessorBatchClassification:
+    async def test_process_frame_batches_person_roi_classification(self):
+        from backend.processing.example import ExampleProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            {
+                "x_min": 10,
+                "y_min": 20,
+                "x_max": 50,
+                "y_max": 80,
+                "label": "person",
+                "confidence": 0.95,
+                "class_id": 1,
+            },
+            {
+                "x_min": 100,
+                "y_min": 120,
+                "x_max": 160,
+                "y_max": 220,
+                "label": "dog",
+                "confidence": 0.75,
+                "class_id": 3,
+            },
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = [
+            {"label": "adult", "confidence": 0.89, "class_id": 10, "image_id": 0},
+        ]
+
+        proc = ExampleProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            rois=[],
+            vengine_client=vengine,
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        result = await proc.process_frame(
+            frame=frame,
+            encoded=b"frame-jpeg",
+            shape=(480, 640, 3),
+            roi_pixel_points=[],
+        )
+
+        assert vengine.upload_and_get_key.await_count == 1
+        classify_call = vengine.classify.await_args.kwargs
+        assert classify_call["shape"] is None
+        assert classify_call["images"] == [
+            {
+                "shape": (480, 640, 3),
+                "roi": [
+                    {"x": 10, "y": 20},
+                    {"x": 50, "y": 20},
+                    {"x": 50, "y": 80},
+                    {"x": 10, "y": 80},
+                ],
+                "key": "frame-key",
+            }
+        ]
+        assert result.classifications == [
+            {
+                "detection_label": "person",
+                "classification_label": "adult",
+                "confidence": 0.89,
+                "bbox": [10, 20, 50, 80],
+            }
+        ]

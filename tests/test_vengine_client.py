@@ -5,7 +5,14 @@ import grpc
 import pytest
 
 from backend.config import Settings
-from core.proto import base_pb2, upload_service_pb2, upload_service_pb2_grpc
+from core.proto import (
+    base_pb2,
+    classification_service_pb2,
+    classification_service_pb2_grpc,
+    detection_service_pb2,
+    upload_service_pb2,
+    upload_service_pb2_grpc,
+)
 from backend.vengine.client import AsyncVEngineClient
 
 
@@ -96,6 +103,33 @@ class TestMakeImage:
         client = self._client()
         with pytest.raises(ValueError, match="only one"):
             client._make_image((100, 200, 3), image_bytes=b"x", image_key="k")
+
+    def test_make_images_batch_supports_key_and_roi_aliases(self):
+        client = self._client()
+        images = client._make_images(
+            images=[
+                {
+                    "shape": (100, 200, 3),
+                    "key": "shared-key",
+                    "roi": [
+                        {"x": 1, "y": 2},
+                        {"x": 3, "y": 2},
+                        {"x": 3, "y": 4},
+                        {"x": 1, "y": 4},
+                    ],
+                },
+                {
+                    "shape": (100, 200, 3),
+                    "image_bytes": b"jpeg-2",
+                },
+            ]
+        )
+        assert len(images) == 2
+        assert images[0].id == 0
+        assert images[0].key == "shared-key"
+        assert len(images[0].region_of_interest.points) == 4
+        assert images[1].id == 1
+        assert images[1].data == b"jpeg-2"
 
 
 class TestServiceToggle:
@@ -262,6 +296,233 @@ class TestUploadServiceGrpcCompatibility:
             assert seen["enable_cache"] is True
             assert seen["client_id"] == "v-sentinel"
             assert seen["request_id"]
+        finally:
+            await client.close()
+            await server.stop(None)
+
+
+class TestBatchImageRpcCompatibility:
+    async def test_classify_sends_multiple_images_in_single_request(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                seen["keys"] = [img.key for img in request.images]
+                seen["roi_sizes"] = [len(img.region_of_interest.points) for img in request.images]
+                return classification_service_pb2.ClassificationResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        classification_service_pb2.ClassificationResult(
+                            label="adult",
+                            confidence=0.9,
+                            image_id=0,
+                            class_id=1,
+                        ),
+                        classification_service_pb2.ClassificationResult(
+                            label="child",
+                            confidence=0.8,
+                            image_id=1,
+                            class_id=2,
+                        ),
+                    ],
+                )
+
+        client._enabled = {"classification": True}
+        client._stubs["classification"] = Stub()
+        results = await client.classify(
+            shape=None,
+            model_name="cls-model",
+            images=[
+                {
+                    "shape": (1080, 1920, 3),
+                    "key": "frame-key",
+                    "roi": [
+                        {"x": 10, "y": 20},
+                        {"x": 100, "y": 20},
+                        {"x": 100, "y": 200},
+                        {"x": 10, "y": 200},
+                    ],
+                },
+                {
+                    "shape": (1080, 1920, 3),
+                    "key": "frame-key",
+                    "roi": [
+                        {"x": 110, "y": 120},
+                        {"x": 220, "y": 120},
+                        {"x": 220, "y": 260},
+                        {"x": 110, "y": 260},
+                    ],
+                },
+            ],
+        )
+
+        assert seen == {
+            "count": 2,
+            "ids": [0, 1],
+            "keys": ["frame-key", "frame-key"],
+            "roi_sizes": [4, 4],
+        }
+        assert results[0]["label"] == "adult"
+        assert results[0]["class_id"] == 1
+        assert results[0]["image_id"] == 0
+        assert results[0]["confidence"] == pytest.approx(0.9)
+        assert results[1]["label"] == "child"
+        assert results[1]["class_id"] == 2
+        assert results[1]["image_id"] == 1
+        assert results[1]["confidence"] == pytest.approx(0.8)
+
+    async def test_detect_sends_multiple_images_and_returns_image_id(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        detection_service_pb2.DetectionResults(
+                            image_id=1,
+                            boxes=[
+                                detection_service_pb2.BoundingBox(
+                                    x_min=1,
+                                    y_min=2,
+                                    x_max=3,
+                                    y_max=4,
+                                    confidence=0.5,
+                                    class_id=7,
+                                    label="person",
+                                )
+                            ],
+                        )
+                    ],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        results = await client.detect(
+            shape=None,
+            model_name="det-model",
+            images=[
+                {"shape": (100, 100, 3), "image_bytes": b"a"},
+                {"shape": (100, 100, 3), "image_bytes": b"b"},
+            ],
+        )
+
+        assert seen == {"count": 2, "ids": [0, 1]}
+        assert results == [
+            {
+                "x_min": 1,
+                "y_min": 2,
+                "x_max": 3,
+                "y_max": 4,
+                "confidence": 0.5,
+                "class_id": 7,
+                "label": "person",
+                "image_id": 1,
+            }
+        ]
+
+    async def test_classify_batch_roundtrip_with_real_grpc_service(self):
+        seen: dict[str, object] = {}
+
+        class ClassificationServicer(
+            classification_service_pb2_grpc.ImageClassificationServicer
+        ):
+            async def Predict(self, request, context):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                seen["keys"] = [img.key for img in request.images]
+                return classification_service_pb2.ClassificationResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        request_id=request.request_header.request_id,
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        classification_service_pb2.ClassificationResult(
+                            label="adult",
+                            confidence=0.91,
+                            image_id=0,
+                            class_id=1,
+                        ),
+                        classification_service_pb2.ClassificationResult(
+                            label="adult",
+                            confidence=0.87,
+                            image_id=1,
+                            class_id=1,
+                        ),
+                    ],
+                )
+
+        server = grpc.aio.server()
+        classification_service_pb2_grpc.add_ImageClassificationServicer_to_server(
+            ClassificationServicer(),
+            server,
+        )
+        port = server.add_insecure_port("127.0.0.1:0")
+        await server.start()
+
+        client = AsyncVEngineClient(Settings())
+        try:
+            await client.connect(
+                {
+                    "vengine_host": "127.0.0.1",
+                    "classification_port": str(port),
+                    "classification_enabled": "true",
+                    "detection_enabled": "false",
+                    "action_enabled": "false",
+                    "ocr_enabled": "false",
+                    "upload_enabled": "false",
+                }
+            )
+            results = await client.classify(
+                shape=None,
+                model_name="cls-model",
+                images=[
+                    {
+                        "shape": (1080, 1920, 3),
+                        "key": "frame-key",
+                        "roi": [
+                            {"x": 10, "y": 20},
+                            {"x": 100, "y": 20},
+                            {"x": 100, "y": 200},
+                            {"x": 10, "y": 200},
+                        ],
+                    },
+                    {
+                        "shape": (1080, 1920, 3),
+                        "key": "frame-key",
+                        "roi": [
+                            {"x": 110, "y": 120},
+                            {"x": 220, "y": 120},
+                            {"x": 220, "y": 260},
+                            {"x": 110, "y": 260},
+                        ],
+                    },
+                ],
+            )
+
+            assert seen == {
+                "count": 2,
+                "ids": [0, 1],
+                "keys": ["frame-key", "frame-key"],
+            }
+            assert results[0]["label"] == "adult"
+            assert results[0]["class_id"] == 1
+            assert results[0]["image_id"] == 0
+            assert results[0]["confidence"] == pytest.approx(0.91)
+            assert results[1]["label"] == "adult"
+            assert results[1]["class_id"] == 1
+            assert results[1]["image_id"] == 1
+            assert results[1]["confidence"] == pytest.approx(0.87)
         finally:
             await client.close()
             await server.stop(None)

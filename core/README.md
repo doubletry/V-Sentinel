@@ -69,6 +69,10 @@ bash backend/proto/generate.sh
 - ROI polygons sent to V-Engine now use integer pixel coordinates.
 - Upload RPCs send `base.Image` / `base.Video` messages instead of raw
   `data + filename` fields, so the client wraps upload payloads before sending.
+- `AsyncVEngineClient.detect()` / `classify()` also support batched
+  `images=[{shape, image_key|image_bytes, roi?}, ...]` requests, so one cached
+  frame key can be reused with multiple ROI-scoped `base.Image` entries in a
+  single microservice call.
 
 ## Architecture
 

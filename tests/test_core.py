@@ -305,3 +305,101 @@ class TestCoreProtoReexport:
         from backend.proto import classification_service_pb2 as backend_cls
         from core.proto import classification_service_pb2 as core_cls
         assert backend_cls is core_cls
+
+
+class TestCoreExampleProcessorBatchClassification:
+    async def test_process_frame_reuses_image_key_for_person_rois(self):
+        from core.example_processor import ExampleProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            {
+                "x_min": 10,
+                "y_min": 20,
+                "x_max": 50,
+                "y_max": 80,
+                "label": "person",
+                "confidence": 0.95,
+                "class_id": 1,
+            },
+            {
+                "x_min": 100,
+                "y_min": 120,
+                "x_max": 160,
+                "y_max": 220,
+                "label": "car",
+                "confidence": 0.70,
+                "class_id": 2,
+            },
+            {
+                "x_min": 200,
+                "y_min": 220,
+                "x_max": 260,
+                "y_max": 320,
+                "label": "person",
+                "confidence": 0.88,
+                "class_id": 1,
+            },
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = [
+            {"label": "adult", "confidence": 0.91, "class_id": 10, "image_id": 0},
+            {"label": "child", "confidence": 0.83, "class_id": 11, "image_id": 1},
+        ]
+
+        proc = ExampleProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        result = await proc.process_frame(
+            frame=frame,
+            encoded=b"frame-jpeg",
+            shape=(480, 640, 3),
+            roi_pixel_points=[],
+        )
+
+        assert vengine.upload_and_get_key.await_count == 1
+        classify_call = vengine.classify.await_args.kwargs
+        assert classify_call["shape"] is None
+        assert classify_call["model_name"] == proc.CLASSIFICATION_MODEL
+        assert classify_call["images"] == [
+            {
+                "shape": (480, 640, 3),
+                "roi": [
+                    {"x": 10, "y": 20},
+                    {"x": 50, "y": 20},
+                    {"x": 50, "y": 80},
+                    {"x": 10, "y": 80},
+                ],
+                "key": "frame-key",
+            },
+            {
+                "shape": (480, 640, 3),
+                "roi": [
+                    {"x": 200, "y": 220},
+                    {"x": 260, "y": 220},
+                    {"x": 260, "y": 320},
+                    {"x": 200, "y": 320},
+                ],
+                "key": "frame-key",
+            },
+        ]
+        assert result.classifications == [
+            {
+                "detection_label": "person",
+                "classification_label": "adult",
+                "confidence": 0.91,
+                "bbox": [10, 20, 50, 80],
+            },
+            {
+                "detection_label": "person",
+                "classification_label": "child",
+                "confidence": 0.83,
+                "bbox": [200, 220, 260, 320],
+            },
+        ]

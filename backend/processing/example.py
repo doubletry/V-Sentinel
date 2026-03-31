@@ -24,18 +24,18 @@ _jpeg = TurboJPEG()
 
 
 class ExampleProcessor(BaseVideoProcessor):
-    """Example processor that runs detection + OCR concurrently, then classifies crops.
-    示例处理器，并发执行检测 + OCR，然后对裁剪区域进行分类。
+    """Example processor that runs detection + OCR concurrently, then batch classifies person ROIs.
+    示例处理器，并发执行检测 + OCR，然后对 person 区域进行批量分类。
 
     Pipeline:
     1. ``asyncio.gather(detect, ocr)`` — concurrent detection + OCR
-    2. Serial classification on each detection crop
+    2. Batch classification on detected person ROIs
     3. Message assembly and WebSocket broadcast
     4. Frame annotation via cv2
 
     流水线：
     1. ``asyncio.gather(detect, ocr)`` — 并发检测 + OCR
-    2. 对每个检测裁剪区域串行分类
+    2. 对检测到的 person ROI 进行批量分类
     3. 消息组装与 WebSocket 广播
     4. 通过 cv2 进行帧标注
     """
@@ -74,8 +74,8 @@ class ExampleProcessor(BaseVideoProcessor):
         shape: tuple[int, int, int],
         roi_pixel_points: list[list[dict]],
     ) -> AnalysisResult:
-        """Process one frame: upload → concurrent detection + OCR by key → serial classify.
-        处理单帧：上传 → 按 key 并发检测 + OCR → 串行分类。"""
+        """Process one frame: upload → concurrent detection + OCR by key → batch classify.
+        处理单帧：上传 → 按 key 并发检测 + OCR → 批量分类。"""
         self._frame_count += 1
 
         # Use first ROI for inference if available / 如果有 ROI 则使用第一个进行推理
@@ -111,38 +111,61 @@ class ExampleProcessor(BaseVideoProcessor):
         )
         detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)
 
-        # 2. Classify each detected crop (serial to avoid overwhelming the service)
-        # 2. 对每个检测裁剪区域进行分类（串行执行以避免服务过载）
+        # 2. Batch classify detected person ROIs in one request
+        # 2. 在一次请求中批量分类检测到的 person ROI
         classifications: list[dict] = []
         h, w = shape[:2]
+        person_detections: list[dict] = []
+        classification_images: list[dict] = []
         for det in detections:
+            if str(det.get("label", "")).lower() != "person":
+                continue
             x1 = max(int(det["x_min"]), 0)
             y1 = max(int(det["y_min"]), 0)
             x2 = min(int(det["x_max"]), w)
             y2 = min(int(det["y_max"]), h)
             if x2 <= x1 or y2 <= y1:
                 continue
-            crop = frame[y1:y2, x1:x2]
-            # Encode crop as RGB JPEG directly (no BGR conversion) / 直接以 RGB 编码裁剪区域（无需 BGR 转换）
-            crop_bytes = _jpeg.encode(crop, quality=85, pixel_format=TJPF_RGB)
-            crop_shape = (y2 - y1, x2 - x1, 3)
-
-            # Upload crop and use cache key for classification
-            # 上传裁剪区域并使用缓存 key 进行分类
-            crop_key = await self.vengine.upload_and_get_key(crop_bytes)
-            crop_kwargs: dict = {}
-            if crop_key:
-                crop_kwargs["image_key"] = crop_key
-            else:
-                crop_kwargs["image_bytes"] = crop_bytes
-
-            cls_results = await self.vengine.classify(
-                shape=crop_shape,
-                model_name=self.CLASSIFICATION_MODEL,
-                **crop_kwargs,
+            person_detections.append(det)
+            classification_images.append(
+                {
+                    "shape": shape,
+                    "roi": [
+                        {"x": x1, "y": y1},
+                        {"x": x2, "y": y1},
+                        {"x": x2, "y": y2},
+                        {"x": x1, "y": y2},
+                    ],
+                    "key": image_key,
+                }
+                if image_key
+                else {
+                    "shape": shape,
+                    "roi": [
+                        {"x": x1, "y": y1},
+                        {"x": x2, "y": y1},
+                        {"x": x2, "y": y2},
+                        {"x": x1, "y": y2},
+                    ],
+                    "image_bytes": encoded,
+                }
             )
-            if cls_results:
-                best = cls_results[0]
+
+        if classification_images:
+            cls_results = await self.vengine.classify(
+                shape=None,
+                model_name=self.CLASSIFICATION_MODEL,
+                images=classification_images,
+            )
+            for best in cls_results:
+                image_id = best.get("image_id")
+                if not isinstance(image_id, int) or not (0 <= image_id < len(person_detections)):
+                    continue
+                det = person_detections[image_id]
+                x1 = max(int(det["x_min"]), 0)
+                y1 = max(int(det["y_min"]), 0)
+                x2 = min(int(det["x_max"]), w)
+                y2 = min(int(det["y_max"]), h)
                 classifications.append(
                     {
                         "detection_label": det["label"],

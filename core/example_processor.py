@@ -16,14 +16,14 @@ Usage::
 Pipeline:
 1. Upload frame → get cache key
 2. Concurrent detection + OCR (using cache key)
-3. Serial classification on each detection crop
+3. Batch classification on detected person ROIs
 4. Frame annotation via cv2
 5. Push annotated frame to MediaMTX
 
 流水线：
 1. 上传帧 → 获取缓存键
 2. 并发检测 + OCR（使用缓存键）
-3. 对每个检测裁剪区域串行分类
+3. 对检测到的 person ROI 进行批量分类
 4. 通过 cv2 进行帧标注
 5. 将标注帧推送到 MediaMTX
 """
@@ -49,8 +49,8 @@ _jpeg = TurboJPEG()
 
 
 class ExampleProcessor(BaseVideoProcessor):
-    """Example processor: upload → concurrent detection + OCR → serial classify.
-    示例处理器：上传 → 并发检测 + OCR → 串行分类。
+    """Example processor: upload → concurrent detection + OCR → batch classify.
+    示例处理器：上传 → 并发检测 + OCR → 批量分类。
 
     This is functionally equivalent to ``backend.processing.example.ExampleProcessor``
     but uses only ``core`` imports, proving that core is self-sufficient.
@@ -73,8 +73,8 @@ class ExampleProcessor(BaseVideoProcessor):
         shape: tuple[int, int, int],
         roi_pixel_points: list[list[dict]],
     ) -> AnalysisResult:
-        """Process one frame: upload → concurrent detection + OCR → serial classify.
-        处理单帧：上传 → 并发检测 + OCR → 串行分类。"""
+        """Process one frame: upload → concurrent detection + OCR → batch classify.
+        处理单帧：上传 → 并发检测 + OCR → 批量分类。"""
         self._frame_count += 1
 
         # Use first ROI for inference if available / 如果有 ROI 则使用第一个进行推理
@@ -120,34 +120,60 @@ class ExampleProcessor(BaseVideoProcessor):
         )
         detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)
 
-        # 2. Serial classification on each crop / 对每个裁剪区域串行分类
+        # 2. Batch classification on detected person ROIs / 对检测到的 person ROI 批量分类
         classifications: list[dict] = []
         h, w = shape[:2]
+        person_detections: list[dict] = []
+        classification_images: list[dict] = []
         for det in detections:
+            if str(det.get("label", "")).lower() != "person":
+                continue
             x1 = max(int(det["x_min"]), 0)
             y1 = max(int(det["y_min"]), 0)
             x2 = min(int(det["x_max"]), w)
             y2 = min(int(det["y_max"]), h)
             if x2 <= x1 or y2 <= y1:
                 continue
-            crop = frame[y1:y2, x1:x2]
-            crop_bytes = _jpeg.encode(crop, quality=85, pixel_format=TJPF_RGB)
-            crop_shape = (y2 - y1, x2 - x1, 3)
-
-            crop_key = await self.vengine.upload_and_get_key(crop_bytes)
-            crop_kwargs: dict = {}
-            if crop_key:
-                crop_kwargs["image_key"] = crop_key
-            else:
-                crop_kwargs["image_bytes"] = crop_bytes
-
-            cls_results = await self.vengine.classify(
-                shape=crop_shape,
-                model_name=self.CLASSIFICATION_MODEL,
-                **crop_kwargs,
+            person_detections.append(det)
+            classification_images.append(
+                {
+                    "shape": shape,
+                    "roi": [
+                        {"x": x1, "y": y1},
+                        {"x": x2, "y": y1},
+                        {"x": x2, "y": y2},
+                        {"x": x1, "y": y2},
+                    ],
+                    "key": image_key,
+                }
+                if image_key
+                else {
+                    "shape": shape,
+                    "roi": [
+                        {"x": x1, "y": y1},
+                        {"x": x2, "y": y1},
+                        {"x": x2, "y": y2},
+                        {"x": x1, "y": y2},
+                    ],
+                    "image_bytes": encoded,
+                }
             )
-            if cls_results:
-                best = cls_results[0]
+
+        if classification_images:
+            cls_results = await self.vengine.classify(
+                shape=None,
+                model_name=self.CLASSIFICATION_MODEL,
+                images=classification_images,
+            )
+            for best in cls_results:
+                image_id = best.get("image_id")
+                if not isinstance(image_id, int) or not (0 <= image_id < len(person_detections)):
+                    continue
+                det = person_detections[image_id]
+                x1 = max(int(det["x_min"]), 0)
+                y1 = max(int(det["y_min"]), 0)
+                x2 = min(int(det["x_max"]), w)
+                y2 = min(int(det["y_max"]), h)
                 classifications.append(
                     {
                         "detection_label": det["label"],

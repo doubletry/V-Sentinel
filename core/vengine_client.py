@@ -196,6 +196,7 @@ class AsyncVEngineClient:
         shape: tuple[int, ...],
         roi_points: list[dict] | None = None,
         *,
+        image_id: int = 0,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
     ) -> base_pb2.Image:
@@ -214,7 +215,7 @@ class AsyncVEngineClient:
             self._make_roi_polygon(roi_points) if roi_points else base_pb2.Polygon()
         )
         kwargs: dict = {
-            "id": 0,
+            "id": image_id,
             "shape": base_pb2.ShapeInfo(dims=list(shape)),
             "region_of_interest": image_roi,
         }
@@ -223,6 +224,53 @@ class AsyncVEngineClient:
         else:
             kwargs["key"] = image_key
         return base_pb2.Image(**kwargs)
+
+    def _make_images(
+        self,
+        *,
+        shape: tuple[int, ...] | None = None,
+        roi_points: list[dict] | None = None,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
+        images: list[dict] | None = None,
+    ) -> list[base_pb2.Image]:
+        """Build one or more ``base_pb2.Image`` objects.
+        构建一个或多个 ``base_pb2.Image`` 对象。
+
+        When ``images`` is provided, each item may contain:
+        ``shape`` plus exactly one of ``image_bytes``/``image_key``.
+        For convenience, ``roi`` and ``key`` are accepted as aliases for
+        ``roi_points`` and ``image_key``.
+        当提供 ``images`` 时，每个元素都应包含 ``shape``，并且必须在
+        ``image_bytes`` / ``image_key`` 中二选一。为方便起见，也接受
+        ``roi`` 和 ``key`` 作为 ``roi_points`` 与 ``image_key`` 的别名。
+        """
+        if images is not None:
+            built_images: list[base_pb2.Image] = []
+            for idx, item in enumerate(images):
+                built_images.append(
+                    self._make_image(
+                        tuple(item["shape"]),
+                        item.get("roi_points", item.get("roi")),
+                        image_id=idx,
+                        image_bytes=item.get("image_bytes", item.get("data")),
+                        image_key=item.get("image_key", item.get("key")),
+                    )
+                )
+            return built_images
+
+        if shape is None:
+            raise ValueError("Provide shape when images are not supplied")
+
+        return [
+            self._make_image(
+                shape,
+                roi_points,
+                image_id=0,
+                image_bytes=image_bytes,
+                image_key=image_key,
+            )
+        ]
 
     # ── Upload + cache key / 上传与缓存键 ────────────────────────────────────
 
@@ -250,7 +298,7 @@ class AsyncVEngineClient:
 
     async def detect(
         self,
-        shape: tuple[int, ...],
+        shape: tuple[int, ...] | None,
         model_name: str,
         conf: float = 0.5,
         nms: float = 0.7,
@@ -258,11 +306,15 @@ class AsyncVEngineClient:
         *,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
+        images: list[dict] | None = None,
     ) -> list[dict]:
         """Async object detection. 异步目标检测。
 
-        Pass either *image_bytes* (raw JPEG) or *image_key* (cache key from upload).
-        传入 *image_bytes*（原始 JPEG）或 *image_key*（上传后的缓存键）。
+        Pass either single-image args (*shape* + *image_bytes*/*image_key*), or
+        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` for a
+        batched request.
+        既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
+        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
         Returns list of {x_min, y_min, x_max, y_max, confidence, class_id, label}.
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
@@ -270,36 +322,46 @@ class AsyncVEngineClient:
         if not self._enabled.get("detection", False):
             return []
         try:
-            image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
+            request_images = self._make_images(
+                shape=shape,
+                roi_points=roi_points,
+                image_bytes=image_bytes,
+                image_key=image_key,
+                images=images,
+            )
+            if not request_images:
+                return []
             params = detection_service_pb2.DetectionParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
-                    use_image_roi=bool(roi_points),
+                    use_image_roi=any(bool(img.region_of_interest.points) for img in request_images),
                 ),
                 confidence_threshold=conf,
                 nms_iou_threshold=nms,
             )
             request = detection_service_pb2.DetectionRequest(
                 request_header=self._make_header(),
-                images=[image],
+                images=request_images,
                 params=params,
             )
             response = await self._stubs["detection"].Predict(request)
             results: list[dict] = []
+            is_batch = len(request_images) > 1
             if response.response_header.status_code == base_pb2.StatusCode.STATUS_OK:
                 for det_result in response.results:
                     for box in det_result.boxes:
-                        results.append(
-                            {
-                                "x_min": box.x_min,
-                                "y_min": box.y_min,
-                                "x_max": box.x_max,
-                                "y_max": box.y_max,
-                                "confidence": box.confidence,
-                                "class_id": box.class_id,
-                                "label": box.label,
-                            }
-                        )
+                        item = {
+                            "x_min": box.x_min,
+                            "y_min": box.y_min,
+                            "x_max": box.x_max,
+                            "y_max": box.y_max,
+                            "confidence": box.confidence,
+                            "class_id": box.class_id,
+                            "label": box.label,
+                        }
+                        if is_batch:
+                            item["image_id"] = det_result.image_id
+                        results.append(item)
             return results
         except grpc.aio.AioRpcError as exc:
             logger.error("Detection gRPC error: {} - {}", exc.code(), exc.details())
@@ -312,45 +374,66 @@ class AsyncVEngineClient:
 
     async def classify(
         self,
-        shape: tuple[int, ...],
+        shape: tuple[int, ...] | None,
         model_name: str,
         roi_points: list[dict] | None = None,
         *,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
+        images: list[dict] | None = None,
     ) -> list[dict]:
         """Async image classification. 异步图像分类。
 
-        Returns list of {label, confidence, class_id}.
+        Pass either single-image args (*shape* + *image_bytes*/*image_key*), or
+        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` for a
+        batched request.
+        既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
+        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
+
+        Returns list of {label, confidence, class_id}. Batched responses also
+        include ``image_id`` to identify which input image/ROI produced the
+        result.
+        返回 {label, confidence, class_id} 列表。批量请求时还会附带 ``image_id``，
+        以标识结果对应的输入图像/ROI。
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
         """
         if not self._enabled.get("classification", False):
             return []
         try:
-            image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
+            request_images = self._make_images(
+                shape=shape,
+                roi_points=roi_points,
+                image_bytes=image_bytes,
+                image_key=image_key,
+                images=images,
+            )
+            if not request_images:
+                return []
             params = classification_service_pb2.ClassificationParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
-                    use_image_roi=bool(roi_points),
+                    use_image_roi=any(bool(img.region_of_interest.points) for img in request_images),
                 )
             )
             request = classification_service_pb2.ClassificationRequest(
                 request_header=self._make_header(),
-                images=[image],
+                images=request_images,
                 params=params,
             )
             response = await self._stubs["classification"].Predict(request)
             results: list[dict] = []
+            is_batch = len(request_images) > 1
             if response.response_header.status_code == base_pb2.StatusCode.STATUS_OK:
                 for res in response.results:
-                    results.append(
-                        {
-                            "label": res.label,
-                            "confidence": res.confidence,
-                            "class_id": res.class_id,
-                        }
-                    )
+                    item = {
+                        "label": res.label,
+                        "confidence": res.confidence,
+                        "class_id": res.class_id,
+                    }
+                    if is_batch:
+                        item["image_id"] = res.image_id
+                    results.append(item)
             return results
         except grpc.aio.AioRpcError as exc:
             logger.error(

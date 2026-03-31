@@ -1,9 +1,11 @@
 """Tests for the AsyncVEngineClient initialisation and image building."""
 from __future__ import annotations
 
+import grpc
 import pytest
 
 from backend.config import Settings
+from core.proto import base_pb2, upload_service_pb2, upload_service_pb2_grpc
 from backend.vengine.client import AsyncVEngineClient
 
 
@@ -196,3 +198,68 @@ class TestServiceToggle:
             frames_bytes=[b"x"], shapes=[(100, 200, 3)], model_name="test"
         )
         assert result == []
+
+
+class TestUploadServiceGrpcCompatibility:
+    async def test_upload_image_roundtrip_with_real_grpc_service(self):
+        seen: dict[str, object] = {}
+
+        class UploadServicer(upload_service_pb2_grpc.UploadServicer):
+            async def UploadImage(self, request, context):
+                seen["request_id"] = request.request_header.request_id
+                seen["client_id"] = request.request_header.client_id
+                seen["filename"] = request.filename
+                seen["data"] = request.data
+                return upload_service_pb2.UploadResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        request_id=request.request_header.request_id,
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        upload_service_pb2.UploadResult(
+                            key="cache-key-1",
+                            hit=False,
+                            id="img-1",
+                            size=len(request.data),
+                        )
+                    ],
+                )
+
+        server = grpc.aio.server()
+        upload_service_pb2_grpc.add_UploadServicer_to_server(UploadServicer(), server)
+        port = server.add_insecure_port("127.0.0.1:0")
+        await server.start()
+
+        client = AsyncVEngineClient(Settings())
+        try:
+            await client.connect(
+                {
+                    "vengine_host": "127.0.0.1",
+                    "upload_port": str(port),
+                    "upload_enabled": "true",
+                    "detection_enabled": "false",
+                    "classification_enabled": "false",
+                    "action_enabled": "false",
+                    "ocr_enabled": "false",
+                }
+            )
+
+            results = await client.upload_image(b"hello-upload", filename="frame.jpg")
+            key = await client.upload_and_get_key(b"hello-upload", filename="frame.jpg")
+
+            assert results == [
+                {
+                    "key": "cache-key-1",
+                    "hit": False,
+                    "id": "img-1",
+                    "size": 12,
+                }
+            ]
+            assert key == "cache-key-1"
+            assert seen["filename"] == "frame.jpg"
+            assert seen["data"] == b"hello-upload"
+            assert seen["client_id"] == "v-sentinel"
+            assert seen["request_id"]
+        finally:
+            await client.close()
+            await server.stop(None)

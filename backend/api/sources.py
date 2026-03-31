@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from urllib.parse import quote
 
 import yaml
 from fastapi import APIRouter, HTTPException, UploadFile, File
@@ -101,13 +102,21 @@ async def export_rois_yaml(source_id: str) -> Response:
         "rois": rois_data,
     }
     yaml_content = yaml.dump(payload, allow_unicode=True, sort_keys=False)
-    # Sanitize source name for use in filename / 清理源名称以用于文件名
-    safe_name = re.sub(r'[^\w\-. ]', '_', source.name) or "rois"
-    filename = f"{safe_name}_rois.yaml"
+    # Build an ASCII-safe fallback filename for the header, while preserving the
+    # UTF-8 filename via RFC 5987.
+    # 构建 ASCII 安全的回退文件名，并通过 RFC 5987 保留 UTF-8 文件名。
+    utf8_filename = f"{source.name or 'rois'}_rois.yaml"
+    safe_name = re.sub(r"[^A-Za-z0-9._ -]", "_", source.name).strip() or "rois"
+    ascii_filename = f"{safe_name}_rois.yaml"
     return Response(
         content=yaml_content,
         media_type="application/x-yaml",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_filename}"; '
+                f"filename*=UTF-8''{quote(utf8_filename)}"
+            )
+        },
     )
 
 

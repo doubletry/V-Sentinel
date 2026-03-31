@@ -1,6 +1,8 @@
 """Tests for the Sources REST API endpoints."""
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import pytest
 from httpx import AsyncClient
 
@@ -177,6 +179,25 @@ class TestROIExport:
         data = yaml.safe_load(resp.content)
         assert len(data["rois"]) == 1
         assert data["rois"][0]["tag"] == "zone-A"
+
+    async def test_export_with_unicode_source_name_uses_utf8_filename_header(
+        self, async_client: AsyncClient
+    ):
+        create_resp = await async_client.post(
+            "/api/sources",
+            json={"name": "测试摄像头", "rtsp_url": "rtsp://localhost:8554/unicode"},
+        )
+        source_id = create_resp.json()["id"]
+
+        resp = await async_client.get(f"/api/sources/{source_id}/rois/export")
+
+        assert resp.status_code == 200
+        content_disposition = resp.headers["content-disposition"]
+        assert 'filename="______rois.yaml"' in content_disposition
+        assert (
+            f"filename*=UTF-8''{quote('测试摄像头_rois.yaml')}"
+            in content_disposition
+        )
 
     async def test_export_not_found(self, async_client: AsyncClient):
         resp = await async_client.get("/api/sources/missing/rois/export")

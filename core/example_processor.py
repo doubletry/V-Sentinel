@@ -38,15 +38,16 @@ from datetime import datetime, timezone
 import cv2
 import numpy as np
 from loguru import logger
-from turbojpeg import TurboJPEG, TJPF_RGB
+try:
+    from turbojpeg import TurboJPEG, TJPF_RGB
+    _jpeg = TurboJPEG()
+except (ImportError, RuntimeError) as _exc:
+    _jpeg = None
+    TJPF_RGB = None  # type: ignore[assignment]
+    logger.warning("TurboJPEG unavailable in example processor: {}", _exc)
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
 from core.runner import run_processor
-
-# Module-level TurboJPEG instance (thread-safe, reusable).
-# 模块级 TurboJPEG 实例（线程安全，可复用）。
-_jpeg = TurboJPEG()
-
 
 class ExampleProcessor(BaseVideoProcessor):
     """Example processor: upload → concurrent detection + OCR → batch classify.
@@ -183,14 +184,11 @@ class ExampleProcessor(BaseVideoProcessor):
                     }
                 )
 
-        # 3. Annotate frame / 标注帧
+        # 3. Assemble analysis result / 组装分析结果
         result = AnalysisResult(
             detections=detections,
             classifications=classifications,
             ocr_texts=ocr_texts,
-        )
-        result.annotated_frame = await asyncio.to_thread(
-            self.draw_on_frame, frame, result
         )
 
         # 4. Assemble messages / 组装消息
@@ -199,7 +197,7 @@ class ExampleProcessor(BaseVideoProcessor):
 
         if detections:
             labels = ", ".join(d["label"] for d in detections[:5])
-            thumbnail = self._encode_thumbnail(result.annotated_frame)
+            thumbnail = self._encode_thumbnail(frame)
             messages.append(
                 {
                     "timestamp": now,
@@ -239,7 +237,14 @@ class ExampleProcessor(BaseVideoProcessor):
             frame = cv2.resize(
                 frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
             )
-        encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
+        if _jpeg is not None:
+            encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
+        else:
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if not ok:
+                return None
+            encoded = buf.tobytes()
         return base64.b64encode(encoded).decode()
 
 

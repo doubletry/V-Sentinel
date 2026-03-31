@@ -69,19 +69,30 @@ bash backend/proto/generate.sh
 - ROI polygons sent to V-Engine now use integer pixel coordinates.
 - Upload RPCs send `base.Image` / `base.Video` messages instead of raw
   `data + filename` fields, so the client wraps upload payloads before sending.
-- `AsyncVEngineClient.detect()` / `classify()` also support batched
+- `AsyncVEngineClient.detect()` / `classify()` / `ocr()` all support batched
   `images=[{shape, image_key|image_bytes, roi?}, ...]` requests, so one cached
   frame key can be reused with multiple ROI-scoped `base.Image` entries in a
   single microservice call.
+- `AsyncVEngineClient.recognize_action()` now supports cache-key based image
+  sequences too, via `image_keys=[...]`, `images=[...]`, or batched
+  `sequences=[{images:[...]}, ...]`.
+- Frame processing is pipelined: multiple frames may be in flight concurrently,
+  while a dedicated display worker thread performs draw+push without blocking
+  the main async inference loop.
 
 ## Architecture
 
 ```
-RTSP Input ──► Frame Reader Thread ──► asyncio.Queue ──► process_frame()
-                                                              │
-                                                    annotated_frame
-                                                              │
-                                                    Push Thread ──► MediaMTX RTSP Output
+RTSP Input ──► Frame Reader Thread ──► asyncio.Queue ──► process_frame() tasks (multiple in flight)
+                                                                  │
+                                                                  ▼
+                                                     Result / Message Dispatch
+                                                                  │
+                                                                  ▼
+                                                    Display Worker Thread (draw + push)
+                                                                  │
+                                                                  ▼
+                                                         MediaMTX RTSP Output
 ```
 
 ## License

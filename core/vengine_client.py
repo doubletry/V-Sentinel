@@ -272,6 +272,75 @@ class AsyncVEngineClient:
             )
         ]
 
+    def _make_sequences(
+        self,
+        *,
+        frames_bytes: list[bytes] | None = None,
+        shapes: list[tuple[int, ...]] | None = None,
+        roi_points: list[dict] | None = None,
+        image_key: str | None = None,
+        image_keys: list[str] | None = None,
+        images: list[dict] | None = None,
+        sequences: list[dict | list[dict]] | None = None,
+    ) -> list[base_pb2.ImageSequence]:
+        """Build one or more ``base_pb2.ImageSequence`` objects.
+        构建一个或多个 ``base_pb2.ImageSequence`` 对象。"""
+        if sequences is not None:
+            built_sequences: list[base_pb2.ImageSequence] = []
+            for seq_idx, sequence in enumerate(sequences):
+                sequence_images = (
+                    sequence.get("images", []) if isinstance(sequence, dict) else sequence
+                )
+                built_sequences.append(
+                    base_pb2.ImageSequence(
+                        images=self._make_images(images=sequence_images),
+                        id=(
+                            int(sequence.get("sequence_id", seq_idx))
+                            if isinstance(sequence, dict)
+                            else seq_idx
+                        ),
+                    )
+                )
+            return built_sequences
+
+        if images is not None:
+            return [base_pb2.ImageSequence(images=self._make_images(images=images), id=0)]
+
+        if shapes is None:
+            raise ValueError("Provide shapes when images/sequences are not supplied")
+
+        if image_keys is None and image_key is not None:
+            image_keys = [image_key] * len(shapes)
+
+        if image_keys is not None:
+            if len(image_keys) != len(shapes):
+                raise ValueError("image_keys and shapes must have the same length")
+            seq_images = [
+                self._make_image(
+                    shape,
+                    roi_points,
+                    image_id=idx,
+                    image_key=key,
+                )
+                for idx, (key, shape) in enumerate(zip(image_keys, shapes))
+            ]
+        else:
+            if frames_bytes is None:
+                raise ValueError("Provide frames_bytes or image_keys")
+            if len(frames_bytes) != len(shapes):
+                raise ValueError("frames_bytes and shapes must have the same length")
+            seq_images = [
+                self._make_image(
+                    shape,
+                    roi_points,
+                    image_id=idx,
+                    image_bytes=data,
+                )
+                for idx, (data, shape) in enumerate(zip(frames_bytes, shapes))
+            ]
+
+        return [base_pb2.ImageSequence(images=seq_images, id=0)]
+
     # ── Upload + cache key / 上传与缓存键 ────────────────────────────────────
 
     async def upload_and_get_key(self, image_bytes: bytes, filename: str = "frame.jpg") -> str | None:
@@ -448,51 +517,70 @@ class AsyncVEngineClient:
 
     async def ocr(
         self,
-        shape: tuple[int, ...],
+        shape: tuple[int, ...] | None,
         model_name: str,
         conf: float = 0.5,
         roi_points: list[dict] | None = None,
         *,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
+        images: list[dict] | None = None,
     ) -> list[dict]:
         """Async OCR. 异步文字识别。
 
-        Returns list of {text, confidence, points}.
+        Pass either single-image args (*shape* + *image_bytes*/*image_key*), or
+        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` for a
+        batched request.
+        既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
+        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
+
+        Returns list of {text, confidence, points}. Batched responses also
+        include ``image_id`` to identify which input image produced the result.
+        返回 {text, confidence, points} 列表。批量请求时还会附带 ``image_id``。
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
         """
         if not self._enabled.get("ocr", False):
             return []
         try:
-            image = self._make_image(shape, roi_points, image_bytes=image_bytes, image_key=image_key)
+            request_images = self._make_images(
+                shape=shape,
+                roi_points=roi_points,
+                image_bytes=image_bytes,
+                image_key=image_key,
+                images=images,
+            )
+            if not request_images:
+                return []
             params = ocr_service_pb2.OCRParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
-                    use_image_roi=bool(roi_points),
+                    use_image_roi=any(bool(img.region_of_interest.points) for img in request_images),
                 ),
                 confidence_threshold=conf,
             )
             request = ocr_service_pb2.OCRRequest(
                 request_header=self._make_header(),
-                images=[image],
+                images=request_images,
                 params=params,
             )
             response = await self._stubs["ocr"].Predict(request)
             results: list[dict] = []
+            is_batch = len(request_images) > 1
             if response.response_header.status_code == base_pb2.StatusCode.STATUS_OK:
                 for ocr_result in response.results:
                     for block in ocr_result.blocks:
-                        results.append(
-                            {
-                                "text": block.text,
-                                "confidence": block.confidence,
-                                "points": [
-                                    {"x": p.x, "y": p.y} for p in block.points
-                                ],
-                                "language": block.language,
-                            }
-                        )
+                        item = {
+                            "text": block.text,
+                            "confidence": block.confidence,
+                            "points": [
+                                {"x": p.x, "y": p.y} for p in block.points
+                            ],
+                            "language": block.language,
+                        }
+                        if is_batch:
+                            item["image_id"] = ocr_result.image_id
+                        results.append(item)
             return results
         except grpc.aio.AioRpcError as exc:
             logger.error("OCR gRPC error: {} - {}", exc.code(), exc.details())
@@ -505,56 +593,74 @@ class AsyncVEngineClient:
 
     async def recognize_action(
         self,
-        frames_bytes: list[bytes],
-        shapes: list[tuple[int, ...]],
         model_name: str,
+        frames_bytes: list[bytes] | None = None,
+        shapes: list[tuple[int, ...]] | None = None,
         roi_points: list[dict] | None = None,
+        *,
+        image_key: str | None = None,
+        image_keys: list[str] | None = None,
+        images: list[dict] | None = None,
+        sequences: list[dict | list[dict]] | None = None,
     ) -> list[dict]:
         """Async action recognition. 异步行为识别。
 
-        Returns list of {label, confidence, class_id}.
+        Supports the legacy single-sequence API (*frames_bytes* + *shapes*), a
+        single-sequence ``images=[...]`` API, and a batched
+        ``sequences=[{images:[...]}, ...]`` API. Cache keys may be supplied via
+        ``image_keys`` / ``image_key`` or inside the ``images`` items.
+        支持原有单序列 API（*frames_bytes* + *shapes*），也支持单序列
+        ``images=[...]`` 以及批量 ``sequences=[{images:[...]}, ...]``。
+
+        Returns list of {label, confidence, class_id}. Batched sequence
+        responses also include ``sequence_id``.
+        返回 {label, confidence, class_id} 列表。批量序列请求时还会附带
+        ``sequence_id``。
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
         """
         if not self._enabled.get("action", False):
             return []
         try:
-            images = [
-                base_pb2.Image(
-                    data=data,
-                    id=idx,
-                    shape=base_pb2.ShapeInfo(dims=list(shape)),
-                )
-                for idx, (data, shape) in enumerate(zip(frames_bytes, shapes))
-            ]
-            if roi_points:
-                roi_polygon = self._make_roi_polygon(roi_points)
-                for img in images:
-                    img.region_of_interest = roi_polygon
-
-            sequence = base_pb2.ImageSequence(images=images, id=0)
+            request_sequences = self._make_sequences(
+                frames_bytes=frames_bytes,
+                shapes=shapes,
+                roi_points=roi_points,
+                image_key=image_key,
+                image_keys=image_keys,
+                images=images,
+                sequences=sequences,
+            )
+            if not request_sequences:
+                return []
             params = action_service_pb2.ActionParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
-                    use_image_roi=bool(roi_points),
+                    use_image_roi=any(
+                        bool(img.region_of_interest.points)
+                        for sequence in request_sequences
+                        for img in sequence.images
+                    ),
                 )
             )
             request = action_service_pb2.ActionRequest(
                 request_header=self._make_header(),
-                sequences=[sequence],
+                sequences=request_sequences,
                 params=params,
             )
             response = await self._stubs["action"].Predict(request)
             results: list[dict] = []
+            is_batch = len(request_sequences) > 1
             if response.response_header.status_code == base_pb2.StatusCode.STATUS_OK:
                 for res in response.results:
-                    results.append(
-                        {
-                            "label": res.label,
-                            "confidence": res.confidence,
-                            "class_id": res.class_id,
-                        }
-                    )
+                    item = {
+                        "label": res.label,
+                        "confidence": res.confidence,
+                        "class_id": res.class_id,
+                    }
+                    if is_batch:
+                        item["sequence_id"] = res.sequence_id
+                    results.append(item)
             return results
         except grpc.aio.AioRpcError as exc:
             logger.error("Action gRPC error: {} - {}", exc.code(), exc.details())

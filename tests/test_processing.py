@@ -222,3 +222,30 @@ class TestExampleProcessorBatchClassification:
                 "bbox": [10, 20, 50, 80],
             }
         ]
+
+
+class TestBackendBaseProcessorPipeline:
+    async def test_handle_result_broadcasts_messages_and_enqueues_display(self):
+        proc = DummyProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            rois=[],
+            vengine_client=MagicMock(),
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+        proc.ws_manager.broadcast = AsyncMock()
+        queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
+        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        frame = np.zeros((32, 32, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[{"x_min": 1, "y_min": 2, "x_max": 3, "y_max": 4, "label": "person"}],
+            messages=[{"message": "hello"}],
+        )
+
+        await proc._handle_result(frame, result)
+
+        proc.ws_manager.broadcast.assert_awaited_once_with({"message": "hello"})
+        assert queued
+        assert queued[0][2] == "cam1_processed"

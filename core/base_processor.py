@@ -9,6 +9,7 @@ into the full V-Sentinel backend without any changes.
 from __future__ import annotations
 
 import asyncio
+import queue
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -104,6 +105,10 @@ class BaseVideoProcessor(ABC):
         self._frame_queue: asyncio.Queue[tuple[np.ndarray, bytes] | None] = (
             asyncio.Queue(maxsize=2)
         )
+        self._processing_tasks: set[asyncio.Task] = set()
+        self._max_inflight_frames = max(
+            1, int(self.app_settings.get("max_inflight_frames", "3"))
+        )
         self.status: str = "stopped"
 
         # Persistent RTSP push state
@@ -111,6 +116,11 @@ class BaseVideoProcessor(ABC):
         self._push_container = None
         self._push_stream = None
         self._push_path: str | None = None
+        self._display_queue: queue.Queue[
+            tuple[np.ndarray, AnalysisResult, str] | None
+        ] = queue.Queue(maxsize=2)
+        self._display_stop = threading.Event()
+        self._display_thread: threading.Thread | None = None
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -120,6 +130,8 @@ class BaseVideoProcessor(ABC):
             logger.warning("Processor already running for {}", self.source_id)
             return
         self._stop_event.clear()
+        self._display_stop.clear()
+        self._start_display_worker()
         self.status = "running"
         self._task = asyncio.create_task(
             self._run_loop(), name=f"processor-{self.source_id}"
@@ -135,6 +147,15 @@ class BaseVideoProcessor(ABC):
                 await asyncio.wait_for(asyncio.shield(self._task), timeout=5.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
+        if self._processing_tasks:
+            for task in list(self._processing_tasks):
+                task.cancel()
+            try:
+                await asyncio.gather(*self._processing_tasks, return_exceptions=True)
+            except Exception:
+                pass
+            self._processing_tasks.clear()
+        self._stop_display_worker()
         self._close_push_container()
         self.status = "stopped"
         logger.info("Stopped processor for {}", self.source_id)
@@ -158,27 +179,13 @@ class BaseVideoProcessor(ABC):
                     break
 
                 frame, encoded = item
-                h, w = frame.shape[:2]
-                shape = (h, w, frame.shape[2] if frame.ndim == 3 else 1)
-                roi_pixel_points = self._normalize_rois_to_pixels(w, h)
-
-                try:
-                    result = await self.process_frame(
-                        frame=frame,
-                        encoded=encoded,
-                        shape=shape,
-                        roi_pixel_points=roi_pixel_points,
-                    )
-                except Exception as exc:
-                    logger.error("process_frame error: {}", exc)
-                    result = AnalysisResult()
-
-                # Push annotated frame back to RTSP if available
-                if result.annotated_frame is not None:
-                    output_path = f"{self._stream_key()}_processed"
-                    await asyncio.to_thread(
-                        self._push_frame, result.annotated_frame, output_path
-                    )
+                await self._wait_for_processing_slot()
+                task = asyncio.create_task(
+                    self._process_frame_item(frame, encoded),
+                    name=f"process-frame-{self.source_id}",
+                )
+                self._processing_tasks.add(task)
+                task.add_done_callback(self._processing_tasks.discard)
         except asyncio.CancelledError:
             pass
         except Exception as exc:
@@ -187,6 +194,12 @@ class BaseVideoProcessor(ABC):
         finally:
             self._stop_event.set()
             reader_task.cancel()
+            if self._processing_tasks:
+                await asyncio.gather(
+                    *list(self._processing_tasks), return_exceptions=True
+                )
+                self._processing_tasks.clear()
+            self._stop_display_worker()
 
     # ── Frame Reader (runs in thread) ─────────────────────────────────────
 
@@ -232,23 +245,44 @@ class BaseVideoProcessor(ABC):
                             self._frame_queue.get_nowait()
                         except asyncio.QueueEmpty:
                             pass
-                    try:
-                        loop.call_soon_threadsafe(
-                            self._frame_queue.put_nowait, (rgb, encoded)
-                        )
-                    except asyncio.QueueFull:
-                        pass
+                    loop.call_soon_threadsafe(
+                        self._enqueue_frame_from_reader, rgb, encoded
+                    )
         except Exception as exc:
             if not self._stop_event.is_set():
                 logger.exception("Frame reader error for {}: {}", self.rtsp_url, exc)
         finally:
             try:
-                loop.call_soon_threadsafe(self._frame_queue.put_nowait, None)
+                loop.call_soon_threadsafe(self._enqueue_reader_sentinel)
             except Exception:
                 pass
             logger.info("Frame reader exited for {}", self.rtsp_url)
 
     # ── Abstract method ───────────────────────────────────────────────────
+
+    def _enqueue_frame_from_reader(self, frame: np.ndarray, encoded: bytes) -> None:
+        """Enqueue the latest decoded frame, dropping the oldest if needed."""
+        if self._frame_queue.full():
+            try:
+                self._frame_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            self._frame_queue.put_nowait((frame, encoded))
+        except asyncio.QueueFull:
+            pass
+
+    def _enqueue_reader_sentinel(self) -> None:
+        """Enqueue the reader completion sentinel, dropping one frame if needed."""
+        if self._frame_queue.full():
+            try:
+                self._frame_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            self._frame_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
 
     @abstractmethod
     async def process_frame(
@@ -282,6 +316,120 @@ class BaseVideoProcessor(ABC):
 
     # ── RTSP Push (persistent) ────────────────────────────────────────────
 
+    async def _wait_for_processing_slot(self) -> None:
+        """Limit frame-level inference concurrency to keep latency bounded."""
+        if len(self._processing_tasks) < self._max_inflight_frames:
+            return
+        done, _ = await asyncio.wait(
+            self._processing_tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            try:
+                await task
+            except BaseException:
+                pass
+
+    async def _process_frame_item(self, frame: np.ndarray, encoded: bytes) -> None:
+        """Process one frame and hand off any display work asynchronously."""
+        h, w = frame.shape[:2]
+        shape = (h, w, frame.shape[2] if frame.ndim == 3 else 1)
+        roi_pixel_points = self._normalize_rois_to_pixels(w, h)
+
+        try:
+            result = await self.process_frame(
+                frame=frame,
+                encoded=encoded,
+                shape=shape,
+                roi_pixel_points=roi_pixel_points,
+            )
+        except Exception as exc:
+            logger.error("process_frame error: {}", exc)
+            result = AnalysisResult()
+
+        await self._handle_result(frame, result)
+
+    async def _handle_result(self, frame: np.ndarray, result: AnalysisResult) -> None:
+        """Default per-result handling: enqueue for drawing/pushing if needed."""
+        if self._should_display_result(result):
+            output_path = f"{self._stream_key()}_processed"
+            self._enqueue_display(frame, result, output_path)
+
+    def _should_display_result(self, result: AnalysisResult) -> bool:
+        """Return whether a result should be drawn/pushed to the output stream."""
+        return bool(
+            result.annotated_frame is not None
+            or result.detections
+            or result.classifications
+            or result.ocr_texts
+            or result.actions
+        )
+
+    def _start_display_worker(self) -> None:
+        """Start the dedicated display worker thread if it is not running."""
+        if self._display_thread is not None and self._display_thread.is_alive():
+            return
+        self._display_thread = threading.Thread(
+            target=self._display_worker,
+            name=f"display-{self.source_id}",
+            daemon=True,
+        )
+        self._display_thread.start()
+
+    def _stop_display_worker(self) -> None:
+        """Signal the display worker to stop and wait briefly for exit."""
+        self._display_stop.set()
+        try:
+            self._display_queue.put_nowait(None)
+        except queue.Full:
+            try:
+                self._display_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._display_queue.put_nowait(None)
+            except queue.Full:
+                pass
+        if self._display_thread is not None:
+            self._display_thread.join(timeout=2.0)
+            self._display_thread = None
+
+    def _enqueue_display(
+        self, frame: np.ndarray, result: AnalysisResult, output_rtsp_path: str
+    ) -> None:
+        """Queue a frame/result pair for the dedicated draw+push worker."""
+        item = (frame, result, output_rtsp_path)
+        try:
+            self._display_queue.put_nowait(item)
+        except queue.Full:
+            try:
+                self._display_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._display_queue.put_nowait(item)
+            except queue.Full:
+                pass
+
+    def _display_worker(self) -> None:
+        """Dedicated worker that draws result overlays and pushes frames."""
+        while not self._display_stop.is_set():
+            try:
+                item = self._display_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+            frame, result, output_rtsp_path = item
+            display_frame = result.annotated_frame
+            if display_frame is None:
+                try:
+                    display_frame = self.draw_on_frame(frame, result)
+                except Exception as exc:
+                    logger.debug("Display draw error for {}: {}", output_rtsp_path, exc)
+                    continue
+            self._push_frame(display_frame, output_rtsp_path)
+
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent RTSP connection."""
         import av
@@ -294,11 +442,24 @@ class BaseVideoProcessor(ABC):
                         f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
                         f"/{output_rtsp_path}"
                     )
-                    container = av.open(rtsp_url, mode="w", format="rtsp")
+                    container = av.open(
+                        rtsp_url,
+                        mode="w",
+                        format="rtsp",
+                        options={
+                            "rtsp_transport": "tcp",
+                            "muxdelay": "0",
+                        },
+                    )
                     stream = container.add_stream("h264", rate=25)
                     stream.width = frame.shape[1]
                     stream.height = frame.shape[0]
                     stream.pix_fmt = "yuv420p"
+                    stream.options = {
+                        "preset": "ultrafast",
+                        "tune": "zerolatency",
+                        "g": "25",
+                    }
                     self._push_container = container
                     self._push_stream = stream
                     self._push_path = output_rtsp_path

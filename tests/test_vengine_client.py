@@ -6,10 +6,12 @@ import pytest
 
 from backend.config import Settings
 from core.proto import (
+    action_service_pb2,
     base_pb2,
     classification_service_pb2,
     classification_service_pb2_grpc,
     detection_service_pb2,
+    ocr_service_pb2,
     upload_service_pb2,
     upload_service_pb2_grpc,
 )
@@ -432,6 +434,165 @@ class TestBatchImageRpcCompatibility:
                 "image_id": 1,
             }
         ]
+
+    async def test_ocr_sends_multiple_images_and_returns_image_id(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                seen["keys"] = [img.key for img in request.images]
+                return ocr_service_pb2.OCRResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        ocr_service_pb2.OCRResults(
+                            image_id=1,
+                            blocks=[
+                                ocr_service_pb2.TextBlock(
+                                    text="hello",
+                                    confidence=0.7,
+                                    language="en",
+                                    points=[
+                                        base_pb2.Point(x=1, y=2),
+                                        base_pb2.Point(x=3, y=4),
+                                    ],
+                                )
+                            ],
+                        )
+                    ],
+                )
+
+        client._enabled = {"ocr": True}
+        client._stubs["ocr"] = Stub()
+        results = await client.ocr(
+            shape=None,
+            model_name="ocr-model",
+            images=[
+                {"shape": (100, 100, 3), "key": "frame-key-1"},
+                {"shape": (100, 100, 3), "key": "frame-key-2"},
+            ],
+        )
+
+        assert seen == {
+            "count": 2,
+            "ids": [0, 1],
+            "keys": ["frame-key-1", "frame-key-2"],
+        }
+        assert results == [
+            {
+                "text": "hello",
+                "confidence": pytest.approx(0.7),
+                "points": [{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+                "language": "en",
+                "image_id": 1,
+            }
+        ]
+
+    async def test_action_accepts_image_keys_for_legacy_sequence(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["sequence_count"] = len(request.sequences)
+                seen["image_keys"] = [img.key for img in request.sequences[0].images]
+                seen["image_ids"] = [img.id for img in request.sequences[0].images]
+                return action_service_pb2.ActionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        action_service_pb2.ActionResult(
+                            label="running",
+                            confidence=0.8,
+                            class_id=3,
+                        )
+                    ],
+                )
+
+        client._enabled = {"action": True}
+        client._stubs["action"] = Stub()
+        results = await client.recognize_action(
+            model_name="action-model",
+            shapes=[(100, 100, 3), (100, 100, 3)],
+            image_keys=["key-1", "key-2"],
+        )
+
+        assert seen == {
+            "sequence_count": 1,
+            "image_keys": ["key-1", "key-2"],
+            "image_ids": [0, 1],
+        }
+        assert results[0]["label"] == "running"
+        assert results[0]["class_id"] == 3
+        assert results[0]["confidence"] == pytest.approx(0.8)
+
+    async def test_action_supports_batched_sequences(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["sequence_count"] = len(request.sequences)
+                seen["sequence_ids"] = [seq.id for seq in request.sequences]
+                seen["seq0_keys"] = [img.key for img in request.sequences[0].images]
+                seen["seq1_data"] = [img.data for img in request.sequences[1].images]
+                return action_service_pb2.ActionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        action_service_pb2.ActionResult(
+                            label="walking",
+                            confidence=0.9,
+                            class_id=1,
+                            sequence_id=0,
+                        ),
+                        action_service_pb2.ActionResult(
+                            label="running",
+                            confidence=0.85,
+                            class_id=2,
+                            sequence_id=1,
+                        ),
+                    ],
+                )
+
+        client._enabled = {"action": True}
+        client._stubs["action"] = Stub()
+        results = await client.recognize_action(
+            model_name="action-model",
+            sequences=[
+                {
+                    "images": [
+                        {"shape": (100, 100, 3), "key": "key-1"},
+                        {"shape": (100, 100, 3), "key": "key-2"},
+                    ]
+                },
+                {
+                    "images": [
+                        {"shape": (100, 100, 3), "image_bytes": b"a"},
+                        {"shape": (100, 100, 3), "image_bytes": b"b"},
+                    ]
+                },
+            ],
+        )
+
+        assert seen == {
+            "sequence_count": 2,
+            "sequence_ids": [0, 1],
+            "seq0_keys": ["key-1", "key-2"],
+            "seq1_data": [b"a", b"b"],
+        }
+        assert results[0]["label"] == "walking"
+        assert results[0]["sequence_id"] == 0
+        assert results[0]["confidence"] == pytest.approx(0.9)
+        assert results[1]["label"] == "running"
+        assert results[1]["sequence_id"] == 1
+        assert results[1]["confidence"] == pytest.approx(0.85)
 
     async def test_classify_batch_roundtrip_with_real_grpc_service(self):
         seen: dict[str, object] = {}

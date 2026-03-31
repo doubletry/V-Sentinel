@@ -20,7 +20,6 @@ import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-import numpy as np
 from loguru import logger
 
 # Re-export core classes so existing imports from backend.processing.base
@@ -107,83 +106,17 @@ class BaseVideoProcessor(_CoreBaseVideoProcessor):
     async def stop(self) -> None:
         """Stop the processing task gracefully.
         优雅停止处理任务。"""
-        self._stop_event.set()
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
-            try:
-                await asyncio.wait_for(asyncio.shield(self._task), timeout=5.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-        # Close the persistent RTSP push container / 关闭持久 RTSP 推流容器
-        self._close_push_container()
-        self.status = "stopped"
-        logger.info("Stopped processor for source {}", self.source_id)
+        await super().stop()
 
-    # ── Main Loop (with agent/broadcast integration) / 主循环（含代理/广播集成）
+    # ── Result dispatch / 结果分发 ────────────────────────────────────────────
 
-    async def _run_loop(self) -> None:
-        """Main processing loop with agent aggregation and WebSocket broadcast.
-        包含代理聚合和 WebSocket 广播的主处理循环。"""
-        loop = asyncio.get_running_loop()
-        reader_task = loop.run_in_executor(None, self._frame_reader, loop)
-
-        try:
-            while not self._stop_event.is_set():
-                try:
-                    item = await asyncio.wait_for(
-                        self._frame_queue.get(), timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    continue
-                if item is None:
-                    logger.info("Frame reader finished for {}", self.source_id)
-                    break
-
-                frame, encoded = item
-                h, w = frame.shape[:2]
-                shape = (h, w, frame.shape[2] if frame.ndim == 3 else 1)
-
-                # Convert ROI points from normalized to pixel coordinates
-                # 将 ROI 点从归一化坐标转换为像素坐标
-                roi_pixel_points = self._normalize_rois_to_pixels(w, h)
-
-                try:
-                    result = await self.process_frame(
-                        frame=frame,
-                        encoded=encoded,
-                        shape=shape,
-                        roi_pixel_points=roi_pixel_points,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "process_frame error for {}: {}", self.source_id, exc
-                    )
-                    result = AnalysisResult()
-
-                # Route results through agent (aggregator) or broadcast directly
-                # 通过代理（聚合器）路由结果，或直接广播
-                if self.agent is not None:
-                    await self.agent.submit(
-                        self.source_id, self.source_name, result
-                    )
-                else:
-                    for msg in result.messages:
-                        await self.ws_manager.broadcast(msg)
-
-                # Push annotated frame back to MediaMTX
-                # 将标注帧推回 MediaMTX
-                if result.annotated_frame is not None:
-                    output_path = f"{self._stream_key()}_processed"
-                    await asyncio.to_thread(
-                        self._push_frame, result.annotated_frame, output_path
-                    )
-
-        except asyncio.CancelledError:
-            pass
-        except Exception as exc:
-            logger.error("Processor run_loop error for {}: {}", self.source_id, exc)
-            self.status = "error"
-        finally:
-            self._stop_event.set()
-            reader_task.cancel()
-            logger.debug("run_loop exited for {}", self.source_id)
+    async def _handle_result(self, frame, result: AnalysisResult) -> None:
+        """Dispatch messages, then hand off display work to the core worker."""
+        if self.agent is not None:
+            await self.agent.submit(
+                self.source_id, self.source_name, result
+            )
+        else:
+            for msg in result.messages:
+                await self.ws_manager.broadcast(msg)
+        await super()._handle_result(frame, result)

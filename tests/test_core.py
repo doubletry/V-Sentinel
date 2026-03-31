@@ -405,3 +405,81 @@ class TestCoreExampleProcessorBatchClassification:
                 "bbox": [200, 220, 260, 320],
             },
         ]
+
+
+class TestCoreBaseVideoProcessorPipeline:
+    async def test_run_loop_allows_multiple_inflight_frames(self):
+        class PipelineProcessor(BaseVideoProcessor):
+            def __init__(self):
+                super().__init__(
+                    source_id="s1",
+                    source_name="cam",
+                    rtsp_url="rtsp://localhost:8554/cam1",
+                    app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+                )
+                self.started_two = asyncio.Event()
+                self.release_first = asyncio.Event()
+                self.started_count = 0
+
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                self.started_count += 1
+                current = self.started_count
+                if current == 2:
+                    self.started_two.set()
+                if current == 1:
+                    await self.release_first.wait()
+                return AnalysisResult()
+
+        proc = PipelineProcessor()
+        proc._max_inflight_frames = 2
+
+        def fake_reader(loop):
+            frame = np.zeros((32, 32, 3), dtype=np.uint8)
+            loop.call_soon_threadsafe(proc._frame_queue.put_nowait, (frame, b"a"))
+            loop.call_soon_threadsafe(proc._frame_queue.put_nowait, (frame, b"b"))
+            loop.call_soon_threadsafe(proc._frame_queue.put_nowait, None)
+
+        proc._frame_reader = fake_reader
+        await proc.start()
+        await asyncio.wait_for(proc.started_two.wait(), timeout=1.0)
+        proc.release_first.set()
+        await asyncio.sleep(0.05)
+        await proc.stop()
+
+        assert proc.started_count >= 2
+
+    async def test_display_worker_draws_and_pushes_on_demand(self):
+        class DisplayProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = DisplayProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        pushed: list[tuple[np.ndarray, str]] = []
+        proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        proc._start_display_worker()
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[
+                {
+                    "x_min": 5,
+                    "y_min": 6,
+                    "x_max": 20,
+                    "y_max": 30,
+                    "confidence": 0.8,
+                    "label": "person",
+                }
+            ]
+        )
+        proc._enqueue_display(frame, result, "cam1_processed")
+        await asyncio.sleep(0.1)
+        proc._stop_display_worker()
+
+        assert len(pushed) == 1
+        pushed_frame, path = pushed[0]
+        assert path == "cam1_processed"
+        assert pushed_frame.sum() > 0

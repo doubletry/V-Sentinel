@@ -174,6 +174,8 @@ class TestCoreVEngineClient:
         client = AsyncVEngineClient()
         poly = client._make_roi_polygon([{"x": 10, "y": 20}, {"x": 30, "y": 40}])
         assert len(poly.points) == 2
+        assert isinstance(poly.points[0].x, int)
+        assert isinstance(poly.points[1].y, int)
         assert poly.points[0].x == 10
         assert poly.points[1].y == 40
 

@@ -430,13 +430,35 @@ class BaseVideoProcessor(ABC):
                     continue
             self._push_frame(display_frame, output_rtsp_path)
 
+    @staticmethod
+    def _ensure_even_dims(frame: np.ndarray) -> np.ndarray:
+        """Crop frame to even width/height required by yuv420p encoding.
+        将帧裁剪为 yuv420p 编码所需的偶数宽高。"""
+        h, w = frame.shape[:2]
+        new_h = h - (h % 2)
+        new_w = w - (w % 2)
+        if new_h != h or new_w != w:
+            frame = frame[:new_h, :new_w]
+        return frame
+
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent RTSP connection."""
         import av
 
+        frame = self._ensure_even_dims(frame)
+        h, w = frame.shape[:2]
+        if h == 0 or w == 0:
+            return
+
         with self._push_lock:
             try:
-                if self._push_container is None or self._push_path != output_rtsp_path:
+                if (
+                    self._push_container is None
+                    or self._push_path != output_rtsp_path
+                    or self._push_stream is None
+                    or self._push_stream.width != w
+                    or self._push_stream.height != h
+                ):
                     self._close_push_container()
                     rtsp_url = (
                         f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
@@ -452,20 +474,21 @@ class BaseVideoProcessor(ABC):
                         },
                     )
                     stream = container.add_stream("h264", rate=25)
-                    stream.width = frame.shape[1]
-                    stream.height = frame.shape[0]
+                    stream.width = w
+                    stream.height = h
                     stream.pix_fmt = "yuv420p"
+                    stream.codec_context.time_base = "1/25"
                     stream.options = {
                         "preset": "ultrafast",
                         "tune": "zerolatency",
                         "g": "25",
+                        "bf": "0",
                     }
                     self._push_container = container
                     self._push_stream = stream
                     self._push_path = output_rtsp_path
 
                 av_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
-                av_frame = av_frame.reformat(format=self._push_stream.pix_fmt)
                 for packet in self._push_stream.encode(av_frame):
                     self._push_container.mux(packet)
             except Exception as exc:

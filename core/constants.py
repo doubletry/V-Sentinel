@@ -72,3 +72,8 @@ PUSH_FPS: int = 25
 
 PUSH_PRESET: str = "ultrafast"
 """x264 preset for RTSP push. RTSP 推流的 x264 预设。"""
+
+RTSP_TRANSPORT: str = "tcp"
+"""RTSP transport protocol for reading.  TCP avoids green-frame / mosaic
+artifacts caused by UDP packet loss.
+RTSP 读取传输协议。TCP 避免 UDP 丢包导致的绿帧/马赛克。"""

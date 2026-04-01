@@ -138,13 +138,6 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         """
         self._frame_count += 1
 
-        # Set tracker ROI from first polygon (if any, once).
-        # 从第一个多边形设置跟踪器 ROI（如果有，仅一次）。
-        if roi_pixel_points and self.tracker.roi is None:
-            self.tracker.roi = [
-                [p["x"], p["y"]] for p in roi_pixel_points[0]
-            ]
-
         # Guard: if no vengine, echo-only mode (draw frame number).
         # 保护：如无 vengine，仅回显模式（绘制帧号）。
         if self.vengine is None:
@@ -160,9 +153,9 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         h, w = shape[:2]
         # The user-defined ROI is used as model_roi for detection: the server
         # filters detection results to keep only boxes inside the ROI
-        # (post-processing).
+        # (post-processing).  No local ROI filtering is needed.
         # 用户定义的 ROI 用作检测的 model_roi：服务端过滤检测结果仅保留 ROI 内
-        # 的检测框（后处理）。
+        # 的检测框（后处理）。无需本地 ROI 过滤。
         primary_roi = roi_pixel_points[0] if roi_pixel_points else None
 
         # 0. Upload frame to cache to avoid duplicate transmission.
@@ -198,11 +191,10 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             else:
                 analysis.others.append(det)
 
-        # 3. Tracker update — the tracker's internal ROI filter is already
-        #    set, but since detection already uses model_roi, all returned
-        #    trucks are within the ROI.
-        # 3. 跟踪器更新——跟踪器的内部 ROI 过滤已设置，但由于检测已使用
-        #    model_roi，所有返回的卡车都在 ROI 内。
+        # 3. Tracker update — detection already used model_roi so all returned
+        #    trucks are within the ROI, no redundant local filtering.
+        # 3. 跟踪器更新——检测已使用 model_roi，所有返回的卡车都在 ROI 内，
+        #    无冗余的本地过滤。
         decision: TrackingDecision = self.tracker.update(analysis)
 
         # 4. Concurrent OCR + classification.

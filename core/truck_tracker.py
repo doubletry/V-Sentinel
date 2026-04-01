@@ -191,17 +191,23 @@ def _det_to_bbox(det: dict) -> list[int]:
 
 
 class TruckTracker:
-    """Single-truck-in-ROI state machine.
-    ROI 内单卡车状态机。
+    """Single-truck state machine for the truck-monitoring pipeline.
+    卡车监控流水线的单卡车状态机。
 
-    Designed for scenarios where at most one truck occupies the ROI at any
-    time.  Transient / passing trucks are filtered out by requiring
+    Designed for scenarios where at most one truck occupies the monitored area
+    at a time.  Transient / passing trucks are filtered out by requiring
     ``min_presence_frames`` consecutive detections before a truck becomes
     "confirmed".  Brief detection gaps (≤ ``max_missing_frames``) are
     tolerated to avoid premature departure events.
-    适用于同一时间 ROI 内最多一辆卡车的场景。通过要求
+
+    **Note**: ROI filtering is handled on the server side via ``model_roi``
+    during detection, so the tracker does not need to perform local ROI checks.
+    适用于同一时间监控区域内最多一辆卡车的场景。通过要求
     ``min_presence_frames`` 次连续检测来过滤瞬态/路过的卡车。
     容忍短暂检测间隙（≤ ``max_missing_frames``）以避免过早触发离开事件。
+
+    **注意**：ROI 过滤在检测阶段通过 ``model_roi`` 在服务端完成，
+    跟踪器无需进行本地 ROI 检查。
 
     Parameters
     ----------
@@ -225,10 +231,6 @@ class TruckTracker:
     required_actions:
         The set of action labels that must all be observed during a visit.
         车辆到访期间需全部观测到的动作标签集合。
-    roi:
-        Optional ROI polygon as list of ``[x, y]`` pairs.  Trucks whose
-        centre is outside the ROI are ignored.
-        可选 ROI 多边形（``[x, y]`` 对列表）。中心不在 ROI 内的卡车被忽略。
     """
 
     def __init__(
@@ -240,7 +242,6 @@ class TruckTracker:
         stability_window: int = STABILITY_WINDOW,
         stability_min_count: int = STABILITY_MIN_COUNT,
         required_actions: frozenset[str] | set[str] = REQUIRED_ACTIONS,
-        roi: list[list[int]] | None = None,
     ) -> None:
         self.ocr_interval = ocr_interval
         self.max_missing_frames = max_missing_frames
@@ -248,7 +249,6 @@ class TruckTracker:
         self.stability_window = stability_window
         self.stability_min_count = stability_min_count
         self.required_actions = frozenset(required_actions)
-        self.roi = roi
 
         # At most one active truck at a time.
         # 同一时间最多一辆活跃卡车。
@@ -266,8 +266,11 @@ class TruckTracker:
         The state transitions are:
         状态转换如下：
 
-        1. Filter truck detections to those inside the ROI.
-           过滤卡车检测，仅保留 ROI 内的。
+        1. Pick the best truck detection (highest confidence).
+           Detection is already filtered by ``model_roi`` on the server side,
+           so no local ROI filtering is needed.
+           选择最佳卡车检测（最高置信度）。
+           检测已在服务端通过 ``model_roi`` 过滤，无需本地 ROI 过滤。
         2. If a truck is currently tracked:
            如果当前有被跟踪的卡车：
            a. If the new detection matches, update the track.
@@ -283,19 +286,14 @@ class TruckTracker:
         now = time.monotonic()
         decision = TrackingDecision()
 
-        # 1. Filter truck detections to those inside the ROI.
-        # 1. 过滤 ROI 内的卡车检测。
-        roi_trucks: list[dict] = []
-        for det in analysis.trucks:
-            bbox = _det_to_bbox(det)
-            if _box_in_roi(bbox, self.roi or []):
-                roi_trucks.append(det)
-
         # Pick the single best truck detection (highest confidence).
+        # Detection results are already filtered to the ROI on the server
+        # via model_roi, so no local filtering is needed.
         # 选择单个最佳卡车检测（最高置信度）。
+        # 检测结果已在服务端通过 model_roi 过滤到 ROI 内，无需本地过滤。
         best_det: dict | None = None
-        if roi_trucks:
-            best_det = max(roi_trucks, key=lambda d: d.get("confidence", 0))
+        if analysis.trucks:
+            best_det = max(analysis.trucks, key=lambda d: d.get("confidence", 0))
 
         # 2. Update existing track or handle departure.
         # 2. 更新已有轨迹或处理离开事件。

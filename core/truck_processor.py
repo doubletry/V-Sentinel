@@ -228,16 +228,19 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         if ocr_rois:
             coros.append(self._do_ocr(ocr_rois, ocr_track_ids))
 
-        # 4b. Classification for combined person + truck ROIs.
+        # 4b. Per-person classification using the combined person + truck ROI.
         #     Classification uses image_roi — the merged bounding box is
         #     sent as a crop region so the server crops before classifying
-        #     (pre-processing).
-        # 4b. 合并的人+卡车 ROI 的分类。
+        #     (pre-processing).  Each person gets a separate classification
+        #     so results can be mapped back to individual person bounding boxes.
+        # 4b. 对每个行人使用合并的人+卡车 ROI 进行分类。
         #     分类使用 image_roi——合并的检测框作为裁剪区域发送，
-        #     服务端在分类前裁剪（前处理）。
+        #     服务端在分类前裁剪（前处理）。每个人单独分类，
+        #     以便将结果映射回各自的人体检测框。
         cls_items = decision.classify_rois
         cls_rois: list[dict] = []
         cls_track_ids: list[int] = []
+        cls_person_bboxes: list[list[int]] = []
         for item in cls_items:
             x1, y1, x2, y2 = item["roi"]
             cls_rois.append({
@@ -251,9 +254,12 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 **({"key": image_key} if image_key else {"image_bytes": encoded}),
             })
             cls_track_ids.append(item["track_id"])
+            cls_person_bboxes.append(item["person_bbox"])
 
         if cls_rois:
-            coros.append(self._do_classify(cls_rois, cls_track_ids))
+            coros.append(self._do_classify(
+                cls_rois, cls_track_ids, cls_person_bboxes
+            ))
 
         # Gather OCR + classify concurrently for real-time performance.
         # 并发收集 OCR + 分类以保证实时性能。
@@ -340,6 +346,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         self,
         cls_rois: list[dict],
         track_ids: list[int],
+        person_bboxes: list[list[int]],
     ) -> dict:
         """Run batched classification and feed results back to tracker.
         运行批量分类并将结果反馈给跟踪器。
@@ -347,8 +354,14 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         Classification uses image_roi — the combined person + truck bounding
         box is sent as a crop region, so the server crops the input image
         before running the classifier (pre-processing).
+
+        Each classification result carries the ``person_bbox`` so the drawing
+        layer can place the label on the correct person's bounding box.
         分类使用 image_roi——合并的人+卡车检测框作为裁剪区域发送，
         服务端在运行分类器前裁剪输入图像（前处理）。
+
+        每个分类结果携带 ``person_bbox``，以便绘制层将标签放置在
+        正确的人体检测框上。
         """
         raw = await self.vengine.classify(
             shape=None,
@@ -369,6 +382,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                     "stable_label": stable_label,
                     "confidence": item.get("confidence", 0.0),
                     "plate": track.best_plate if track else "",
+                    "person_bbox": person_bboxes[image_id],
                 })
         return {"classifications": classifications}
 

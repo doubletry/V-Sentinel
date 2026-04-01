@@ -218,8 +218,11 @@ class TestExampleProcessorBatchClassification:
             {
                 "detection_label": "person",
                 "classification_label": "adult",
+                "stable_label": "adult",
+                "raw_label": "adult",
                 "confidence": 0.89,
                 "bbox": [10, 20, 50, 80],
+                "person_bbox": [10, 20, 50, 80],
             }
         ]
 

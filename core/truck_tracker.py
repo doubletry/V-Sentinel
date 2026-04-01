@@ -102,9 +102,13 @@ class TrackingDecision:
     本帧需要进行 OCR 的卡车 track_id 列表。"""
 
     classify_rois: list[dict] = field(default_factory=list)
-    """Combined person+truck ROIs to send to the action classifier.
-    发送到动作分类器的人+卡车合并 ROI。
-    Each dict: {track_id, roi: [x1, y1, x2, y2]}"""
+    """Per-person classification ROIs (person bbox merged with the truck bbox).
+    Each person in the ROI gets their own classification request so that
+    results can be mapped back to individual person bounding boxes.
+    每个人的分类 ROI（人的检测框与卡车检测框合并）。
+    ROI 内每个人都有独立的分类请求，以便将结果映射回各自的人体检测框。
+    Each dict: {track_id, roi: [x1, y1, x2, y2],
+                person_bbox: [x1, y1, x2, y2]}"""
 
     visits: list[VehicleVisit] = field(default_factory=list)
     """Vehicles that left the scene this frame.
@@ -359,18 +363,24 @@ class TruckTracker:
             ):
                 decision.ocr_truck_ids.append(tid)
 
-            # Classification: merge with overlapping persons.
-            # 分类：与重叠的行人合并。
-            nearby_persons = [
-                _det_to_bbox(p)
-                for p in analysis.persons
-                if _boxes_overlap(self._track.bbox, _det_to_bbox(p))
-            ]
-            if nearby_persons:
-                combined = _merge_boxes([self._track.bbox] + nearby_persons)
-                decision.classify_rois.append(
-                    {"track_id": tid, "roi": combined}
-                )
+            # Classification: produce one classify_roi per person detected.
+            # All persons come from model_roi-filtered detections, so they
+            # are already inside the user-drawn ROI — no overlap check needed.
+            # Each person's bbox is merged with the truck bbox to form the
+            # classification region; the per-person bbox is preserved so
+            # that classification results can be drawn on each person's box.
+            # 分类：为每个检测到的人生成一个 classify_roi。
+            # 所有行人都来自 model_roi 过滤后的检测，已在用户绘制的 ROI 内，
+            # 无需重叠检查。每个人的检测框与卡车检测框合并构成分类区域；
+            # 保留每个人的检测框以便将分类结果绘制到各自的框上。
+            for p in analysis.persons:
+                person_bbox = _det_to_bbox(p)
+                combined = _merge_boxes([self._track.bbox, person_bbox])
+                decision.classify_rois.append({
+                    "track_id": tid,
+                    "roi": combined,
+                    "person_bbox": person_bbox,
+                })
 
         return decision
 

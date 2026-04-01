@@ -77,3 +77,21 @@ RTSP_TRANSPORT: str = "tcp"
 """RTSP transport protocol for reading.  TCP avoids green-frame / mosaic
 artifacts caused by UDP packet loss.
 RTSP 读取传输协议。TCP 避免 UDP 丢包导致的绿帧/马赛克。"""
+
+# ── Drawing / overlay defaults / 绘制/叠加默认值 ─────────────────────────────
+
+DRAW_FONT_SCALE: float = 1.0
+"""Font scale for text drawn on detection bounding boxes.
+检测框上文本的字体缩放比例。"""
+
+DRAW_FONT_THICKNESS: int = 2
+"""Font thickness for text drawn on detection bounding boxes.
+检测框上文本的字体粗细。"""
+
+DRAW_DETECTION_COLOR: tuple[int, int, int] = (0, 255, 0)
+"""BGR/RGB color for detection bounding boxes.  Green.
+检测框的颜色。绿色。"""
+
+DRAW_CLASSIFICATION_COLOR: tuple[int, int, int] = (255, 255, 0)
+"""BGR/RGB color for classification labels on person boxes.  Yellow.
+人物框分类标签的颜色。黄色。"""

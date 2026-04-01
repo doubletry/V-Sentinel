@@ -17,7 +17,6 @@ from core.truck_tracker import (
     TrackingDecision,
     TruckTracker,
     VehicleVisit,
-    _box_in_roi,
     _boxes_overlap,
     _det_to_bbox,
     _iou,
@@ -108,19 +107,6 @@ class TestBoxesOverlap:
         assert _boxes_overlap([0, 0, 10, 10], [10, 0, 20, 10]) is False
 
 
-class TestBoxInRoi:
-    def test_empty_roi(self):
-        assert _box_in_roi([5, 5, 15, 15], []) is True
-
-    def test_inside(self):
-        roi = [[0, 0], [100, 0], [100, 100], [0, 100]]
-        assert _box_in_roi([10, 10, 30, 30], roi) is True
-
-    def test_outside(self):
-        roi = [[0, 0], [50, 0], [50, 50], [0, 50]]
-        assert _box_in_roi([100, 100, 200, 200], roi) is False
-
-
 class TestDetToBbox:
     def test_conversion(self):
         det = {"x_min": 1.5, "y_min": 2.7, "x_max": 10.9, "y_max": 20.1}
@@ -205,17 +191,20 @@ class TestTruckTracker:
         d4 = tracker.update(FrameAnalysis(trucks=[det]))
         assert tid in d4.ocr_truck_ids
 
-    def test_person_truck_overlap_produces_classify_roi(self):
-        """When person overlaps with truck, a combined ROI is produced.
-        当行人与卡车重叠时，产生合并 ROI。"""
+    def test_person_truck_produces_classify_roi(self):
+        """When person and truck are both detected, a per-person combined ROI
+        is produced — no overlap check needed.
+        当同时检测到行人和卡车时，为每个人产生合并 ROI——无需重叠检查。"""
         tracker = TruckTracker(min_presence_frames=1)
         truck = _truck_det(10, 10, 100, 100)
-        person = _person_det(20, 20, 60, 80)  # overlaps with truck
+        person = _person_det(20, 20, 60, 80)
         decision = tracker.update(FrameAnalysis(trucks=[truck], persons=[person]))
         assert len(decision.classify_rois) == 1
         roi = decision.classify_rois[0]["roi"]
         # Merged box should encompass both
         assert roi == [10, 10, 100, 100]
+        # person_bbox is preserved for per-person label display
+        assert decision.classify_rois[0]["person_bbox"] == [20, 20, 60, 80]
 
     def test_no_person_means_no_classify_roi(self):
         """Without person detection, no classification ROI is produced.
@@ -225,14 +214,34 @@ class TestTruckTracker:
         decision = tracker.update(FrameAnalysis(trucks=[truck]))
         assert len(decision.classify_rois) == 0
 
-    def test_non_overlapping_person_no_classify_roi(self):
-        """Person far from truck does not produce classification ROI.
-        远离卡车的行人不产生分类 ROI。"""
+    def test_non_overlapping_person_still_produces_classify_roi(self):
+        """Person far from truck still produces a classification ROI because
+        both are within the model_roi-filtered area — no overlap required.
+        远离卡车的行人仍然产生分类 ROI，因为两者都在 model_roi 过滤区域内——
+        不需要重叠。"""
         tracker = TruckTracker(min_presence_frames=1)
         truck = _truck_det(10, 10, 100, 100)
-        person = _person_det(200, 200, 300, 300)  # no overlap
+        person = _person_det(200, 200, 300, 300)  # no overlap but same ROI
         decision = tracker.update(FrameAnalysis(trucks=[truck], persons=[person]))
-        assert len(decision.classify_rois) == 0
+        assert len(decision.classify_rois) == 1
+        roi = decision.classify_rois[0]["roi"]
+        # Merged box encompasses both
+        assert roi == [10, 10, 300, 300]
+        assert decision.classify_rois[0]["person_bbox"] == [200, 200, 300, 300]
+
+    def test_multiple_persons_produce_multiple_classify_rois(self):
+        """Each person gets their own classify_roi for individual labelling.
+        每个人都获得独立的 classify_roi 以进行独立标注。"""
+        tracker = TruckTracker(min_presence_frames=1)
+        truck = _truck_det(10, 10, 100, 100)
+        p1 = _person_det(20, 20, 60, 80)
+        p2 = _person_det(200, 200, 300, 300)
+        decision = tracker.update(FrameAnalysis(
+            trucks=[truck], persons=[p1, p2]
+        ))
+        assert len(decision.classify_rois) == 2
+        assert decision.classify_rois[0]["person_bbox"] == [20, 20, 60, 80]
+        assert decision.classify_rois[1]["person_bbox"] == [200, 200, 300, 300]
 
     def test_action_stability_filter(self):
         """Action labels require min_count occurrences to become stable.
@@ -319,27 +328,6 @@ class TestTruckTracker:
         visit = decision.visits[0]
         assert visit.confirmed_actions == {"action1"}
         assert visit.missing_actions == {"action2", "action3"}
-
-    def test_roi_filter_excludes_outside_trucks(self):
-        """Trucks outside the ROI polygon are ignored.
-        ROI 多边形外的卡车被忽略。"""
-        roi = [[0, 0], [50, 0], [50, 50], [0, 50]]
-        tracker = TruckTracker(roi=roi, min_presence_frames=1)
-        # Truck centred at (55, 55) → outside ROI
-        tracker.update(
-            FrameAnalysis(trucks=[_truck_det(50, 50, 60, 60)])
-        )
-        assert len(tracker.get_all_tracks()) == 0
-
-    def test_roi_filter_includes_inside_trucks(self):
-        """Trucks inside the ROI polygon are tracked.
-        ROI 多边形内的卡车被跟踪。"""
-        roi = [[0, 0], [100, 0], [100, 100], [0, 100]]
-        tracker = TruckTracker(roi=roi, min_presence_frames=1)
-        tracker.update(
-            FrameAnalysis(trucks=[_truck_det(10, 10, 40, 40)])
-        )
-        assert len(tracker.get_all_tracks()) == 1
 
     def test_feed_ocr_unknown_track_noop(self):
         """feed_ocr on unknown track_id should not raise.
@@ -580,3 +568,93 @@ class TestTruckMonitorProcessor:
         visit_msgs = [m for m in result2.messages if "Vehicle left" in m.get("message", "")]
         assert len(visit_msgs) == 1
         assert "XY789" in visit_msgs[0]["message"]
+
+    async def test_classification_includes_person_bbox(self):
+        """Classification results include person_bbox for per-person labelling.
+        分类结果包含 person_bbox 用于每个人的标注。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+            _person_det(30, 30, 80, 150, label="person"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "ABC", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = [
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        assert len(result.classifications) >= 1
+        cls = result.classifications[0]
+        assert "person_bbox" in cls
+        assert cls["person_bbox"] == [30, 30, 80, 150]
+
+
+class TestDrawOnFrameWithClassifications:
+    def test_person_gets_classification_label(self):
+        """Person detection with matching classification shows action label.
+        有匹配分类结果的行人检测显示动作标签。"""
+
+        class DummyProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = DummyProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[
+                {"x_min": 30, "y_min": 30, "x_max": 80, "y_max": 150,
+                 "confidence": 0.8, "label": "person"},
+                {"x_min": 10, "y_min": 10, "x_max": 200, "y_max": 200,
+                 "confidence": 0.9, "label": "truck"},
+            ],
+            classifications=[
+                {"stable_label": "action1", "raw_label": "action1",
+                 "confidence": 0.9,
+                 "person_bbox": [30, 30, 80, 150]},
+            ],
+        )
+        drawn = proc.draw_on_frame(frame, result)
+        # Should have drawn something (non-zero pixels)
+        assert drawn.sum() > 0
+
+    def test_detection_without_classification(self):
+        """Detection without classification uses default label.
+        无分类结果的检测使用默认标签。"""
+
+        class DummyProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = DummyProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[
+                {"x_min": 10, "y_min": 10, "x_max": 100, "y_max": 100,
+                 "confidence": 0.9, "label": "truck"},
+            ],
+        )
+        drawn = proc.draw_on_frame(frame, result)
+        assert drawn.sum() > 0

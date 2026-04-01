@@ -179,8 +179,11 @@ class ExampleProcessor(BaseVideoProcessor):
                     {
                         "detection_label": det["label"],
                         "classification_label": best["label"],
+                        "stable_label": best["label"],
+                        "raw_label": best["label"],
                         "confidence": best["confidence"],
                         "bbox": [x1, y1, x2, y2],
+                        "person_bbox": [x1, y1, x2, y2],
                     }
                 )
 

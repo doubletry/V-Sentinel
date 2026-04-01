@@ -20,7 +20,15 @@ import cv2
 import numpy as np
 from loguru import logger
 
-from core.constants import PUSH_FPS, PUSH_PRESET, RTSP_TRANSPORT
+from core.constants import (
+    DRAW_CLASSIFICATION_COLOR,
+    DRAW_DETECTION_COLOR,
+    DRAW_FONT_SCALE,
+    DRAW_FONT_THICKNESS,
+    PUSH_FPS,
+    PUSH_PRESET,
+    RTSP_TRANSPORT,
+)
 
 try:
     from turbojpeg import TurboJPEG
@@ -366,18 +374,74 @@ class BaseVideoProcessor(ABC):
     def draw_on_frame(
         self, frame: np.ndarray, result: AnalysisResult
     ) -> np.ndarray:
-        """Draw detections and OCR results on a frame copy."""
+        """Draw detections and per-person classification labels on a frame copy.
+        在帧副本上绘制检测框和每个人的分类标签。
+
+        Detection bounding boxes are drawn in green.  If ``result.classifications``
+        contains entries with a ``person_bbox`` key, the classification label is
+        rendered on the matching person's bounding box in yellow.  This allows
+        each person to display their own action label rather than a generic
+        detection label.
+        检测框用绿色绘制。如果 ``result.classifications`` 中包含
+        ``person_bbox`` 键的条目，分类标签会以黄色渲染在对应人的检测框上。
+        这样每个人都能显示自己的动作标签，而非通用的检测标签。
+        """
         out = frame.copy()
+
+        # Index classification labels by person_bbox for fast lookup.
+        # 按 person_bbox 索引分类标签以快速查找。
+        cls_by_bbox: dict[tuple[int, int, int, int], dict] = {}
+        for cls in result.classifications:
+            pbbox = cls.get("person_bbox")
+            if pbbox and len(pbbox) == 4:
+                key = (int(pbbox[0]), int(pbbox[1]), int(pbbox[2]), int(pbbox[3]))
+                cls_by_bbox[key] = cls
+
         for det in result.detections:
             x1, y1 = int(det.get("x_min", 0)), int(det.get("y_min", 0))
             x2, y2 = int(det.get("x_max", 0)), int(det.get("y_max", 0))
-            label = det.get("label", "")
+            det_label = det.get("label", "")
             conf = det.get("confidence", 0.0)
-            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(
-                out, f"{label} {conf:.2f}", (x1, max(y1 - 5, 10)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA,
-            )
+
+            # Check if this detection's bbox matches a classification result
+            # (for person detections, show the action label instead).
+            # 检查该检测框是否匹配分类结果（对行人检测，显示动作标签）。
+            bbox_key = (x1, y1, x2, y2)
+            cls_match = cls_by_bbox.get(bbox_key)
+
+            if cls_match:
+                # Person with classification — draw in classification color
+                # with the action label.
+                # 有分类结果的行人——用分类颜色绘制动作标签。
+                stable = cls_match.get("stable_label", "")
+                raw = cls_match.get("raw_label", "")
+                display_label = stable or raw or det_label
+                cls_conf = cls_match.get("confidence", conf)
+                cv2.rectangle(out, (x1, y1), (x2, y2), DRAW_CLASSIFICATION_COLOR, 2)
+                cv2.putText(
+                    out,
+                    f"{display_label} {cls_conf:.2f}",
+                    (x1, max(y1 - 8, 15)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    DRAW_FONT_SCALE,
+                    DRAW_CLASSIFICATION_COLOR,
+                    DRAW_FONT_THICKNESS,
+                    cv2.LINE_AA,
+                )
+            else:
+                # Regular detection — draw in detection color.
+                # 普通检测——用检测颜色绘制。
+                cv2.rectangle(out, (x1, y1), (x2, y2), DRAW_DETECTION_COLOR, 2)
+                cv2.putText(
+                    out,
+                    f"{det_label} {conf:.2f}",
+                    (x1, max(y1 - 8, 15)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    DRAW_FONT_SCALE,
+                    DRAW_DETECTION_COLOR,
+                    DRAW_FONT_THICKNESS,
+                    cv2.LINE_AA,
+                )
         return out
 
     # ── RTSP Push (persistent) ────────────────────────────────────────────

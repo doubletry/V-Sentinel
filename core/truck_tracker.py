@@ -35,7 +35,15 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any
+from core.constants import (
+    MAX_MISSING_FRAMES,
+    MIN_PRESENCE_FRAMES,
+    OCR_INTERVAL,
+    OTHER_ACTION_LABEL,
+    REQUIRED_ACTIONS,
+    STABILITY_MIN_COUNT,
+    STABILITY_WINDOW,
+)
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -182,13 +190,6 @@ def _det_to_bbox(det: dict) -> list[int]:
 # ── TruckTracker ─────────────────────────────────────────────────────────────
 
 
-# The 6 required actions (exclude "other").
-# 6 类必需动作（排除 "other"）。
-REQUIRED_ACTIONS = frozenset(
-    {"action1", "action2", "action3", "action4", "action5", "action6"}
-)
-
-
 class TruckTracker:
     """Single-truck-in-ROI state machine.
     ROI 内单卡车状态机。
@@ -233,11 +234,11 @@ class TruckTracker:
     def __init__(
         self,
         *,
-        ocr_interval: int = 10,
-        max_missing_frames: int = 5,
-        min_presence_frames: int = 3,
-        stability_window: int = 7,
-        stability_min_count: int = 3,
+        ocr_interval: int = OCR_INTERVAL,
+        max_missing_frames: int = MAX_MISSING_FRAMES,
+        min_presence_frames: int = MIN_PRESENCE_FRAMES,
+        stability_window: int = STABILITY_WINDOW,
+        stability_min_count: int = STABILITY_MIN_COUNT,
         required_actions: frozenset[str] | set[str] = REQUIRED_ACTIONS,
         roi: list[list[int]] | None = None,
     ) -> None:
@@ -410,7 +411,7 @@ class TruckTracker:
             self._track.action_history,
             min_count=self.stability_min_count,
         )
-        if stable and stable != "other":
+        if stable and stable != OTHER_ACTION_LABEL:
             self._track.confirmed_actions.add(stable)
         self._track.stable_action = stable
         return stable

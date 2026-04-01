@@ -18,6 +18,12 @@ except (ImportError, RuntimeError) as _exc:
 
 from backend.models.schemas import AnalysisMessage, ROI
 from backend.processing.base import AnalysisResult, BaseVideoProcessor
+from core.constants import (
+    CLASSIFICATION_MODEL,
+    DETECTION_MODEL,
+    OCR_MODEL,
+    PERSON_LABEL,
+)
 
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
@@ -30,20 +36,22 @@ class ExampleProcessor(BaseVideoProcessor):
 
     Pipeline:
     1. ``asyncio.gather(detect, ocr)`` — concurrent detection + OCR
+       Detection uses ``model_roi`` — server filters results by ROI
+       (post-processing).
     2. Batch classification on detected person ROIs
+       Classification uses ``image_roi`` — server crops the image to ROI
+       before classifying (pre-processing).
     3. Message assembly and WebSocket broadcast
     4. Frame annotation via cv2
 
     流水线：
     1. ``asyncio.gather(detect, ocr)`` — 并发检测 + OCR
+       检测使用 ``model_roi``——服务端按 ROI 过滤结果（后处理）。
     2. 对检测到的 person ROI 进行批量分类
+       分类使用 ``image_roi``——服务端在分类前裁剪图像到 ROI（前处理）。
     3. 消息组装与 WebSocket 广播
     4. 通过 cv2 进行帧标注
     """
-
-    DETECTION_MODEL = "huotai"
-    CLASSIFICATION_MODEL = "huotai"
-    OCR_MODEL = "paddleocr"
 
     def __init__(
         self,
@@ -98,14 +106,14 @@ class ExampleProcessor(BaseVideoProcessor):
         # 1. 并发运行检测和 OCR（两者使用同一 key）
         detect_coro = self.vengine.detect(
             shape=shape,
-            model_name=self.DETECTION_MODEL,
+            model_name=DETECTION_MODEL,
             conf=0.5,
             roi_points=primary_roi,
             **img_kwargs,
         )
         ocr_coro = self.vengine.ocr(
             shape=shape,
-            model_name=self.OCR_MODEL,
+            model_name=OCR_MODEL,
             conf=0.5,
             roi_points=primary_roi,
             **img_kwargs,
@@ -119,7 +127,7 @@ class ExampleProcessor(BaseVideoProcessor):
         person_detections: list[dict] = []
         classification_images: list[dict] = []
         for det in detections:
-            if str(det.get("label", "")).lower() != "person":
+            if str(det.get("label", "")).lower() != PERSON_LABEL:
                 continue
             x1 = max(int(det["x_min"]), 0)
             y1 = max(int(det["y_min"]), 0)
@@ -155,7 +163,7 @@ class ExampleProcessor(BaseVideoProcessor):
         if classification_images:
             cls_results = await self.vengine.classify(
                 shape=None,
-                model_name=self.CLASSIFICATION_MODEL,
+                model_name=CLASSIFICATION_MODEL,
                 images=classification_images,
             )
             for best in cls_results:

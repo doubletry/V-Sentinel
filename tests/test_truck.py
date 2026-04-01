@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
+from core.constants import REQUIRED_ACTIONS
 from core.truck_tracker import (
     FrameAnalysis,
     TrackedTruck,
@@ -126,34 +127,45 @@ class TestDetToBbox:
         assert _det_to_bbox(det) == [1, 2, 10, 20]
 
 
-# ── Tests for TruckTracker ────────────────────────────────────────────────────
+# ── Tests for TruckTracker (single-truck model) ──────────────────────────────
 
 
 class TestTruckTracker:
+    """Tests for the simplified single-truck-in-ROI state machine.
+    简化的 ROI 内单卡车状态机测试。"""
+
     def test_new_truck_creates_track(self):
-        tracker = TruckTracker()
+        """A new truck detection should start a candidate track.
+        新的卡车检测应启动一个候选轨迹。"""
+        tracker = TruckTracker(min_presence_frames=1)
         analysis = FrameAnalysis(trucks=[_truck_det()])
-        decision = tracker.update(analysis)
+        tracker.update(analysis)
         assert len(tracker.get_all_tracks()) == 1
 
     def test_same_truck_keeps_track(self):
-        tracker = TruckTracker()
+        """Repeated detections of the same truck maintain a single track.
+        重复检测同一卡车保持单一轨迹。"""
+        tracker = TruckTracker(min_presence_frames=1)
         det = _truck_det()
         tracker.update(FrameAnalysis(trucks=[det]))
         tracker.update(FrameAnalysis(trucks=[det]))
         assert len(tracker.get_all_tracks()) == 1
 
     def test_truck_leaves_produces_visit(self):
-        tracker = TruckTracker()
+        """When the truck disappears, a VehicleVisit is produced.
+        卡车消失时应产生 VehicleVisit。"""
+        tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         assert len(tracker.get_all_tracks()) == 1
-        # Next frame: no trucks
+        # Next frame: no trucks → departure
         decision = tracker.update(FrameAnalysis())
         assert len(decision.visits) == 1
         assert len(tracker.get_all_tracks()) == 0
 
     def test_visit_records_plate(self):
-        tracker = TruckTracker()
+        """Visit should record the best plate from OCR.
+        到访记录应包含 OCR 的最佳车牌。"""
+        tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         track_id = list(tracker.get_all_tracks().keys())[0]
         tracker.feed_ocr(track_id, "ABC123", 0.9)
@@ -161,7 +173,9 @@ class TestTruckTracker:
         assert decision.visits[0].plate == "ABC123"
 
     def test_best_plate_keeps_highest_confidence(self):
-        tracker = TruckTracker()
+        """Only the OCR result with the highest confidence is kept.
+        仅保留置信度最高的 OCR 结果。"""
+        tracker = TruckTracker(min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
         tracker.feed_ocr(tid, "LOW", 0.5)
@@ -171,7 +185,9 @@ class TestTruckTracker:
         assert tracker.get_track(tid).best_plate_conf == 0.95
 
     def test_ocr_interval_triggers_correctly(self):
-        tracker = TruckTracker(ocr_interval=3)
+        """OCR should trigger on first frame and after ocr_interval frames.
+        OCR 应在第一帧和 ocr_interval 帧后触发。"""
+        tracker = TruckTracker(ocr_interval=3, min_presence_frames=1)
         det = _truck_det()
         # Frame 1: new truck → needs OCR (best_plate is empty)
         d1 = tracker.update(FrameAnalysis(trucks=[det]))
@@ -190,7 +206,9 @@ class TestTruckTracker:
         assert tid in d4.ocr_truck_ids
 
     def test_person_truck_overlap_produces_classify_roi(self):
-        tracker = TruckTracker()
+        """When person overlaps with truck, a combined ROI is produced.
+        当行人与卡车重叠时，产生合并 ROI。"""
+        tracker = TruckTracker(min_presence_frames=1)
         truck = _truck_det(10, 10, 100, 100)
         person = _person_det(20, 20, 60, 80)  # overlaps with truck
         decision = tracker.update(FrameAnalysis(trucks=[truck], persons=[person]))
@@ -200,20 +218,26 @@ class TestTruckTracker:
         assert roi == [10, 10, 100, 100]
 
     def test_no_person_means_no_classify_roi(self):
-        tracker = TruckTracker()
+        """Without person detection, no classification ROI is produced.
+        无行人检测时不产生分类 ROI。"""
+        tracker = TruckTracker(min_presence_frames=1)
         truck = _truck_det(10, 10, 100, 100)
         decision = tracker.update(FrameAnalysis(trucks=[truck]))
         assert len(decision.classify_rois) == 0
 
     def test_non_overlapping_person_no_classify_roi(self):
-        tracker = TruckTracker()
+        """Person far from truck does not produce classification ROI.
+        远离卡车的行人不产生分类 ROI。"""
+        tracker = TruckTracker(min_presence_frames=1)
         truck = _truck_det(10, 10, 100, 100)
         person = _person_det(200, 200, 300, 300)  # no overlap
         decision = tracker.update(FrameAnalysis(trucks=[truck], persons=[person]))
         assert len(decision.classify_rois) == 0
 
     def test_action_stability_filter(self):
-        tracker = TruckTracker(stability_min_count=3)
+        """Action labels require min_count occurrences to become stable.
+        动作标签需要达到 min_count 次出现才稳定。"""
+        tracker = TruckTracker(stability_min_count=3, min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
@@ -224,7 +248,9 @@ class TestTruckTracker:
         assert tracker.feed_action(tid, "action1") == "action1"
 
     def test_action_flicker_filtered(self):
-        tracker = TruckTracker(stability_min_count=3)
+        """Flickering labels are filtered by majority vote.
+        闪烁的标签被多数投票过滤。"""
+        tracker = TruckTracker(stability_min_count=3, min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
@@ -236,7 +262,9 @@ class TestTruckTracker:
         assert tracker.get_track(tid).stable_action == "action1"
 
     def test_confirmed_actions_accumulate(self):
-        tracker = TruckTracker(stability_min_count=2)
+        """Multiple stable actions accumulate in confirmed_actions set.
+        多个稳定动作累积到 confirmed_actions 集合中。"""
+        tracker = TruckTracker(stability_min_count=2, min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
@@ -255,7 +283,9 @@ class TestTruckTracker:
         assert "action2" in track.confirmed_actions
 
     def test_other_label_not_added_to_confirmed(self):
-        tracker = TruckTracker(stability_min_count=2)
+        """The 'other' label should not be added to confirmed_actions.
+        'other' 标签不应添加到 confirmed_actions。"""
+        tracker = TruckTracker(stability_min_count=2, min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
@@ -268,10 +298,14 @@ class TestTruckTracker:
         assert track.stable_action == "other"
 
     def test_missing_actions_in_visit(self):
+        """Visit should report actions that were never confirmed.
+        到访记录应报告未确认的动作。"""
         required = {"action1", "action2", "action3"}
         tracker = TruckTracker(
             stability_min_count=2,
             required_actions=required,
+            min_presence_frames=1,
+            max_missing_frames=0,
         )
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
@@ -287,49 +321,135 @@ class TestTruckTracker:
         assert visit.missing_actions == {"action2", "action3"}
 
     def test_roi_filter_excludes_outside_trucks(self):
+        """Trucks outside the ROI polygon are ignored.
+        ROI 多边形外的卡车被忽略。"""
         roi = [[0, 0], [50, 0], [50, 50], [0, 50]]
-        tracker = TruckTracker(roi=roi)
+        tracker = TruckTracker(roi=roi, min_presence_frames=1)
         # Truck centred at (55, 55) → outside ROI
-        decision = tracker.update(
+        tracker.update(
             FrameAnalysis(trucks=[_truck_det(50, 50, 60, 60)])
         )
         assert len(tracker.get_all_tracks()) == 0
 
     def test_roi_filter_includes_inside_trucks(self):
+        """Trucks inside the ROI polygon are tracked.
+        ROI 多边形内的卡车被跟踪。"""
         roi = [[0, 0], [100, 0], [100, 100], [0, 100]]
-        tracker = TruckTracker(roi=roi)
-        decision = tracker.update(
+        tracker = TruckTracker(roi=roi, min_presence_frames=1)
+        tracker.update(
             FrameAnalysis(trucks=[_truck_det(10, 10, 40, 40)])
         )
         assert len(tracker.get_all_tracks()) == 1
 
     def test_feed_ocr_unknown_track_noop(self):
+        """feed_ocr on unknown track_id should not raise.
+        对未知 track_id 调用 feed_ocr 不应抛异常。"""
         tracker = TruckTracker()
         tracker.feed_ocr(999, "XYZ", 0.9)  # should not raise
 
     def test_feed_action_unknown_track_returns_empty(self):
+        """feed_action on unknown track_id returns empty string.
+        对未知 track_id 调用 feed_action 返回空字符串。"""
         tracker = TruckTracker()
         assert tracker.feed_action(999, "action1") == ""
 
-    def test_multiple_trucks_tracked_independently(self):
-        tracker = TruckTracker()
+    def test_single_truck_replaces_when_old_leaves(self):
+        """Only one truck tracked at a time; new one starts after old leaves.
+        同一时间只跟踪一辆卡车；旧的离开后才开始跟踪新的。"""
+        tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
         t1 = _truck_det(10, 10, 50, 50)
-        t2 = _truck_det(200, 200, 300, 300)
-        tracker.update(FrameAnalysis(trucks=[t1, t2]))
-        assert len(tracker.get_all_tracks()) == 2
-
-        # Remove t1
-        decision = tracker.update(FrameAnalysis(trucks=[t2]))
+        # Truck 1 arrives
+        tracker.update(FrameAnalysis(trucks=[t1]))
         assert len(tracker.get_all_tracks()) == 1
+        tid1 = list(tracker.get_all_tracks().keys())[0]
+
+        # Truck 1 leaves (no detections)
+        decision = tracker.update(FrameAnalysis())
         assert len(decision.visits) == 1
+        assert len(tracker.get_all_tracks()) == 0
+
+        # Truck 2 arrives
+        t2 = _truck_det(200, 200, 300, 300)
+        tracker.update(FrameAnalysis(trucks=[t2]))
+        assert len(tracker.get_all_tracks()) == 1
+        tid2 = list(tracker.get_all_tracks().keys())[0]
+        assert tid2 != tid1  # different track_id
 
     def test_visits_property_accumulates(self):
-        tracker = TruckTracker()
+        """visits property accumulates across multiple departures.
+        visits 属性在多次离开中累积。"""
+        tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
         tracker.update(FrameAnalysis(trucks=[_truck_det(10, 10, 50, 50)]))
         tracker.update(FrameAnalysis())  # truck leaves → visit 1
         tracker.update(FrameAnalysis(trucks=[_truck_det(200, 200, 300, 300)]))
         tracker.update(FrameAnalysis())  # truck 2 leaves → visit 2
         assert len(tracker.visits) == 2
+
+    def test_transient_truck_filtered_by_min_presence(self):
+        """A truck appearing for fewer than min_presence_frames is filtered
+        (not confirmed, no visit on departure).
+        出现帧数少于 min_presence_frames 的卡车被过滤
+        （不确认，离开时不产生到访记录）。"""
+        tracker = TruckTracker(min_presence_frames=3, max_missing_frames=0)
+        det = _truck_det()
+        # Frame 1: first appearance (presence_frames=1, not confirmed)
+        d1 = tracker.update(FrameAnalysis(trucks=[det]))
+        assert len(tracker.get_all_tracks()) == 1
+        assert len(d1.ocr_truck_ids) == 0  # not confirmed yet
+        # Frame 2: still not confirmed (presence_frames=2)
+        d2 = tracker.update(FrameAnalysis(trucks=[det]))
+        assert len(d2.ocr_truck_ids) == 0
+        # Truck disappears before reaching min_presence_frames
+        d3 = tracker.update(FrameAnalysis())
+        # No visit should be recorded for transient truck
+        assert len(d3.visits) == 0
+        assert len(tracker.get_all_tracks()) == 0
+
+    def test_confirmed_truck_gets_ocr_and_classify(self):
+        """Once confirmed, the truck triggers OCR and classification decisions.
+        一旦确认，卡车触发 OCR 和分类决策。"""
+        tracker = TruckTracker(min_presence_frames=2)
+        det = _truck_det(10, 10, 100, 100)
+        person = _person_det(20, 20, 60, 80)
+        # Frame 1: not yet confirmed
+        d1 = tracker.update(FrameAnalysis(trucks=[det], persons=[person]))
+        assert len(d1.ocr_truck_ids) == 0
+        assert len(d1.classify_rois) == 0
+        # Frame 2: now confirmed
+        d2 = tracker.update(FrameAnalysis(trucks=[det], persons=[person]))
+        assert len(d2.ocr_truck_ids) == 1
+        assert len(d2.classify_rois) == 1
+
+    def test_max_missing_frames_tolerates_gaps(self):
+        """Brief detection gaps within max_missing_frames keep the track alive.
+        max_missing_frames 内的短暂检测间隙保持轨迹活跃。"""
+        tracker = TruckTracker(min_presence_frames=1, max_missing_frames=2)
+        det = _truck_det()
+        tracker.update(FrameAnalysis(trucks=[det]))
+        # 1 frame missing (within tolerance)
+        d = tracker.update(FrameAnalysis())
+        assert len(d.visits) == 0
+        assert len(tracker.get_all_tracks()) == 1
+        # 2 frames missing total
+        d = tracker.update(FrameAnalysis())
+        assert len(d.visits) == 0
+        assert len(tracker.get_all_tracks()) == 1
+        # 3 frames missing → exceeds max_missing_frames
+        d = tracker.update(FrameAnalysis())
+        assert len(d.visits) == 1
+        assert len(tracker.get_all_tracks()) == 0
+
+    def test_best_detection_by_confidence(self):
+        """When multiple trucks detected, the one with highest confidence wins.
+        当检测到多辆卡车时，置信度最高的获胜。"""
+        tracker = TruckTracker(min_presence_frames=1)
+        t1 = _truck_det(10, 10, 50, 50, conf=0.6)
+        t2 = _truck_det(200, 200, 300, 300, conf=0.95)
+        d = tracker.update(FrameAnalysis(trucks=[t1, t2]))
+        assert len(tracker.get_all_tracks()) == 1
+        # The tracked truck should have the bbox of the highest-conf detection
+        track = list(tracker.get_all_tracks().values())[0]
+        assert track.bbox == [200, 200, 300, 300]
 
 
 # ── Tests for _ensure_even_dims ───────────────────────────────────────────────
@@ -362,6 +482,8 @@ class TestEnsureEvenDims:
 
 class TestTruckMonitorProcessor:
     async def test_no_vengine_echo_mode(self):
+        """Without V-Engine, processor runs in echo mode (draws frame number).
+        无 V-Engine 时，处理器运行在回显模式（绘制帧号）。"""
         from core.truck_processor import TruckMonitorProcessor
         proc = TruckMonitorProcessor(
             source_id="s1",
@@ -377,6 +499,8 @@ class TestTruckMonitorProcessor:
         assert result.annotated_frame is not None
 
     async def test_full_pipeline_with_truck_and_person(self):
+        """Full pipeline: detect truck+person → OCR → classify → track.
+        完整流水线：检测卡车+行人 → OCR → 分类 → 跟踪。"""
         from core.truck_processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
@@ -399,6 +523,8 @@ class TestTruckMonitorProcessor:
             vengine_client=vengine,
             app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
         )
+        # Override tracker min_presence_frames=1 for test simplicity
+        proc.tracker = TruckTracker(min_presence_frames=1)
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
         result = await proc.process_frame(
             frame=frame, encoded=b"jpeg",
@@ -414,6 +540,8 @@ class TestTruckMonitorProcessor:
         assert track.best_plate == "ABC123"
 
     async def test_truck_leaves_produces_visit_message(self):
+        """When truck leaves, a visit message is produced with the plate.
+        卡车离开时应产生带车牌的到访消息。"""
         from core.truck_processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
@@ -434,6 +562,8 @@ class TestTruckMonitorProcessor:
             vengine_client=vengine,
             app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
         )
+        # Override tracker for test simplicity
+        proc.tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
         # Frame 1: truck arrives

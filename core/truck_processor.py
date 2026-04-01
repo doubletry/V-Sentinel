@@ -61,6 +61,14 @@ except (ImportError, RuntimeError) as _exc:
     TJPF_RGB = None  # type: ignore[assignment]
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
+from core.constants import (
+    CLASSIFICATION_MODEL,
+    DETECTION_MODEL,
+    OCR_INTERVAL,
+    OCR_MODEL,
+    PERSON_LABEL,
+    TRUCK_LABELS,
+)
 from core.runner import run_processor
 from core.truck_tracker import (
     FrameAnalysis,
@@ -92,15 +100,6 @@ class TruckMonitorProcessor(BaseVideoProcessor):
        为离开事件生成消息。
     """
 
-    DETECTION_MODEL = "huotai"
-    CLASSIFICATION_MODEL = "huotai"
-    OCR_MODEL = "paddleocr"
-
-    # Configurable via app_settings or constructor kwargs
-    # 可通过 app_settings 或构造函数参数配置
-    OCR_INTERVAL: int = 10  # every N frames / 每 N 帧
-    TRUCK_LABELS: frozenset[str] = frozenset({"truck"})
-
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self._frame_count = 0
@@ -109,7 +108,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         # 如果可用，使用 app_settings 中的设置创建跟踪器。
         self.tracker = TruckTracker(
             ocr_interval=int(
-                self.app_settings.get("ocr_interval", str(self.OCR_INTERVAL))
+                self.app_settings.get("ocr_interval", str(OCR_INTERVAL))
             ),
         )
 
@@ -181,7 +180,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         #    返回的检测结果已被过滤为 ROI 内的检测框。
         detections = await self.vengine.detect(
             shape=shape,
-            model_name=self.DETECTION_MODEL,
+            model_name=DETECTION_MODEL,
             conf=0.5,
             roi_points=primary_roi,
             **img_kwargs,
@@ -192,9 +191,9 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         analysis = FrameAnalysis()
         for det in detections:
             label = str(det.get("label", "")).lower()
-            if label in self.TRUCK_LABELS:
+            if label in TRUCK_LABELS:
                 analysis.trucks.append(det)
-            elif label == "person":
+            elif label == PERSON_LABEL:
                 analysis.persons.append(det)
             else:
                 analysis.others.append(det)
@@ -330,7 +329,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         """
         raw = await self.vengine.ocr(
             shape=None,
-            model_name=self.OCR_MODEL,
+            model_name=OCR_MODEL,
             conf=0.3,
             images=ocr_rois,
         )
@@ -361,7 +360,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         """
         raw = await self.vengine.classify(
             shape=None,
-            model_name=self.CLASSIFICATION_MODEL,
+            model_name=CLASSIFICATION_MODEL,
             images=cls_rois,
         )
         classifications: list[dict] = []

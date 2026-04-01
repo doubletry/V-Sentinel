@@ -9,8 +9,8 @@ into the full V-Sentinel backend without any changes.
 from __future__ import annotations
 
 import asyncio
-import fractions
 import queue
+import subprocess
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -19,6 +19,8 @@ from typing import Any
 import cv2
 import numpy as np
 from loguru import logger
+
+from core.constants import PUSH_FPS, PUSH_PRESET
 
 try:
     from turbojpeg import TurboJPEG
@@ -112,11 +114,13 @@ class BaseVideoProcessor(ABC):
         )
         self.status: str = "stopped"
 
-        # Persistent RTSP push state
+        # Persistent RTSP push state (ffmpeg subprocess)
+        # 持久化 RTSP 推流状态（ffmpeg 子进程）
         self._push_lock = threading.Lock()
-        self._push_container = None
-        self._push_stream = None
+        self._push_proc: subprocess.Popen | None = None
         self._push_path: str | None = None
+        self._push_width: int = 0
+        self._push_height: int = 0
         self._display_queue: queue.Queue[
             tuple[np.ndarray, AnalysisResult, str] | None
         ] = queue.Queue(maxsize=2)
@@ -443,9 +447,16 @@ class BaseVideoProcessor(ABC):
         return frame
 
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
-        """Push annotated frame to MediaMTX via a persistent RTSP connection."""
-        import av
+        """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.
+        通过持久化 ffmpeg 子进程将标注帧推送到 MediaMTX。
 
+        Uses ``ffmpeg -f rawvideo`` to accept raw RGB24 frames on stdin and
+        encode them as H.264 over RTSP.  The subprocess is kept alive across
+        frames; it is re-created only when the output path or frame dimensions
+        change.
+        使用 ``ffmpeg -f rawvideo`` 在 stdin 上接收原始 RGB24 帧，编码为 H.264
+        通过 RTSP 推流。子进程跨帧保持活跃；仅在输出路径或帧尺寸变化时重建。
+        """
         frame = self._ensure_even_dims(frame)
         h, w = frame.shape[:2]
         if h == 0 or w == 0:
@@ -453,62 +464,76 @@ class BaseVideoProcessor(ABC):
 
         with self._push_lock:
             try:
+                # Re-create ffmpeg process when path or dimensions change.
+                # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (
-                    self._push_container is None
+                    self._push_proc is None
                     or self._push_path != output_rtsp_path
-                    or self._push_stream is None
-                    or self._push_stream.width != w
-                    or self._push_stream.height != h
+                    or self._push_width != w
+                    or self._push_height != h
                 ):
                     self._close_push_container()
                     rtsp_url = (
                         f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
                         f"/{output_rtsp_path}"
                     )
-                    container = av.open(
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-f", "rawvideo",
+                        "-pix_fmt", "rgb24",
+                        "-s", f"{w}x{h}",
+                        "-r", str(PUSH_FPS),
+                        "-i", "pipe:0",
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-preset", PUSH_PRESET,
+                        "-tune", "zerolatency",
+                        "-g", str(PUSH_FPS),
+                        "-bf", "0",
+                        "-f", "rtsp",
+                        "-rtsp_transport", "tcp",
                         rtsp_url,
-                        mode="w",
-                        format="rtsp",
-                        options={
-                            "rtsp_transport": "tcp",
-                            "muxdelay": "0",
-                        },
+                    ]
+                    self._push_proc = subprocess.Popen(
+                        cmd,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                     )
-                    stream = container.add_stream("h264", rate=25)
-                    stream.width = w
-                    stream.height = h
-                    stream.pix_fmt = "yuv420p"
-                    stream.time_base = fractions.Fraction(1, 25)
-                    stream.options = {
-                        "preset": "ultrafast",
-                        "tune": "zerolatency",
-                        "g": "25",
-                        "bf": "0",
-                    }
-                    self._push_container = container
-                    self._push_stream = stream
                     self._push_path = output_rtsp_path
+                    self._push_width = w
+                    self._push_height = h
 
-                av_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
-                for packet in self._push_stream.encode(av_frame):
-                    self._push_container.mux(packet)
+                # Write raw RGB frame bytes to ffmpeg stdin.
+                # 将原始 RGB 帧字节写入 ffmpeg 的 stdin。
+                if self._push_proc.stdin is not None:
+                    self._push_proc.stdin.write(frame.tobytes())
+            except (BrokenPipeError, OSError) as exc:
+                logger.debug("Push error for {}: {}", output_rtsp_path, exc)
+                self._close_push_container()
             except Exception as exc:
                 logger.debug("Push error for {}: {}", output_rtsp_path, exc)
                 self._close_push_container()
 
     def _close_push_container(self) -> None:
-        """Flush and close the persistent RTSP output container."""
-        if self._push_container is not None:
+        """Terminate the persistent ffmpeg push subprocess.
+        终止持久化的 ffmpeg 推流子进程。"""
+        if self._push_proc is not None:
             try:
-                if self._push_stream is not None:
-                    for packet in self._push_stream.encode():
-                        self._push_container.mux(packet)
-                self._push_container.close()
+                if self._push_proc.stdin is not None:
+                    self._push_proc.stdin.close()
+                self._push_proc.terminate()
+                self._push_proc.wait(timeout=3)
             except Exception:
-                pass
-            self._push_container = None
-            self._push_stream = None
+                try:
+                    self._push_proc.kill()
+                except Exception:
+                    pass
+            self._push_proc = None
             self._push_path = None
+            self._push_width = 0
+            self._push_height = 0
 
     # ── Utility ───────────────────────────────────────────────────────────
 

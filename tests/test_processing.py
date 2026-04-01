@@ -9,7 +9,9 @@ import pytest
 
 from backend.api.ws import WSManager
 from backend.config import DEFAULT_APP_SETTINGS
-from backend.models.schemas import ROI, ROIPoint
+from backend.db.database import create_source
+from backend.models.schemas import AnalysisMessage, ROI, ROIPoint
+from backend.models.schemas import VideoSourceCreate
 from backend.processing.base import AnalysisResult, BaseVideoProcessor
 from backend.processing.manager import ProcessorManager
 
@@ -69,6 +71,29 @@ class TestBaseVideoProcessor:
         proc = self._make_processor()
         proc.rtsp_url = "rtsp://host:8554/stream/"
         assert proc._stream_key() == "stream"
+
+    async def test_do_detect_maps_and_filters_results(self):
+        proc = self._make_processor()
+        proc.vengine.detect = AsyncMock(
+            return_value=[
+                {"label": "truck", "confidence": 0.92},
+                {"label": "person", "confidence": 0.33},
+            ]
+        )
+
+        result = await proc._do_detect(
+            shape=(100, 200, 3),
+            model_name="demo",
+            image_bytes=b"frame",
+            on_item=lambda item: item if item["confidence"] >= 0.5 else None,
+        )
+
+        proc.vengine.detect.assert_awaited_once()
+        assert result == {
+            "detections": [
+                {"label": "truck", "confidence": 0.92},
+            ]
+        }
 
     def test_normalize_rois(self):
         proc = self._make_processor()
@@ -146,9 +171,47 @@ class TestProcessorManager:
         with pytest.raises(ValueError, match="Source not found"):
             await mgr.start_processor("nonexistent")
 
+    async def test_start_processor_uses_configured_plugin(self, init_db):
+        source = await create_source(
+            VideoSourceCreate(name="cam-1", rtsp_url="rtsp://localhost:8554/cam1")
+        )
+        mgr = self._make_manager()
+        mgr._app_settings["processor_plugin"] = "example"
+
+        processor = MagicMock(status="stopped")
+        processor.start = AsyncMock()
+
+        with patch("backend.processing.manager.resolve_processor_class") as resolve:
+            processor_cls = MagicMock(return_value=processor)
+            resolve.return_value = processor_cls
+
+            result = await mgr.start_processor(source.id)
+
+        resolve.assert_called_once_with("example")
+        processor_cls.assert_called_once()
+        processor.start.assert_awaited_once()
+        assert mgr._processors[source.id] is processor
+        assert result["processor_plugin"] == "example"
+
     async def test_stop_all_empty(self):
         mgr = self._make_manager()
         await mgr.stop_all()  # Should not raise
+
+    def test_truck_adapter_initializes_core_state(self):
+        from backend.processing.truck import TruckMonitorProcessor
+
+        processor = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            rois=[],
+            vengine_client=MagicMock(),
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+
+        assert processor.tracker is not None
+        assert processor.agent is None
 
 
 class TestExampleProcessorBatchClassification:
@@ -249,6 +312,11 @@ class TestBackendBaseProcessorPipeline:
 
         await proc._handle_result(frame, result)
 
-        proc.ws_manager.broadcast.assert_awaited_once_with({"message": "hello"})
+        proc.ws_manager.broadcast.assert_awaited_once()
+        sent = proc.ws_manager.broadcast.await_args.args[0]
+        assert isinstance(sent, AnalysisMessage)
+        assert sent.message == "hello"
+        assert sent.source_name == "cam"
+        assert sent.source_id == "s1"
         assert queued
         assert queued[0][2] == "cam1_processed"

@@ -205,21 +205,24 @@ run_processor(
 )
 ```
 
-Once ready, drop your processor into `backend/processing/` and register it in
-`ProcessorManager` — no code changes needed.
+Once ready, add a thin backend adapter in `backend/processing/`, register it in
+`backend/processing/registry.py`, and select it with the `processor_plugin`
+setting.
 
 See [`core/README.md`](core/README.md) for full details.
+See [`docs/processor-plugin-usage.md`](docs/processor-plugin-usage.md) for the
+core-template + backend-adapter workflow.
 
 ---
 
 ## Proto Generation
 
-The `.proto` sources live in `backend/proto/` and the generated Python stubs
-(`*_pb2.py`, `*_pb2_grpc.py`) are written to the canonical `core/proto/`
-package. To regenerate from the latest proto files:
+The `.proto` sources and the generated Python stubs (`*_pb2.py`,
+`*_pb2_grpc.py`) both live in the canonical `core/proto/` package.
+To regenerate from the latest proto files:
 
 ```bash
-bash backend/proto/generate.sh
+bash core/proto/generate.sh
 ```
 
 ---
@@ -262,7 +265,15 @@ class MyProcessor(BaseVideoProcessor):
         return result
 ```
 
-Register it in `ProcessorManager.start_processor()`.
+Register it in `backend/processing/registry.py`, then set:
+
+```json
+{
+    "processor_plugin": "my_scene"
+}
+```
+
+See [`docs/processor-plugin-usage.md`](docs/processor-plugin-usage.md).
 
 ---
 

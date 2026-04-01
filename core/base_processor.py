@@ -9,12 +9,13 @@ into the full V-Sentinel backend without any changes.
 from __future__ import annotations
 
 import asyncio
+import base64
 import queue
 import subprocess
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -34,10 +35,11 @@ from core.constants import (
 )
 
 try:
-    from turbojpeg import TurboJPEG
+    from turbojpeg import TurboJPEG, TJPF_RGB
     _jpeg = TurboJPEG()
 except (ImportError, RuntimeError) as _exc:
     _jpeg = None
+    TJPF_RGB = None  # type: ignore[assignment]
     import warnings
     warnings.warn(
         f"TurboJPEG unavailable ({_exc}), falling back to cv2.imencode",
@@ -400,6 +402,142 @@ class BaseVideoProcessor(ABC):
     ) -> AnalysisResult:
         """Process a single frame. Implement your AI logic here."""
         ...
+
+    # ── Reusable inference helpers / 可复用推理辅助方法 ───────────────────
+
+    @staticmethod
+    def _bbox_to_roi_points(
+        bbox: list[int] | tuple[int, int, int, int],
+        width: int,
+        height: int,
+    ) -> list[dict[str, int]]:
+        """Convert an [x1, y1, x2, y2] bbox to ROI polygon points.
+        将 [x1, y1, x2, y2] 检测框转换为 ROI 多边形点。"""
+        x1, y1, x2, y2 = bbox
+        x1 = max(int(x1), 0)
+        y1 = max(int(y1), 0)
+        x2 = min(int(x2), width)
+        y2 = min(int(y2), height)
+        return [
+            {"x": x1, "y": y1},
+            {"x": x2, "y": y1},
+            {"x": x2, "y": y2},
+            {"x": x1, "y": y2},
+        ]
+
+    async def _do_detect(
+        self,
+        *,
+        shape: tuple[int, ...],
+        model_name: str,
+        conf: float = 0.5,
+        model_roi: list[dict] | None = None,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
+        images: list[dict] | None = None,
+        on_item: Callable[[dict], dict | None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Run reusable detection and optionally map each detection result.
+        执行可复用检测，并可选地映射每个检测结果。"""
+        if self.vengine is None:
+            return {"detections": []}
+
+        detect_kwargs: dict[str, object] = {
+            "shape": shape,
+            "model_name": model_name,
+            "conf": conf,
+        }
+        if model_roi is not None:
+            detect_kwargs["model_roi"] = model_roi
+        if image_bytes is not None:
+            detect_kwargs["image_bytes"] = image_bytes
+        if image_key is not None:
+            detect_kwargs["image_key"] = image_key
+        if images is not None:
+            detect_kwargs["images"] = images
+
+        raw = await self.vengine.detect(**detect_kwargs)
+        detections: list[dict] = []
+        for item in raw:
+            mapped = on_item(item) if on_item is not None else item
+            if mapped is not None:
+                detections.append(mapped)
+        return {"detections": detections}
+
+    async def _do_ocr(
+        self,
+        ocr_rois: list[dict],
+        *,
+        model_name: str,
+        conf: float = 0.3,
+        on_item: Callable[[dict], None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Run reusable batched OCR and optionally post-process each result.
+        执行可复用的批量 OCR，并可选地对每个结果做后处理。"""
+        if self.vengine is None or not ocr_rois:
+            return {"ocr_texts": []}
+
+        raw = await self.vengine.ocr(
+            shape=None,
+            model_name=model_name,
+            conf=conf,
+            images=ocr_rois,
+        )
+        ocr_texts: list[dict] = []
+        for item in raw:
+            if on_item is not None:
+                on_item(item)
+            ocr_texts.append(item)
+        return {"ocr_texts": ocr_texts}
+
+    async def _do_classify(
+        self,
+        cls_rois: list[dict],
+        *,
+        model_name: str,
+        on_item: Callable[[dict], dict | None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Run reusable batched classification and map results if needed.
+        执行可复用的批量分类，并在需要时映射结果。"""
+        if self.vengine is None or not cls_rois:
+            return {"classifications": []}
+
+        raw = await self.vengine.classify(
+            shape=None,
+            model_name=model_name,
+            images=cls_rois,
+        )
+        classifications: list[dict] = []
+        for item in raw:
+            mapped = on_item(item) if on_item is not None else item
+            if mapped is not None:
+                classifications.append(mapped)
+        return {"classifications": classifications}
+
+    def _encode_thumbnail(
+        self, frame: np.ndarray | None, max_width: int = 320
+    ) -> str | None:
+        """Encode a frame as a base64 JPEG thumbnail (RGB channel order).
+        将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
+        if frame is None:
+            return None
+
+        h, w = frame.shape[:2]
+        if w > max_width:
+            scale = max_width / w
+            frame = cv2.resize(
+                frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
+            )
+
+        if _jpeg is not None:
+            encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
+        else:
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if not ok:
+                return None
+            encoded = buf.tobytes()
+        return base64.b64encode(encoded).decode()
 
     # ── Drawing helpers ───────────────────────────────────────────────────
 

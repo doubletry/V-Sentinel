@@ -121,6 +121,74 @@ export const useSourceStore = defineStore('source', () => {
     }
   }
 
+  function getRunningSourceIdsSnapshot() {
+    return Array.from(runningSourceIds.value)
+  }
+
+  async function restartProcessing(sourceIds) {
+    const targets = Array.from(
+      new Set((sourceIds || []).map((item) => String(item || '').trim()).filter(Boolean))
+    )
+
+    if (!targets.length) {
+      return {
+        status: 'not_running',
+        restarted: 0,
+        stopped: 0,
+        failed: [],
+      }
+    }
+
+    const failed = []
+    const stoppedIds = []
+    let restarted = 0
+
+    for (const sourceId of targets) {
+      try {
+        await processorApi.stop(sourceId)
+        stoppedIds.push(sourceId)
+        runningSourceIds.value.delete(sourceId)
+      } catch (err) {
+        failed.push({
+          source_id: sourceId,
+          phase: 'stop',
+          reason: err.message,
+        })
+      }
+    }
+
+    for (const sourceId of stoppedIds) {
+      try {
+        const result = await processorApi.start(sourceId)
+        if (result.status === 'started' || result.status === 'already_running') {
+          restarted += 1
+          runningSourceIds.value.add(sourceId)
+        } else {
+          failed.push({
+            source_id: sourceId,
+            phase: 'start',
+            reason: result.status || 'unknown',
+          })
+        }
+      } catch (err) {
+        failed.push({
+          source_id: sourceId,
+          phase: 'start',
+          reason: err.message,
+        })
+      }
+    }
+
+    await syncProcessorStatus()
+
+    return {
+      status: failed.length ? 'partial' : 'restarted',
+      restarted,
+      stopped: stoppedIds.length,
+      failed,
+    }
+  }
+
   function assignToCell(cellIndex, source) {
     gridAssignments.value[cellIndex] = source
   }
@@ -145,6 +213,8 @@ export const useSourceStore = defineStore('source', () => {
     startAllProcessing,
     stopAllProcessing,
     syncProcessorStatus,
+    getRunningSourceIdsSnapshot,
+    restartProcessing,
     assignToCell,
     removeFromCell,
   }

@@ -91,6 +91,25 @@
 
         <section class="settings-section">
           <h2>{{ t('settings.backendService') }}</h2>
+          <el-form-item :label="t('settings.processorPlugin')">
+            <div class="field-stack">
+              <el-select
+                v-model="form.processor_plugin"
+                style="width: 100%"
+                filterable
+                allow-create
+                default-first-option
+              >
+                <el-option
+                  v-for="option in processorPluginOptions"
+                  :key="option.value"
+                  :label="t(option.labelKey)"
+                  :value="option.value"
+                />
+              </el-select>
+              <p class="form-hint">{{ t('settings.processorPluginHint') }}</p>
+            </div>
+          </el-form-item>
           <div class="service-control-row">
             <el-tag :type="sourceStore.runningCount > 0 ? 'success' : 'info'" effect="dark">
               {{
@@ -203,6 +222,10 @@ const { t } = useI18n()
 const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
+const processorPluginOptions = [
+  { value: 'truck', labelKey: 'settings.processorPluginTruck' },
+  { value: 'example', labelKey: 'settings.processorPluginExample' },
+]
 
 const loading = ref(false)
 const saving = ref(false)
@@ -211,6 +234,7 @@ const roiTagInput = ref('')
 const roiTagList = ref([])
 const form = ref({
   ui_language: 'zh-CN',
+  processor_plugin: 'truck',
   site_title: '',
   site_description: '',
   favicon_url: '/favicon.ico',
@@ -294,13 +318,45 @@ async function reload() {
 
 async function save() {
   saving.value = true
+  const previousPlugin = appSettingsStore.settings?.processor_plugin || 'truck'
   try {
     syncRoiTagOptionsToForm()
+    const pluginChanged = previousPlugin !== form.value.processor_plugin
+    let runningSourceIds = []
+    if (pluginChanged) {
+      await sourceStore.syncProcessorStatus()
+      runningSourceIds = sourceStore.getRunningSourceIdsSnapshot()
+    }
+
     const data = await appSettingsStore.updateSettings(form.value)
     Object.assign(form.value, data)
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     appSettingsStore.applyLanguage(form.value.ui_language)
-    ElMessage.success(t('settings.settingsSaved'))
+
+    if (!pluginChanged) {
+      ElMessage.success(t('settings.settingsSaved'))
+      return
+    }
+
+    if (!runningSourceIds.length) {
+      ElMessage.success(t('settings.settingsSavedRestartRequired'))
+      return
+    }
+
+    const restartResult = await sourceStore.restartProcessing(runningSourceIds)
+    if (restartResult.status === 'partial') {
+      ElMessage.warning(
+        t('settings.settingsSavedRestartPartial', {
+          restarted: restartResult.restarted,
+          failed: restartResult.failed.length,
+        })
+      )
+      return
+    }
+
+    ElMessage.success(
+      t('settings.settingsSavedRestarted', { count: restartResult.restarted })
+    )
   } catch (err) {
     ElMessage.error(t('settings.failedToSave', { message: err.message }))
   } finally {
@@ -470,6 +526,17 @@ onMounted(async () => {
 
 .service-tip {
   margin-top: 8px;
+  color: #8f9fbe;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.field-stack {
+  width: 100%;
+}
+
+.form-hint {
+  margin-top: 6px;
   color: #8f9fbe;
   font-size: 12px;
   line-height: 1.45;

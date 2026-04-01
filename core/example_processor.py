@@ -32,19 +32,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 from datetime import datetime, timezone
 
 import cv2
 import numpy as np
-from loguru import logger
-try:
-    from turbojpeg import TurboJPEG, TJPF_RGB
-    _jpeg = TurboJPEG()
-except (ImportError, RuntimeError) as _exc:
-    _jpeg = None
-    TJPF_RGB = None  # type: ignore[assignment]
-    logger.warning("TurboJPEG unavailable in example processor: {}", _exc)
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
 from core.runner import run_processor
@@ -105,21 +96,32 @@ class ExampleProcessor(BaseVideoProcessor):
             img_kwargs["image_bytes"] = encoded
 
         # 1. Concurrent detection + OCR / 并发检测 + OCR
-        detect_coro = self.vengine.detect(
+        detect_coro = self._do_detect(
             shape=shape,
             model_name=self.DETECTION_MODEL,
             conf=0.5,
             model_roi=primary_roi,
             **img_kwargs,
         )
-        ocr_coro = self.vengine.ocr(
-            shape=shape,
+        ocr_coro = self._do_ocr(
+            [
+                {
+                    "shape": shape,
+                    "roi": primary_roi,
+                    **({"key": image_key} if image_key else {"image_bytes": encoded}),
+                }
+            ] if primary_roi else [
+                {
+                    "shape": shape,
+                    **({"key": image_key} if image_key else {"image_bytes": encoded}),
+                }
+            ],
             model_name=self.OCR_MODEL,
             conf=0.5,
-            image_roi=primary_roi,
-            **img_kwargs,
         )
-        detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)
+        detect_result, ocr_result = await asyncio.gather(detect_coro, ocr_coro)
+        detections = detect_result["detections"]
+        ocr_texts = ocr_result["ocr_texts"]
 
         # 2. Batch classification on detected person ROIs / 对检测到的 person ROI 批量分类
         classifications: list[dict] = []
@@ -139,50 +141,43 @@ class ExampleProcessor(BaseVideoProcessor):
             classification_images.append(
                 {
                     "shape": shape,
-                    "roi": [
-                        {"x": x1, "y": y1},
-                        {"x": x2, "y": y1},
-                        {"x": x2, "y": y2},
-                        {"x": x1, "y": y2},
-                    ],
+                    "roi": self._bbox_to_roi_points([x1, y1, x2, y2], w, h),
                     "key": image_key,
                 }
                 if image_key
                 else {
                     "shape": shape,
-                    "roi": [
-                        {"x": x1, "y": y1},
-                        {"x": x2, "y": y1},
-                        {"x": x2, "y": y2},
-                        {"x": x1, "y": y2},
-                    ],
+                    "roi": self._bbox_to_roi_points([x1, y1, x2, y2], w, h),
                     "image_bytes": encoded,
                 }
             )
 
         if classification_images:
-            cls_results = await self.vengine.classify(
-                shape=None,
-                model_name=self.CLASSIFICATION_MODEL,
-                images=classification_images,
-            )
-            for best in cls_results:
+            def _map_classification(best: dict) -> dict | None:
                 image_id = best.get("image_id")
                 if not isinstance(image_id, int) or not (0 <= image_id < len(person_detections)):
-                    continue
+                    return None
                 det = person_detections[image_id]
                 x1 = max(int(det["x_min"]), 0)
                 y1 = max(int(det["y_min"]), 0)
                 x2 = min(int(det["x_max"]), w)
                 y2 = min(int(det["y_max"]), h)
-                classifications.append(
-                    {
-                        "detection_label": det["label"],
-                        "classification_label": best["label"],
-                        "confidence": best["confidence"],
-                        "bbox": [x1, y1, x2, y2],
-                    }
-                )
+                return {
+                    "detection_label": det["label"],
+                    "classification_label": best["label"],
+                    "stable_label": best["label"],
+                    "raw_label": best["label"],
+                    "confidence": best["confidence"],
+                    "bbox": [x1, y1, x2, y2],
+                    "person_bbox": [x1, y1, x2, y2],
+                }
+
+            cls_result = await self._do_classify(
+                classification_images,
+                model_name=self.CLASSIFICATION_MODEL,
+                on_item=_map_classification,
+            )
+            classifications.extend(cls_result["classifications"])
 
         # 3. Assemble analysis result / 组装分析结果
         result = AnalysisResult(
@@ -223,30 +218,6 @@ class ExampleProcessor(BaseVideoProcessor):
 
         result.messages = messages
         return result
-
-    def _encode_thumbnail(
-        self, frame: np.ndarray | None, max_width: int = 320
-    ) -> str | None:
-        """Encode a frame as a base64 JPEG thumbnail (RGB).
-        将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
-        if frame is None:
-            return None
-        h, w = frame.shape[:2]
-        if w > max_width:
-            scale = max_width / w
-            frame = cv2.resize(
-                frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
-            )
-        if _jpeg is not None:
-            encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
-        else:
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
-            if not ok:
-                return None
-            encoded = buf.tobytes()
-        return base64.b64encode(encoded).decode()
-
 
 def main() -> None:
     """CLI entry point for the ExampleProcessor standalone runner.

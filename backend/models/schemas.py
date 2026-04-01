@@ -117,6 +117,8 @@ class AppSettingsUpdate(BaseModel):
     ocr_enabled: str | None = None
     upload_enabled: str | None = None
 
+    processor_plugin: str | None = None
+
     mediamtx_rtsp_addr: str | None = None
     mediamtx_webrtc_addr: str | None = None
     max_pull_workers: str | None = None

@@ -8,7 +8,8 @@ from loguru import logger
 from backend.db.database import get_source, list_sources
 from backend.models.schemas import ProcessorStatus
 from backend.processing.agent import AnalysisAgent
-from backend.processing.example import ExampleProcessor
+from backend.processing.base import BaseVideoProcessor
+from backend.processing.registry import resolve_processor_class
 
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
@@ -34,7 +35,7 @@ class ProcessorManager:
         self._vengine = vengine_client
         self._ws_manager = ws_manager
         self._app_settings = app_settings
-        self._processors: dict[str, ExampleProcessor] = {}
+        self._processors: dict[str, BaseVideoProcessor] = {}
         self._lock = asyncio.Lock()
         self._agent = AnalysisAgent(ws_manager=ws_manager)
 
@@ -68,7 +69,10 @@ class ProcessorManager:
             if source is None:
                 raise ValueError(f"Source not found: {source_id}")
 
-            processor = ExampleProcessor(
+            plugin_name = self._app_settings.get("processor_plugin", "truck")
+            processor_cls = resolve_processor_class(plugin_name)
+
+            processor = processor_cls(
                 source_id=source.id,
                 source_name=source.name,
                 rtsp_url=source.rtsp_url,
@@ -80,11 +84,16 @@ class ProcessorManager:
             )
             await processor.start()
             self._processors[source_id] = processor
-            logger.info("ProcessorManager: started processor for {}", source_id)
+            logger.info(
+                "ProcessorManager: started {} processor for {}",
+                plugin_name,
+                source_id,
+            )
             return {
                 "status": "started",
                 "source_id": source_id,
                 "source_name": source.name,
+                "processor_plugin": plugin_name,
             }
 
     async def stop_processor(self, source_id: str) -> dict:

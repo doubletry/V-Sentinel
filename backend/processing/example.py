@@ -108,14 +108,14 @@ class ExampleProcessor(BaseVideoProcessor):
             shape=shape,
             model_name=DETECTION_MODEL,
             conf=0.5,
-            roi_points=primary_roi,
+            model_roi=primary_roi,
             **img_kwargs,
         )
         ocr_coro = self.vengine.ocr(
             shape=shape,
             model_name=OCR_MODEL,
             conf=0.5,
-            roi_points=primary_roi,
+            image_roi=primary_roi,
             **img_kwargs,
         )
         detections, ocr_texts = await asyncio.gather(detect_coro, ocr_coro)

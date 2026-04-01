@@ -175,7 +175,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             shape=shape,
             model_name=DETECTION_MODEL,
             conf=0.5,
-            roi_points=primary_roi,
+            model_roi=primary_roi,
             **img_kwargs,
         )
 

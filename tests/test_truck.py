@@ -610,9 +610,9 @@ class TestTruckProcessorRoiFlow:
     """Verify that ROI pixel points flow correctly to all vengine calls.
     验证 ROI 像素坐标正确传递到所有 vengine 调用。"""
 
-    async def test_detect_receives_roi_points_from_roi_pixel_points(self):
-        """When roi_pixel_points is provided, detect() receives roi_points.
-        当提供 roi_pixel_points 时，detect() 接收到 roi_points。"""
+    async def test_detect_receives_model_roi_from_roi_pixel_points(self):
+        """When roi_pixel_points is provided, detect() receives model_roi.
+        当提供 roi_pixel_points 时，detect() 接收到 model_roi。"""
         from core.truck_processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
@@ -640,11 +640,11 @@ class TestTruckProcessorRoiFlow:
 
         vengine.detect.assert_called_once()
         call_kwargs = vengine.detect.call_args
-        assert call_kwargs.kwargs.get("roi_points") == roi or call_kwargs[1].get("roi_points") == roi
+        assert call_kwargs.kwargs.get("model_roi") == roi or call_kwargs[1].get("model_roi") == roi
 
-    async def test_detect_receives_none_roi_when_no_roi_pixel_points(self):
-        """When roi_pixel_points is empty, detect() receives roi_points=None.
-        当 roi_pixel_points 为空时，detect() 接收 roi_points=None。"""
+    async def test_detect_receives_none_model_roi_when_no_roi_pixel_points(self):
+        """When roi_pixel_points is empty, detect() receives model_roi=None.
+        当 roi_pixel_points 为空时，detect() 接收 model_roi=None。"""
         from core.truck_processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
@@ -666,13 +666,13 @@ class TestTruckProcessorRoiFlow:
 
         vengine.detect.assert_called_once()
         call_kwargs = vengine.detect.call_args
-        # roi_points should be None when no ROI provided
-        assert call_kwargs.kwargs.get("roi_points") is None or call_kwargs[1].get("roi_points") is None
+        # model_roi should be None when no ROI provided
+        assert call_kwargs.kwargs.get("model_roi") is None or call_kwargs[1].get("model_roi") is None
 
     async def test_detect_uses_image_key_not_images_param(self):
         """detect() is called with single-image args (not images list), so
-        roi_points at top level is used correctly.
-        detect() 使用单图参数调用（非 images 列表），因此顶层 roi_points 正确使用。"""
+        model_roi at top level is used correctly.
+        detect() 使用单图参数调用（非 images 列表），因此顶层 model_roi 正确使用。"""
         from core.truck_processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
@@ -895,8 +895,8 @@ class TestTruckProcessorRoiFlow:
         )
 
         call_kwargs = vengine.detect.call_args
-        # Should have roi_points AND image_key (not images list)
-        assert call_kwargs.kwargs.get("roi_points") == roi
+        # Should have model_roi AND image_key (not images list)
+        assert call_kwargs.kwargs.get("model_roi") == roi
         assert call_kwargs.kwargs.get("image_key") == "frame-key"
         assert "images" not in call_kwargs.kwargs
 
@@ -939,9 +939,9 @@ class TestTruckProcessorRoiFlow:
             shape=(480, 640, 3), roi_pixel_points=[roi],
         )
 
-        # Verify detect was called with ROI
+        # Verify detect was called with model_roi
         detect_kwargs = vengine.detect.call_args.kwargs
-        assert detect_kwargs["roi_points"] == roi
+        assert detect_kwargs["model_roi"] == roi
 
         # Verify detections, OCR and classifications
         assert len(result.detections) == 2

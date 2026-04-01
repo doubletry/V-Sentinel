@@ -194,7 +194,7 @@ class AsyncVEngineClient:
     def _make_image(
         self,
         shape: tuple[int, ...],
-        roi_points: list[dict] | None = None,
+        image_roi: list[dict] | None = None,
         *,
         image_id: int = 0,
         image_bytes: bytes | None = None,
@@ -202,6 +202,14 @@ class AsyncVEngineClient:
     ) -> base_pb2.Image:
         """Build a ``base_pb2.Image`` from either raw bytes **or** a cache key.
         从原始字节**或**缓存键构建 ``base_pb2.Image``。
+
+        *image_roi* is an optional per-image ROI that goes into
+        ``Image.region_of_interest`` (used for pre-processing crops, e.g.
+        classification and OCR).  This is distinct from model_roi which
+        goes into ``InferenceParams.region_of_interest``.
+        *image_roi* 是可选的逐图 ROI，放入 ``Image.region_of_interest``
+        （用于预处理裁剪，如分类和 OCR）。这与放入
+        ``InferenceParams.region_of_interest`` 的 model_roi 不同。
 
         Exactly one of *image_bytes* / *image_key* must be provided.
         必须且仅提供 *image_bytes* / *image_key* 其中之一。
@@ -211,13 +219,13 @@ class AsyncVEngineClient:
         if image_bytes is not None and image_key is not None:
             raise ValueError("Provide only one of image_bytes or image_key, not both")
 
-        image_roi = (
-            self._make_roi_polygon(roi_points) if roi_points else base_pb2.Polygon()
+        roi_polygon = (
+            self._make_roi_polygon(image_roi) if image_roi else base_pb2.Polygon()
         )
         kwargs: dict = {
             "id": image_id,
             "shape": base_pb2.ShapeInfo(dims=list(shape)),
-            "region_of_interest": image_roi,
+            "region_of_interest": roi_polygon,
         }
         if image_bytes is not None:
             kwargs["data"] = image_bytes
@@ -229,7 +237,7 @@ class AsyncVEngineClient:
         self,
         *,
         shape: tuple[int, ...] | None = None,
-        roi_points: list[dict] | None = None,
+        image_roi: list[dict] | None = None,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
         images: list[dict] | None = None,
@@ -237,13 +245,19 @@ class AsyncVEngineClient:
         """Build one or more ``base_pb2.Image`` objects.
         构建一个或多个 ``base_pb2.Image`` 对象。
 
+        *image_roi* sets ``Image.region_of_interest`` for per-image
+        pre-processing crops.  This is independent of model_roi which
+        goes into ``InferenceParams.region_of_interest``.
+        *image_roi* 设置 ``Image.region_of_interest`` 用于逐图预处理裁剪。
+        这与放入 ``InferenceParams.region_of_interest`` 的 model_roi 无关。
+
         When ``images`` is provided, each item may contain:
         ``shape`` plus exactly one of ``image_bytes``/``image_key``.
         For convenience, ``roi`` and ``key`` are accepted as aliases for
-        ``roi_points`` and ``image_key``.
+        ``image_roi`` and ``image_key``.
         当提供 ``images`` 时，每个元素都应包含 ``shape``，并且必须在
         ``image_bytes`` / ``image_key`` 中二选一。为方便起见，也接受
-        ``roi`` 和 ``key`` 作为 ``roi_points`` 与 ``image_key`` 的别名。
+        ``roi`` 和 ``key`` 作为 ``image_roi`` 与 ``image_key`` 的别名。
         """
         if images is not None:
             built_images: list[base_pb2.Image] = []
@@ -251,7 +265,7 @@ class AsyncVEngineClient:
                 built_images.append(
                     self._make_image(
                         tuple(item["shape"]),
-                        item.get("roi_points", item.get("roi")),
+                        item.get("image_roi", item.get("roi_points", item.get("roi"))),
                         image_id=idx,
                         image_bytes=item.get("image_bytes", item.get("data")),
                         image_key=item.get("image_key", item.get("key")),
@@ -265,7 +279,7 @@ class AsyncVEngineClient:
         return [
             self._make_image(
                 shape,
-                roi_points,
+                image_roi,
                 image_id=0,
                 image_bytes=image_bytes,
                 image_key=image_key,
@@ -277,7 +291,7 @@ class AsyncVEngineClient:
         *,
         frames_bytes: list[bytes] | None = None,
         shapes: list[tuple[int, ...]] | None = None,
-        roi_points: list[dict] | None = None,
+        image_roi: list[dict] | None = None,
         image_key: str | None = None,
         image_keys: list[str] | None = None,
         images: list[dict] | None = None,
@@ -318,7 +332,7 @@ class AsyncVEngineClient:
             seq_images = [
                 self._make_image(
                     shape,
-                    roi_points,
+                    image_roi,
                     image_id=idx,
                     image_key=key,
                 )
@@ -332,7 +346,7 @@ class AsyncVEngineClient:
             seq_images = [
                 self._make_image(
                     shape,
-                    roi_points,
+                    image_roi,
                     image_id=idx,
                     image_bytes=data,
                 )
@@ -371,7 +385,7 @@ class AsyncVEngineClient:
         model_name: str,
         conf: float = 0.5,
         nms: float = 0.7,
-        roi_points: list[dict] | None = None,
+        model_roi: list[dict] | None = None,
         *,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
@@ -380,16 +394,18 @@ class AsyncVEngineClient:
         """Async object detection. 异步目标检测。
 
         Pass either single-image args (*shape* + *image_bytes*/*image_key*), or
-        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` for a
-        batched request.
+        ``images=[{shape, image_bytes|image_key}, ...]`` for a batched request.
         既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
-        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
+        ``images=[{shape, image_bytes|image_key}, ...]`` 的批量请求。
 
-        ROI handling: detection uses ``use_model_roi`` (server-side
-        post-processing filter on detection results), so only detections whose
-        centre falls inside the ROI are returned.
-        ROI 处理：检测使用 ``use_model_roi``（服务端对检测结果的后处理过滤），
-        仅返回中心点在 ROI 内的检测框。
+        *model_roi* is the user-drawn region of interest placed in
+        ``InferenceParams.region_of_interest``.  The server runs detection on
+        the full image, then filters results to keep only boxes inside this
+        ROI (post-processing).  There is only **one** model_roi per request.
+        *model_roi* 是用户绘制的感兴趣区域，放入
+        ``InferenceParams.region_of_interest``。服务端在完整图像上运行检测，
+        然后过滤结果仅保留 ROI 内的检测框（后处理）。
+        每次请求只有**一个** model_roi。
 
         Returns list of {x_min, y_min, x_max, y_max, confidence, class_id, label}.
         Returns empty list when service is disabled.
@@ -400,23 +416,25 @@ class AsyncVEngineClient:
         try:
             request_images = self._make_images(
                 shape=shape,
-                roi_points=roi_points,
                 image_bytes=image_bytes,
                 image_key=image_key,
                 images=images,
             )
             if not request_images:
                 return []
-            has_roi = any(bool(img.region_of_interest.points) for img in request_images)
+            model_roi_polygon = (
+                self._make_roi_polygon(model_roi) if model_roi else base_pb2.Polygon()
+            )
             params = detection_service_pb2.DetectionParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
+                    region_of_interest=model_roi_polygon,
                     # Detection uses model_roi: the server runs detection on the
                     # full image, then filters results to keep only boxes inside
                     # the ROI (post-processing).
                     # 检测使用 model_roi：服务端在完整图像上运行检测，然后过滤结果
                     # 仅保留 ROI 内的检测框（后处理）。
-                    use_model_roi=has_roi,
+                    use_model_roi=bool(model_roi),
                 ),
                 confidence_threshold=conf,
                 nms_iou_threshold=nms,
@@ -458,7 +476,7 @@ class AsyncVEngineClient:
         self,
         shape: tuple[int, ...] | None,
         model_name: str,
-        roi_points: list[dict] | None = None,
+        image_roi: list[dict] | None = None,
         *,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
@@ -467,16 +485,18 @@ class AsyncVEngineClient:
         """Async image classification. 异步图像分类。
 
         Pass either single-image args (*shape* + *image_bytes*/*image_key*), or
-        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` for a
+        ``images=[{shape, image_bytes|image_key, roi?}, ...]`` for a
         batched request.
         既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
-        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
+        ``images=[{shape, image_bytes|image_key, roi?}, ...]`` 的批量请求。
 
-        ROI handling: classification uses ``use_image_roi`` (server-side
-        pre-processing crop on input images before classification), so the
-        model only sees the ROI region.
-        ROI 处理：分类使用 ``use_image_roi``（服务端对输入图像的预处理裁剪），
-        模型仅看到 ROI 区域。
+        *image_roi* (single-image) or per-item ``roi`` (batch) is the
+        per-image crop region placed in ``Image.region_of_interest``.
+        The server crops the input image to this region before feeding it
+        to the classifier (pre-processing).
+        *image_roi*（单图）或每项的 ``roi``（批量）是逐图裁剪区域，
+        放入 ``Image.region_of_interest``。服务端在将图像送入分类器前
+        裁剪到此区域（前处理）。
 
         Returns list of {label, confidence, class_id}. Batched responses also
         include ``image_id`` to identify which input image/ROI produced the
@@ -491,7 +511,7 @@ class AsyncVEngineClient:
         try:
             request_images = self._make_images(
                 shape=shape,
-                roi_points=roi_points,
+                image_roi=image_roi,
                 image_bytes=image_bytes,
                 image_key=image_key,
                 images=images,
@@ -544,7 +564,7 @@ class AsyncVEngineClient:
         shape: tuple[int, ...] | None,
         model_name: str,
         conf: float = 0.5,
-        roi_points: list[dict] | None = None,
+        image_roi: list[dict] | None = None,
         *,
         image_bytes: bytes | None = None,
         image_key: str | None = None,
@@ -553,10 +573,18 @@ class AsyncVEngineClient:
         """Async OCR. 异步文字识别。
 
         Pass either single-image args (*shape* + *image_bytes*/*image_key*), or
-        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` for a
+        ``images=[{shape, image_bytes|image_key, roi?}, ...]`` for a
         batched request.
         既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
-        ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
+        ``images=[{shape, image_bytes|image_key, roi?}, ...]`` 的批量请求。
+
+        *image_roi* (single-image) or per-item ``roi`` (batch) is the
+        per-image crop region placed in ``Image.region_of_interest``.
+        The server crops the input image to this region before OCR
+        (pre-processing).
+        *image_roi*（单图）或每项的 ``roi``（批量）是逐图裁剪区域，
+        放入 ``Image.region_of_interest``。服务端在 OCR 前裁剪到此区域
+        （前处理）。
 
         Returns list of {text, confidence, points}. Batched responses also
         include ``image_id`` to identify which input image produced the result.
@@ -569,7 +597,7 @@ class AsyncVEngineClient:
         try:
             request_images = self._make_images(
                 shape=shape,
-                roi_points=roi_points,
+                image_roi=image_roi,
                 image_bytes=image_bytes,
                 image_key=image_key,
                 images=images,
@@ -620,7 +648,7 @@ class AsyncVEngineClient:
         model_name: str,
         frames_bytes: list[bytes] | None = None,
         shapes: list[tuple[int, ...]] | None = None,
-        roi_points: list[dict] | None = None,
+        image_roi: list[dict] | None = None,
         *,
         image_key: str | None = None,
         image_keys: list[str] | None = None,
@@ -636,6 +664,10 @@ class AsyncVEngineClient:
         支持原有单序列 API（*frames_bytes* + *shapes*），也支持单序列
         ``images=[...]`` 以及批量 ``sequences=[{images:[...]}, ...]``。
 
+        *image_roi* is the per-image crop region placed in
+        ``Image.region_of_interest`` (pre-processing).
+        *image_roi* 是逐图裁剪区域，放入 ``Image.region_of_interest``（前处理）。
+
         Returns list of {label, confidence, class_id}. Batched sequence
         responses also include ``sequence_id``.
         返回 {label, confidence, class_id} 列表。批量序列请求时还会附带
@@ -649,7 +681,7 @@ class AsyncVEngineClient:
             request_sequences = self._make_sequences(
                 frames_bytes=frames_bytes,
                 shapes=shapes,
-                roi_points=roi_points,
+                image_roi=image_roi,
                 image_key=image_key,
                 image_keys=image_keys,
                 images=images,

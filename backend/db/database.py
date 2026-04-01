@@ -44,13 +44,15 @@ PRAGMA_FK = "PRAGMA foreign_keys = ON;"
 
 
 async def init_db() -> None:
-    """Create database tables if they don't exist."""
+    """Create database tables if they don't exist.
+    创建数据库表（如果不存在）。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
         await db.execute(CREATE_SOURCES_TABLE)
         await db.execute(CREATE_ROIS_TABLE)
         await db.execute(CREATE_SETTINGS_TABLE)
         # Ensure all default keys exist, while preserving user-modified values.
+        # 确保所有默认键存在，同时保留用户修改过的值。
         for key, value in DEFAULT_APP_SETTINGS.items():
             await db.execute(
                 "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
@@ -61,10 +63,14 @@ async def init_db() -> None:
 
 
 def _now_iso() -> str:
+    """Return current UTC time as an ISO 8601 string.
+    返回当前 UTC 时间的 ISO 8601 字符串。"""
     return datetime.now(timezone.utc).isoformat()
 
 
 async def _get_rois_for_source(db: aiosqlite.Connection, source_id: str) -> list[ROI]:
+    """Fetch all ROIs for a given source from the database.
+    从数据库获取指定视频源的所有 ROI。"""
     async with db.execute(
         "SELECT id, type, points, tag FROM rois WHERE source_id = ? ORDER BY created_at",
         (source_id,),
@@ -79,6 +85,8 @@ async def _get_rois_for_source(db: aiosqlite.Connection, source_id: str) -> list
 
 
 def _row_to_source(row: tuple, rois: list[ROI]) -> VideoSource:
+    """Convert a database row and ROI list to a VideoSource model.
+    将数据库行与 ROI 列表转换为 VideoSource 模型。"""
     source_id, name, rtsp_url, created_at = row
     return VideoSource(
         id=source_id,
@@ -90,6 +98,8 @@ def _row_to_source(row: tuple, rois: list[ROI]) -> VideoSource:
 
 
 async def create_source(source: VideoSourceCreate) -> VideoSource:
+    """Insert a new video source into the database.
+    向数据库插入新的视频源。"""
     source_id = str(uuid.uuid4())
     created_at = _now_iso()
     async with aiosqlite.connect(_DB_PATH) as db:
@@ -109,6 +119,8 @@ async def create_source(source: VideoSourceCreate) -> VideoSource:
 
 
 async def get_source(source_id: str) -> VideoSource | None:
+    """Retrieve a single video source by ID, or None if not found.
+    按 ID 获取单个视频源，未找到则返回 None。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
         async with db.execute(
@@ -123,6 +135,8 @@ async def get_source(source_id: str) -> VideoSource | None:
 
 
 async def get_source_by_rtsp(rtsp_url: str) -> VideoSource | None:
+    """Retrieve a video source by its RTSP URL, or None if not found.
+    按 RTSP URL 获取视频源，未找到则返回 None。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
         async with db.execute(
@@ -137,6 +151,8 @@ async def get_source_by_rtsp(rtsp_url: str) -> VideoSource | None:
 
 
 async def list_sources() -> list[VideoSource]:
+    """List all video sources ordered by creation time.
+    按创建时间列出所有视频源。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
         async with db.execute(
@@ -151,9 +167,11 @@ async def list_sources() -> list[VideoSource]:
 
 
 async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource | None:
+    """Update a video source's fields and/or ROIs.
+    更新视频源的字段和/或 ROI。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
-        # Build update query dynamically
+        # Build update query dynamically / 动态构建更新查询
         fields: list[str] = []
         values: list = []
         if data.name is not None:
@@ -168,7 +186,7 @@ async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource 
                 f"UPDATE video_sources SET {', '.join(fields)} WHERE id = ?",
                 values,
             )
-        # Update ROIs if provided
+        # Update ROIs if provided / 如果提供了 ROI 则更新
         if data.rois is not None:
             await _save_rois_in_db(db, source_id, data.rois)
         await db.commit()
@@ -184,6 +202,8 @@ async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource 
 
 
 async def delete_source(source_id: str) -> bool:
+    """Delete a video source by ID. Returns True if a row was deleted.
+    按 ID 删除视频源。如果删除了记录则返回 True。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
         cursor = await db.execute(
@@ -196,6 +216,8 @@ async def delete_source(source_id: str) -> bool:
 async def _save_rois_in_db(
     db: aiosqlite.Connection, source_id: str, rois: list[ROICreate]
 ) -> None:
+    """Replace all ROIs for a source within an existing transaction.
+    在已有事务内替换指定源的所有 ROI。"""
     await db.execute("DELETE FROM rois WHERE source_id = ?", (source_id,))
     now = _now_iso()
     for roi in rois:
@@ -208,6 +230,8 @@ async def _save_rois_in_db(
 
 
 async def save_rois(source_id: str, rois: list[ROICreate]) -> list[ROI]:
+    """Save ROIs for a source (replaces existing ROIs).
+    保存视频源的 ROI（替换现有 ROI）。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(PRAGMA_FK)
         await _save_rois_in_db(db, source_id, rois)
@@ -216,14 +240,17 @@ async def save_rois(source_id: str, rois: list[ROICreate]) -> list[ROI]:
 
 
 async def get_rois(source_id: str) -> list[ROI]:
+    """Get all ROIs for a given source.
+    获取指定视频源的所有 ROI。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         return await _get_rois_for_source(db, source_id)
 
 
-# ── App Settings ──────────────────────────────────────────────────────────────
+# ── App Settings / 应用设置 ────────────────────────────────────────────────────
 
 async def get_all_settings() -> dict[str, str]:
-    """Return all app settings as a key→value dict."""
+    """Return all app settings as a key→value dict.
+    以键→值字典形式返回所有应用设置。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         async with db.execute("SELECT key, value FROM app_settings") as cursor:
             rows = await cursor.fetchall()
@@ -231,7 +258,8 @@ async def get_all_settings() -> dict[str, str]:
 
 
 async def get_setting(key: str) -> str | None:
-    """Return a single setting value, or None if not found."""
+    """Return a single setting value, or None if not found.
+    返回单个设置值，未找到则返回 None。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         async with db.execute(
             "SELECT value FROM app_settings WHERE key = ?", (key,)
@@ -241,7 +269,8 @@ async def get_setting(key: str) -> str | None:
 
 
 async def update_settings(data: dict[str, str]) -> dict[str, str]:
-    """Update multiple settings at once. Returns all settings after update."""
+    """Update multiple settings at once. Returns all settings after update.
+    批量更新设置。返回更新后的所有设置。"""
     async with aiosqlite.connect(_DB_PATH) as db:
         for key, value in data.items():
             await db.execute(

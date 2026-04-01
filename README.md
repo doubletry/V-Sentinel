@@ -1,3 +1,5 @@
+[中文文档](README_zh.md)
+
 # V-Sentinel
 
 **AI Video Surveillance Analysis Platform**
@@ -24,13 +26,19 @@ V-Sentinel is a full-stack video surveillance AI analysis platform that integrat
 │  │  (RTSP→WebRTC)  │         │  Detection / Classification /   │   │
 │  └─────────────────┘         │  Action / OCR / Upload           │   │
 │                               └──────────────────────────────────┘   │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │  core/  — Standalone Processor SDK                           │   │
+│  │  Develop & test processors independently, then plug into     │   │
+│  │  the full backend with zero code changes.                    │   │
+│  └──────────────────────────────────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────┘
 
 Backend Async Processing Architecture:
 ┌─────────────────────────────────────────────────────────────────┐
 │  Thread Pool: RTSP Frame Pulling (1 thread per camera)          │
 │  ┌─────────────────────────────────────────────────┐            │
-│  │ av.open(rtsp) → decode → jpeg.encode → Queue   │            │
+│  │ av.open(rtsp) → decode → TurboJPEG.encode → Q  │            │
 │  └─────────────────────┬───────────────────────────┘            │
 │                        │ frames via asyncio.Queue               │
 │                        ▼                                        │
@@ -57,10 +65,14 @@ Backend Async Processing Architecture:
 | Backend | FastAPI (Python, fully async) |
 | Video Streaming | MediaMTX (RTSP → WebRTC) |
 | AI Inference | V-Engine gRPC microservices |
+| JPEG Encoding | TurboJPEG (via PyTurboJPEG) |
+| RTSP Push | Persistent av container per camera |
 | gRPC Client | grpc.aio (async gRPC) |
 | Real-time | WebSocket |
+| ROI Config | YAML import/export (pyyaml) |
 | Python Env | uv + pyproject.toml |
 | Database | SQLite via aiosqlite |
+| Processor SDK | `core/` standalone package |
 
 ---
 
@@ -69,6 +81,7 @@ Backend Async Processing Architecture:
 - **Node.js** >= 18
 - **Python** >= 3.11
 - **uv** — [install](https://docs.astral.sh/uv/getting-started/installation/)
+- **libturbojpeg** — required by PyTurboJPEG (`apt install libturbojpeg0-dev` on Debian/Ubuntu)
 - **MediaMTX** — [download](https://github.com/bluenviron/mediamtx/releases) or use Docker
 - **V-Engine** — running gRPC microservices (see [V-Engine repo](https://github.com/doubletry/V-Engine))
 
@@ -82,27 +95,35 @@ Backend Async Processing Architecture:
 git clone https://github.com/doubletry/V-Sentinel.git
 cd V-Sentinel
 
-# Install Python dependencies
+# Install Python dependencies (includes PyTurboJPEG, pyyaml, and all others)
 uv sync
 ```
 
 ### 2. Start the backend
 
 ```bash
+# Default port 8000 — use any port you like
 uv run uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API documentation: http://localhost:8000/docs
+API documentation: `http://localhost:<port>/docs`
 
 ### 3. Start the frontend (dev mode)
 
 ```bash
 cd frontend
 npm install
+
+# The Vite dev proxy defaults to backend port 8000.
+# Override with VITE_BACKEND_PORT if your backend runs on a different port:
+#   VITE_BACKEND_PORT=9000 npm run dev
 npm run dev
 ```
 
 The frontend will be available at http://localhost:5173
+
+> **Note:** The frontend uses relative URLs for all API and WebSocket calls, so it
+> works with any backend port — no hardcoded addresses.
 
 ### 4. Build frontend for production
 
@@ -135,15 +156,70 @@ MEDIAMTX_WEBRTC_ADDR=http://localhost:8889
 DB_PATH=./v_sentinel.db
 ```
 
+### Frontend proxy port
+
+During development, the Vite dev server proxies `/api` and `/ws` requests to the
+backend. The target port is read from the `VITE_BACKEND_PORT` environment variable
+(defaults to `8000`):
+
+```bash
+VITE_BACKEND_PORT=9000 npm run dev
+```
+
+---
+
+## Core Package — Standalone Processor SDK
+
+The `core/` directory is a self-contained Python package (`v-sentinel-core`) that
+lets you develop and test video processors **independently** of the full backend.
+
+### Install
+
+```bash
+pip install ./core            # minimal install
+pip install ./core[grpc]      # with V-Engine gRPC support
+```
+
+### Usage
+
+```python
+from core.base_processor import BaseVideoProcessor, AnalysisResult
+
+class MyProcessor(BaseVideoProcessor):
+    async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+        # Your AI logic here
+        annotated = self.draw_on_frame(frame, AnalysisResult())
+        return AnalysisResult(annotated_frame=annotated)
+```
+
+Run standalone:
+
+```python
+from core.runner import run_processor
+from my_processor import MyProcessor
+
+run_processor(
+    MyProcessor,
+    rtsp_input="rtsp://localhost:8554/cam1",
+    mediamtx_rtsp_addr="rtsp://localhost:8554",
+)
+```
+
+Once ready, drop your processor into `backend/processing/` and register it in
+`ProcessorManager` — no code changes needed.
+
+See [`core/README.md`](core/README.md) for full details.
+
 ---
 
 ## Proto Generation
 
-The repository includes pre-generated stub files in `backend/proto/`. To regenerate from source `.proto` files:
+The `.proto` sources live in `backend/proto/` and the generated Python stubs
+(`*_pb2.py`, `*_pb2_grpc.py`) are written to the canonical `core/proto/`
+package. To regenerate from the latest proto files:
 
 ```bash
-cd backend/proto
-./generate.sh
+bash backend/proto/generate.sh
 ```
 
 ---
@@ -161,8 +237,16 @@ from datetime import datetime, timezone
 class MyProcessor(BaseVideoProcessor):
     async def process_frame(self, frame, encoded, shape, roi_pixel_points):
         detections, ocr = await asyncio.gather(
-            self.vengine.detect(encoded, shape, "yolov8n"),
-            self.vengine.ocr(encoded, shape, "paddleocr"),
+            self.vengine.detect(
+                shape=shape,
+                model_name="yolov8n",
+                image_bytes=encoded,
+            ),
+            self.vengine.ocr(
+                shape=shape,
+                model_name="paddleocr",
+                image_bytes=encoded,
+            ),
         )
         messages = []
         if detections:
@@ -195,6 +279,13 @@ Register it in `ProcessorManager.start_processor()`.
 | `DELETE` | `/api/sources/{id}` | Delete source |
 | `GET` | `/api/sources/by-rtsp?rtsp_url=` | Get source by RTSP URL |
 
+### ROI Import / Export
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/sources/{id}/rois/export` | Export ROIs as YAML |
+| `POST` | `/api/sources/{id}/rois/import` | Import ROIs from YAML (with tag validation) |
+
 ### Processor
 
 | Method | Path | Description |
@@ -207,7 +298,7 @@ Register it in `ProcessorManager.start_processor()`.
 
 | Path | Description |
 |------|-------------|
-| `ws://localhost:8000/ws/messages` | Real-time analysis message stream |
+| `/ws/messages` | Real-time analysis message stream |
 
 ---
 

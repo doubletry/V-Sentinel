@@ -13,13 +13,16 @@ router = APIRouter()
 
 
 class WSManager:
-    """WebSocket connection manager for real-time message broadcasting."""
+    """WebSocket connection manager for real-time message broadcasting.
+    用于实时消息广播的 WebSocket 连接管理器。"""
 
     def __init__(self) -> None:
         self._connections: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket) -> None:
+        """Accept and register a new WebSocket connection.
+        接受并注册新的 WebSocket 连接。"""
         await websocket.accept()
         async with self._lock:
             self._connections.add(websocket)
@@ -28,6 +31,8 @@ class WSManager:
         )
 
     async def disconnect(self, websocket: WebSocket) -> None:
+        """Remove a WebSocket connection from the active set.
+        从活跃连接集合中移除 WebSocket 连接。"""
         async with self._lock:
             self._connections.discard(websocket)
         logger.info(
@@ -35,7 +40,8 @@ class WSManager:
         )
 
     async def broadcast(self, message: AnalysisMessage) -> None:
-        """Send a message to all connected WebSocket clients."""
+        """Send a message to all connected WebSocket clients.
+        向所有已连接的 WebSocket 客户端发送消息。"""
         payload = message.model_dump_json()
         dead: list[WebSocket] = []
         async with self._lock:
@@ -51,13 +57,14 @@ class WSManager:
 
 @router.websocket("/ws/messages")
 async def ws_messages_endpoint(websocket: WebSocket) -> None:
-    """WebSocket endpoint for real-time analysis message streaming."""
-    from backend.main import ws_manager  # avoid circular imports
+    """WebSocket endpoint for real-time analysis message streaming.
+    用于实时分析消息推送的 WebSocket 端点。"""
+    from backend.main import ws_manager  # avoid circular imports / 避免循环导入
 
     await ws_manager.connect(websocket)
     try:
         while True:
-            # Keep connection alive; client can send pings
+            # Keep connection alive; client can send pings / 保持连接活跃；客户端可发送 ping
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")

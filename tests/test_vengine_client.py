@@ -1,9 +1,20 @@
 """Tests for the AsyncVEngineClient initialisation and image building."""
 from __future__ import annotations
 
+import grpc
 import pytest
 
 from backend.config import Settings
+from core.proto import (
+    action_service_pb2,
+    base_pb2,
+    classification_service_pb2,
+    classification_service_pb2_grpc,
+    detection_service_pb2,
+    ocr_service_pb2,
+    upload_service_pb2,
+    upload_service_pb2_grpc,
+)
 from backend.vengine.client import AsyncVEngineClient
 
 
@@ -54,8 +65,10 @@ class TestAsyncVEngineClient:
         client = AsyncVEngineClient(cfg)
         poly = client._make_roi_polygon([{"x": 10, "y": 20}, {"x": 30, "y": 40}])
         assert len(poly.points) == 2
-        assert poly.points[0].x == 10.0
-        assert poly.points[1].y == 40.0
+        assert isinstance(poly.points[0].x, int)
+        assert isinstance(poly.points[1].y, int)
+        assert poly.points[0].x == 10
+        assert poly.points[1].y == 40
 
 
 class TestMakeImage:
@@ -80,7 +93,7 @@ class TestMakeImage:
         client = self._client()
         img = client._make_image(
             (100, 200, 3),
-            roi_points=[{"x": 10, "y": 20}],
+            image_roi=[{"x": 10, "y": 20}],
             image_key="k",
         )
         assert len(img.region_of_interest.points) == 1
@@ -94,3 +107,886 @@ class TestMakeImage:
         client = self._client()
         with pytest.raises(ValueError, match="only one"):
             client._make_image((100, 200, 3), image_bytes=b"x", image_key="k")
+
+    def test_make_images_batch_supports_key_and_roi_aliases(self):
+        client = self._client()
+        images = client._make_images(
+            images=[
+                {
+                    "shape": (100, 200, 3),
+                    "key": "shared-key",
+                    "roi": [
+                        {"x": 1, "y": 2},
+                        {"x": 3, "y": 2},
+                        {"x": 3, "y": 4},
+                        {"x": 1, "y": 4},
+                    ],
+                },
+                {
+                    "shape": (100, 200, 3),
+                    "image_bytes": b"jpeg-2",
+                },
+            ]
+        )
+        assert len(images) == 2
+        assert images[0].id == 0
+        assert images[0].key == "shared-key"
+        assert len(images[0].region_of_interest.points) == 4
+        assert images[1].id == 1
+        assert images[1].data == b"jpeg-2"
+
+
+class TestServiceToggle:
+    """Tests for per-service enable/disable switches.
+    测试各服务的启用/禁用开关。"""
+
+    def test_parse_enabled_defaults(self):
+        """All services enabled by default. 默认所有服务启用。"""
+        enabled = AsyncVEngineClient._parse_enabled({})
+        for service in AsyncVEngineClient.SERVICE_NAMES:
+            assert enabled[service] is True
+
+    def test_parse_enabled_disabled(self):
+        """Disable individual services. 禁用单个服务。"""
+        settings = {
+            "detection_enabled": "false",
+            "ocr_enabled": "0",
+            "upload_enabled": "no",
+        }
+        enabled = AsyncVEngineClient._parse_enabled(settings)
+        assert enabled["detection"] is False
+        assert enabled["ocr"] is False
+        assert enabled["upload"] is False
+        assert enabled["classification"] is True
+        assert enabled["action"] is True
+
+    async def test_connect_skips_disabled(self):
+        """Disabled services should not have channels/stubs.
+        禁用的服务不应创建通道/存根。"""
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        app_settings = {
+            "detection_enabled": "true",
+            "classification_enabled": "false",
+            "action_enabled": "false",
+            "ocr_enabled": "true",
+            "upload_enabled": "false",
+        }
+        await client.connect(app_settings)
+
+        assert "detection" in client._channels
+        assert "ocr" in client._channels
+        assert "classification" not in client._channels
+        assert "action" not in client._channels
+        assert "upload" not in client._channels
+
+        assert client.is_service_enabled("detection") is True
+        assert client.is_service_enabled("classification") is False
+
+        await client.close()
+
+    async def test_disabled_detect_returns_empty(self):
+        """Detect should return empty list when disabled.
+        禁用时 detect 应返回空列表。"""
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        client._enabled = {"detection": False}
+        result = await client.detect(
+            shape=(100, 200, 3), model_name="test", image_bytes=b"x"
+        )
+        assert result == []
+
+    async def test_disabled_classify_returns_empty(self):
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        client._enabled = {"classification": False}
+        result = await client.classify(
+            shape=(100, 200, 3), model_name="test", image_bytes=b"x"
+        )
+        assert result == []
+
+    async def test_disabled_ocr_returns_empty(self):
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        client._enabled = {"ocr": False}
+        result = await client.ocr(
+            shape=(100, 200, 3), model_name="test", image_bytes=b"x"
+        )
+        assert result == []
+
+    async def test_disabled_upload_returns_empty(self):
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        client._enabled = {"upload": False}
+        result = await client.upload_image(b"x")
+        assert result == []
+
+    async def test_disabled_upload_and_get_key_returns_none(self):
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        client._enabled = {"upload": False}
+        result = await client.upload_and_get_key(b"x")
+        assert result is None
+
+    async def test_disabled_action_returns_empty(self):
+        cfg = Settings()
+        client = AsyncVEngineClient(cfg)
+        client._enabled = {"action": False}
+        result = await client.recognize_action(
+            frames_bytes=[b"x"], shapes=[(100, 200, 3)], model_name="test"
+        )
+        assert result == []
+
+
+class TestUploadServiceGrpcCompatibility:
+    async def test_upload_image_roundtrip_with_real_grpc_service(self):
+        seen: dict[str, object] = {}
+
+        class UploadServicer(upload_service_pb2_grpc.UploadServicer):
+            async def UploadImage(self, request, context):
+                seen["request_id"] = request.request_header.request_id
+                seen["client_id"] = request.request_header.client_id
+                seen["images_len"] = len(request.images)
+                seen["data"] = request.images[0].data
+                seen["enable_cache"] = request.images[0].enable_cache
+                return upload_service_pb2.UploadResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        request_id=request.request_header.request_id,
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    cache_infos=[
+                        base_pb2.ImageCacheInfo(
+                            key="cache-key-1",
+                            hit=False,
+                            id=1,
+                            size=len(request.images[0].data),
+                        )
+                    ],
+                )
+
+        server = grpc.aio.server()
+        upload_service_pb2_grpc.add_UploadServicer_to_server(UploadServicer(), server)
+        port = server.add_insecure_port("127.0.0.1:0")
+        await server.start()
+
+        client = AsyncVEngineClient(Settings())
+        try:
+            await client.connect(
+                {
+                    "vengine_host": "127.0.0.1",
+                    "upload_port": str(port),
+                    "upload_enabled": "true",
+                    "detection_enabled": "false",
+                    "classification_enabled": "false",
+                    "action_enabled": "false",
+                    "ocr_enabled": "false",
+                }
+            )
+
+            results = await client.upload_image(b"hello-upload", filename="frame.jpg")
+            key = await client.upload_and_get_key(b"hello-upload", filename="frame.jpg")
+
+            assert results == [
+                {
+                    "key": "cache-key-1",
+                    "hit": False,
+                    "id": 1,
+                    "size": 12,
+                }
+            ]
+            assert key == "cache-key-1"
+            assert seen["images_len"] == 1
+            assert seen["data"] == b"hello-upload"
+            assert seen["enable_cache"] is True
+            assert seen["client_id"] == "v-sentinel"
+            assert seen["request_id"]
+        finally:
+            await client.close()
+            await server.stop(None)
+
+
+class TestBatchImageRpcCompatibility:
+    async def test_classify_sends_multiple_images_in_single_request(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                seen["keys"] = [img.key for img in request.images]
+                seen["roi_sizes"] = [len(img.region_of_interest.points) for img in request.images]
+                return classification_service_pb2.ClassificationResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        classification_service_pb2.ClassificationResult(
+                            label="adult",
+                            confidence=0.9,
+                            image_id=0,
+                            class_id=1,
+                        ),
+                        classification_service_pb2.ClassificationResult(
+                            label="child",
+                            confidence=0.8,
+                            image_id=1,
+                            class_id=2,
+                        ),
+                    ],
+                )
+
+        client._enabled = {"classification": True}
+        client._stubs["classification"] = Stub()
+        results = await client.classify(
+            shape=None,
+            model_name="cls-model",
+            images=[
+                {
+                    "shape": (1080, 1920, 3),
+                    "key": "frame-key",
+                    "roi": [
+                        {"x": 10, "y": 20},
+                        {"x": 100, "y": 20},
+                        {"x": 100, "y": 200},
+                        {"x": 10, "y": 200},
+                    ],
+                },
+                {
+                    "shape": (1080, 1920, 3),
+                    "key": "frame-key",
+                    "roi": [
+                        {"x": 110, "y": 120},
+                        {"x": 220, "y": 120},
+                        {"x": 220, "y": 260},
+                        {"x": 110, "y": 260},
+                    ],
+                },
+            ],
+        )
+
+        assert seen == {
+            "count": 2,
+            "ids": [0, 1],
+            "keys": ["frame-key", "frame-key"],
+            "roi_sizes": [4, 4],
+        }
+        assert results[0]["label"] == "adult"
+        assert results[0]["class_id"] == 1
+        assert results[0]["image_id"] == 0
+        assert results[0]["confidence"] == pytest.approx(0.9)
+        assert results[1]["label"] == "child"
+        assert results[1]["class_id"] == 2
+        assert results[1]["image_id"] == 1
+        assert results[1]["confidence"] == pytest.approx(0.8)
+
+    async def test_detect_sends_multiple_images_and_returns_image_id(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        detection_service_pb2.DetectionResults(
+                            image_id=1,
+                            boxes=[
+                                detection_service_pb2.BoundingBox(
+                                    x_min=1,
+                                    y_min=2,
+                                    x_max=3,
+                                    y_max=4,
+                                    confidence=0.5,
+                                    class_id=7,
+                                    label="person",
+                                )
+                            ],
+                        )
+                    ],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        results = await client.detect(
+            shape=None,
+            model_name="det-model",
+            images=[
+                {"shape": (100, 100, 3), "image_bytes": b"a"},
+                {"shape": (100, 100, 3), "image_bytes": b"b"},
+            ],
+        )
+
+        assert seen == {"count": 2, "ids": [0, 1]}
+        assert results == [
+            {
+                "x_min": 1,
+                "y_min": 2,
+                "x_max": 3,
+                "y_max": 4,
+                "confidence": 0.5,
+                "class_id": 7,
+                "label": "person",
+                "image_id": 1,
+            }
+        ]
+
+    async def test_detect_single_image_with_roi_sets_use_model_roi(self):
+        """Single-image detect() with model_roi sets use_model_roi=True
+        and places ROI in InferenceParams.region_of_interest (not Image).
+        单图 detect() 带 model_roi 时设置 use_model_roi=True
+        并将 ROI 放入 InferenceParams.region_of_interest（非 Image）。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["image_roi_len"] = len(request.images[0].region_of_interest.points)
+                seen["model_roi_len"] = len(request.params.base.region_of_interest.points)
+                seen["use_model_roi"] = request.params.base.use_model_roi
+                seen["image_key"] = request.images[0].key
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        await client.detect(
+            shape=(480, 640, 3),
+            model_name="det-model",
+            model_roi=[
+                {"x": 10, "y": 20},
+                {"x": 300, "y": 20},
+                {"x": 300, "y": 400},
+                {"x": 10, "y": 400},
+            ],
+            image_key="frame-key",
+        )
+
+        assert seen["count"] == 1
+        # model_roi goes to InferenceParams.region_of_interest
+        assert seen["model_roi_len"] == 4
+        # Image should NOT have ROI (image_roi is separate)
+        assert seen["image_roi_len"] == 0
+        assert seen["use_model_roi"] is True
+        assert seen["image_key"] == "frame-key"
+
+    async def test_detect_single_image_without_roi_sets_model_roi_false(self):
+        """Single-image detect() without model_roi sets use_model_roi=False.
+        单图 detect() 无 model_roi 时设置 use_model_roi=False。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["use_model_roi"] = request.params.base.use_model_roi
+                seen["model_roi_len"] = len(request.params.base.region_of_interest.points)
+                seen["image_roi_len"] = len(request.images[0].region_of_interest.points)
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        await client.detect(
+            shape=(480, 640, 3),
+            model_name="det-model",
+            image_key="frame-key",
+        )
+
+        assert seen["use_model_roi"] is False
+        assert seen["model_roi_len"] == 0
+        assert seen["image_roi_len"] == 0
+
+    async def test_detect_model_roi_coordinates_in_inference_params(self):
+        """model_roi coordinates appear in InferenceParams.region_of_interest,
+        not in Image.region_of_interest.
+        model_roi 坐标出现在 InferenceParams.region_of_interest 中，
+        而不是 Image.region_of_interest。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                roi = request.params.base.region_of_interest
+                seen["model_roi_points"] = [
+                    {"x": p.x, "y": p.y} for p in roi.points
+                ]
+                seen["image_roi_points"] = [
+                    {"x": p.x, "y": p.y}
+                    for p in request.images[0].region_of_interest.points
+                ]
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        roi = [
+            {"x": 100, "y": 200},
+            {"x": 500, "y": 200},
+            {"x": 500, "y": 600},
+            {"x": 100, "y": 600},
+        ]
+        await client.detect(
+            shape=(720, 1280, 3),
+            model_name="det-model",
+            model_roi=roi,
+            image_key="test-key",
+        )
+
+        assert seen["model_roi_points"] == roi
+        assert seen["image_roi_points"] == []
+
+    async def test_classify_image_roi_in_image_not_inference_params(self):
+        """classify() image_roi goes into Image.region_of_interest,
+        InferenceParams.region_of_interest stays empty.
+        classify() 的 image_roi 放入 Image.region_of_interest，
+        InferenceParams.region_of_interest 保持为空。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["image_roi_sizes"] = [
+                    len(img.region_of_interest.points) for img in request.images
+                ]
+                seen["model_roi_len"] = len(request.params.base.region_of_interest.points)
+                seen["use_image_roi"] = request.params.base.use_image_roi
+                seen["use_model_roi"] = request.params.base.use_model_roi
+                return classification_service_pb2.ClassificationResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"classification": True}
+        client._stubs["classification"] = Stub()
+        await client.classify(
+            shape=None,
+            model_name="cls-model",
+            images=[
+                {
+                    "shape": (480, 640, 3),
+                    "key": "frame-key",
+                    "roi": [
+                        {"x": 10, "y": 20},
+                        {"x": 100, "y": 20},
+                        {"x": 100, "y": 200},
+                        {"x": 10, "y": 200},
+                    ],
+                },
+            ],
+        )
+
+        # image_roi goes to Image.region_of_interest
+        assert seen["image_roi_sizes"] == [4]
+        # InferenceParams.region_of_interest stays empty
+        assert seen["model_roi_len"] == 0
+        assert seen["use_image_roi"] is True
+        assert seen["use_model_roi"] is False
+
+    async def test_ocr_image_roi_in_image_not_inference_params(self):
+        """ocr() image_roi goes into Image.region_of_interest,
+        InferenceParams.region_of_interest stays empty.
+        ocr() 的 image_roi 放入 Image.region_of_interest，
+        InferenceParams.region_of_interest 保持为空。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["image_roi_sizes"] = [
+                    len(img.region_of_interest.points) for img in request.images
+                ]
+                seen["model_roi_len"] = len(request.params.base.region_of_interest.points)
+                seen["use_image_roi"] = request.params.base.use_image_roi
+                return ocr_service_pb2.OCRResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"ocr": True}
+        client._stubs["ocr"] = Stub()
+        await client.ocr(
+            shape=(480, 640, 3),
+            model_name="ocr-model",
+            image_roi=[
+                {"x": 50, "y": 60},
+                {"x": 200, "y": 60},
+                {"x": 200, "y": 250},
+                {"x": 50, "y": 250},
+            ],
+            image_key="frame-key",
+        )
+
+        # image_roi goes to Image.region_of_interest
+        assert seen["image_roi_sizes"] == [4]
+        # InferenceParams.region_of_interest stays empty
+        assert seen["model_roi_len"] == 0
+        assert seen["use_image_roi"] is True
+
+    async def test_ocr_sends_multiple_images_and_returns_image_id(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                seen["keys"] = [img.key for img in request.images]
+                return ocr_service_pb2.OCRResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        ocr_service_pb2.OCRResults(
+                            image_id=1,
+                            blocks=[
+                                ocr_service_pb2.TextBlock(
+                                    text="hello",
+                                    confidence=0.7,
+                                    language="en",
+                                    points=[
+                                        base_pb2.Point(x=1, y=2),
+                                        base_pb2.Point(x=3, y=4),
+                                    ],
+                                )
+                            ],
+                        )
+                    ],
+                )
+
+        client._enabled = {"ocr": True}
+        client._stubs["ocr"] = Stub()
+        results = await client.ocr(
+            shape=None,
+            model_name="ocr-model",
+            images=[
+                {"shape": (100, 100, 3), "key": "frame-key-1"},
+                {"shape": (100, 100, 3), "key": "frame-key-2"},
+            ],
+        )
+
+        assert seen == {
+            "count": 2,
+            "ids": [0, 1],
+            "keys": ["frame-key-1", "frame-key-2"],
+        }
+        assert results == [
+            {
+                "text": "hello",
+                "confidence": pytest.approx(0.7),
+                "points": [{"x": 1, "y": 2}, {"x": 3, "y": 4}],
+                "language": "en",
+                "image_id": 1,
+            }
+        ]
+
+    async def test_action_accepts_image_keys_for_legacy_sequence(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["sequence_count"] = len(request.sequences)
+                seen["image_keys"] = [img.key for img in request.sequences[0].images]
+                seen["image_ids"] = [img.id for img in request.sequences[0].images]
+                return action_service_pb2.ActionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        action_service_pb2.ActionResult(
+                            label="running",
+                            confidence=0.8,
+                            class_id=3,
+                        )
+                    ],
+                )
+
+        client._enabled = {"action": True}
+        client._stubs["action"] = Stub()
+        results = await client.recognize_action(
+            model_name="action-model",
+            shapes=[(100, 100, 3), (100, 100, 3)],
+            image_keys=["key-1", "key-2"],
+        )
+
+        assert seen == {
+            "sequence_count": 1,
+            "image_keys": ["key-1", "key-2"],
+            "image_ids": [0, 1],
+        }
+        assert results[0]["label"] == "running"
+        assert results[0]["class_id"] == 3
+        assert results[0]["confidence"] == pytest.approx(0.8)
+
+    async def test_action_supports_batched_sequences(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["sequence_count"] = len(request.sequences)
+                seen["sequence_ids"] = [seq.id for seq in request.sequences]
+                seen["seq0_keys"] = [img.key for img in request.sequences[0].images]
+                seen["seq1_data"] = [img.data for img in request.sequences[1].images]
+                return action_service_pb2.ActionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        action_service_pb2.ActionResult(
+                            label="walking",
+                            confidence=0.9,
+                            class_id=1,
+                            sequence_id=0,
+                        ),
+                        action_service_pb2.ActionResult(
+                            label="running",
+                            confidence=0.85,
+                            class_id=2,
+                            sequence_id=1,
+                        ),
+                    ],
+                )
+
+        client._enabled = {"action": True}
+        client._stubs["action"] = Stub()
+        results = await client.recognize_action(
+            model_name="action-model",
+            sequences=[
+                {
+                    "images": [
+                        {"shape": (100, 100, 3), "key": "key-1"},
+                        {"shape": (100, 100, 3), "key": "key-2"},
+                    ]
+                },
+                {
+                    "images": [
+                        {"shape": (100, 100, 3), "image_bytes": b"a"},
+                        {"shape": (100, 100, 3), "image_bytes": b"b"},
+                    ]
+                },
+            ],
+        )
+
+        assert seen == {
+            "sequence_count": 2,
+            "sequence_ids": [0, 1],
+            "seq0_keys": ["key-1", "key-2"],
+            "seq1_data": [b"a", b"b"],
+        }
+        assert results[0]["label"] == "walking"
+        assert results[0]["sequence_id"] == 0
+        assert results[0]["confidence"] == pytest.approx(0.9)
+        assert results[1]["label"] == "running"
+        assert results[1]["sequence_id"] == 1
+        assert results[1]["confidence"] == pytest.approx(0.85)
+
+    async def test_classify_batch_roundtrip_with_real_grpc_service(self):
+        seen: dict[str, object] = {}
+
+        class ClassificationServicer(
+            classification_service_pb2_grpc.ImageClassificationServicer
+        ):
+            async def Predict(self, request, context):
+                seen["count"] = len(request.images)
+                seen["ids"] = [img.id for img in request.images]
+                seen["keys"] = [img.key for img in request.images]
+                return classification_service_pb2.ClassificationResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        request_id=request.request_header.request_id,
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[
+                        classification_service_pb2.ClassificationResult(
+                            label="adult",
+                            confidence=0.91,
+                            image_id=0,
+                            class_id=1,
+                        ),
+                        classification_service_pb2.ClassificationResult(
+                            label="adult",
+                            confidence=0.87,
+                            image_id=1,
+                            class_id=1,
+                        ),
+                    ],
+                )
+
+        server = grpc.aio.server()
+        classification_service_pb2_grpc.add_ImageClassificationServicer_to_server(
+            ClassificationServicer(),
+            server,
+        )
+        port = server.add_insecure_port("127.0.0.1:0")
+        await server.start()
+
+        client = AsyncVEngineClient(Settings())
+        try:
+            await client.connect(
+                {
+                    "vengine_host": "127.0.0.1",
+                    "classification_port": str(port),
+                    "classification_enabled": "true",
+                    "detection_enabled": "false",
+                    "action_enabled": "false",
+                    "ocr_enabled": "false",
+                    "upload_enabled": "false",
+                }
+            )
+            results = await client.classify(
+                shape=None,
+                model_name="cls-model",
+                images=[
+                    {
+                        "shape": (1080, 1920, 3),
+                        "key": "frame-key",
+                        "roi": [
+                            {"x": 10, "y": 20},
+                            {"x": 100, "y": 20},
+                            {"x": 100, "y": 200},
+                            {"x": 10, "y": 200},
+                        ],
+                    },
+                    {
+                        "shape": (1080, 1920, 3),
+                        "key": "frame-key",
+                        "roi": [
+                            {"x": 110, "y": 120},
+                            {"x": 220, "y": 120},
+                            {"x": 220, "y": 260},
+                            {"x": 110, "y": 260},
+                        ],
+                    },
+                ],
+            )
+
+            assert seen == {
+                "count": 2,
+                "ids": [0, 1],
+                "keys": ["frame-key", "frame-key"],
+            }
+            assert results[0]["label"] == "adult"
+            assert results[0]["class_id"] == 1
+            assert results[0]["image_id"] == 0
+            assert results[0]["confidence"] == pytest.approx(0.91)
+            assert results[1]["label"] == "adult"
+            assert results[1]["class_id"] == 1
+            assert results[1]["image_id"] == 1
+            assert results[1]["confidence"] == pytest.approx(0.87)
+        finally:
+            await client.close()
+            await server.stop(None)
+
+
+class TestModelAndHealthProtoCompatibility:
+    async def test_load_model_uses_set_as_default_field(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def LoadModel(self, request):
+                seen["set_as_default"] = request.set_as_default
+                seen["model_name"] = request.model_name
+                return base_pb2.ModelResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    )
+                )
+
+        client._stubs["detection"] = Stub()
+        result = await client.load_model(
+            "detection",
+            model_name="detector",
+            model_version="v1",
+            device_id=2,
+            set_default=True,
+        )
+
+        assert seen == {"set_as_default": True, "model_name": "detector"}
+        assert result["model_name"] == "detector"
+        assert result["model_version"] == "v1"
+        assert result["device_id"] == 2
+        assert result["set_as_default"] is True
+        assert result["status_code"] == base_pb2.StatusCode.STATUS_OK
+
+    async def test_list_models_uses_model_name_filter_and_new_model_fields(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def ListModels(self, request):
+                seen["model_name_filter"] = request.model_name_filter
+                return base_pb2.ListModelsResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    models=[
+                        base_pb2.ModelInfo(
+                            model_name="detector",
+                            model_version="v1",
+                            device_id=1,
+                            status="loaded",
+                            is_default=True,
+                        )
+                    ],
+                )
+
+        client._stubs["detection"] = Stub()
+        result = await client.list_models("detection", name_filter="det")
+
+        assert seen == {"model_name_filter": "det"}
+        assert result == [
+            {
+                "model_name": "detector",
+                "model_version": "v1",
+                "device_id": 1,
+                "is_default": True,
+                "status": "loaded",
+                "name": "detector",
+                "version": "v1",
+            }
+        ]
+
+    async def test_health_check_uses_empty_request_and_new_response_shape(self):
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def HealthCheck(self, request):
+                seen["request_header_set"] = request.ListFields()
+                return base_pb2.HealthCheckResponse(
+                    status="serving",
+                    uptime_seconds=42,
+                    loaded_model_count=3,
+                )
+
+        client._stubs["upload"] = Stub()
+        result = await client.health_check("upload")
+
+        assert seen == {"request_header_set": []}
+        assert result == {
+            "status": "serving",
+            "uptime_seconds": 42,
+            "loaded_model_count": 3,
+        }

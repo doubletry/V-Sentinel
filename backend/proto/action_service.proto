@@ -4,33 +4,45 @@ package action;
 
 import "base.proto";
 
+// Video Action Recognition Service.
 service ActionRecognition {
+  // Run action recognition on one or more video sequences.
   rpc Predict(ActionRequest) returns (ActionResponse);
+  // Load an action recognition model onto a device.
   rpc LoadModel(base.LoadModelRequest) returns (base.ModelResponse);
+  // Unload an action recognition model from a device.
   rpc UnloadModel(base.UnloadModelRequest) returns (base.ModelResponse);
+  // List loaded action recognition models.
   rpc ListModels(base.ListModelsRequest) returns (base.ListModelsResponse);
+  // Health check.
   rpc HealthCheck(base.HealthCheckRequest) returns (base.HealthCheckResponse);
 }
 
+// Parameters specific to video action recognition inference.
 message ActionParams {
   base.InferenceParams base = 1;
 }
 
+// Per-sequence video classification result.
 message ActionResult {
   string label = 1;
   float confidence = 2;
-  int64 sequence_id = 3;
+  int32 sequence_id = 3;
   base.ImageCacheInfo cache_info = 4;
-  int32 class_id = 5;
+  int32 class_id = 5;             // Predicted class index
 }
 
+// Request for action recognition inference.
 message ActionRequest {
   base.RequestHeader request_header = 1;
   repeated base.ImageSequence sequences = 2;
   ActionParams params = 3;
 }
 
+// Response containing action recognition results.
 message ActionResponse {
   base.ResponseHeader response_header = 1;
   repeated ActionResult results = 2;
+  string model_name = 3;
+  string model_version = 4;
 }

@@ -2,84 +2,71 @@ syntax = "proto3";
 
 package base;
 
+// Status codes for all service responses.
 enum StatusCode {
   STATUS_OK = 0;
-  STATUS_INVALID_REQUEST = 1;
-  STATUS_MODEL_NOT_FOUND = 2;
-  STATUS_INFERENCE_ERROR = 3;
-  STATUS_INTERNAL_ERROR = 4;
+  // Client errors (1-9)
+  STATUS_INVALID_REQUEST = 1;    // Invalid or malformed request parameters
+  STATUS_MODEL_NOT_FOUND = 2;    // Requested model or version not loaded
+  STATUS_MODEL_ALREADY_EXISTS = 3; // Model already loaded on the target device
+  STATUS_DEVICE_UNAVAILABLE = 4; // Specified device is not available
+  // Server errors (10-19)
+  STATUS_INFERENCE_ERROR = 10;   // Inference execution failed
+  STATUS_INFERENCE_TIMEOUT = 11; // Inference timed out
+  STATUS_CODEC_ERROR = 12;       // Image/video encode or decode failed
+  STATUS_SERVER_ERROR = 13;      // Unexpected server-side error
 }
 
+// Common request header sent by every RPC.
 message RequestHeader {
-  double request_timestamp = 1;
-  string request_id = 2;
-  string client_id = 3;
+  double request_timestamp = 1;  // Client-side timestamp when request was sent
+  string request_id = 2;         // Unique ID for request tracing
+  string client_id = 3;          // Identifier of the calling client
 }
 
+// Common response header returned by every RPC.
 message ResponseHeader {
-  string request_id = 1;
-  double response_timestamp = 2;
-  StatusCode status_code = 3;
-  string error_message = 4;
-  float latency_ms = 5;
+  string request_id = 1;           // Echoed from RequestHeader
+  double response_timestamp = 2;   // Server-side timestamp when response was generated
+  StatusCode status_code = 3;      // Result status code
+  string error_message = 4;        // Human-readable error detail (empty on success)
+  int64 latency_ms = 5;            // Server-side processing latency in milliseconds
 }
 
-message Point {
-  float x = 1;
-  float y = 2;
-}
-
+// A polygon defined by an ordered list of vertices.
 message Polygon {
   repeated Point points = 1;
 }
 
+// A 2D point with integer coordinates.
+message Point {
+  int32 x = 1;
+  int32 y = 2;
+}
+
+// ---------- Inference parameter messages ----------
+
+// Common parameters shared across all inference RPCs.
 message InferenceParams {
-  string model_name = 1;
-  string model_version = 2;
-  Polygon region_of_interest = 3;
-  bool use_image_roi = 4;
-  bool use_model_roi = 5;
+  string model_name = 1;          // Name of the model to use
+  string model_version = 2;       // Model version; empty string = use default version
+  Polygon region_of_interest = 3; // Optional region of interest polygon
+  bool use_image_roi = 4;         // Whether to crop input images to their per-image ROI
+  bool use_model_roi = 5;         // Whether to apply model-level ROI processing
 }
 
-message ShapeInfo {
-  repeated int32 dims = 1;
-}
+// ---------- Model lifecycle messages ----------
 
-message ImageCacheInfo {
-  string key = 1;
-  bool hit = 2;
-  string id = 3;
-  int64 size = 4;
-}
-
-message Image {
-  oneof input {
-    bytes data = 1;
-    string key = 2;
-  }
-  int64 id = 3;
-  ShapeInfo shape = 4;
-  Polygon region_of_interest = 5;
-}
-
-message ImageSequence {
-  repeated Image images = 1;
-  int64 sequence_id = 2;
-}
-
-message Video {
-  bytes data = 1;
-  string key = 2;
-}
-
+// Request to load a model onto a device.
 message LoadModelRequest {
   RequestHeader request_header = 1;
   string model_name = 2;
   string model_version = 3;
   int32 device_id = 4;
-  bool set_default = 5;
+  bool set_as_default = 5;         // If true, set this version as the default for model_name
 }
 
+// Request to unload a model from a device.
 message UnloadModelRequest {
   RequestHeader request_header = 1;
   string model_name = 2;
@@ -87,35 +74,79 @@ message UnloadModelRequest {
   int32 device_id = 4;
 }
 
-message ModelInfo {
-  string name = 1;
-  string version = 2;
-  int32 device_id = 3;
-  bool is_default = 4;
-  string status = 5;
-}
-
+// Generic response for load/unload operations.
 message ModelResponse {
   ResponseHeader response_header = 1;
-  ModelInfo model_info = 2;
 }
 
+// Request to list loaded models (optional name filter).
 message ListModelsRequest {
   RequestHeader request_header = 1;
-  string name_filter = 2;
+  string model_name_filter = 2;    // If non-empty, only return models matching this name
 }
 
+// Information about a single loaded model instance.
+message ModelInfo {
+  string model_name = 1;
+  string model_version = 2;
+  int32 device_id = 3;
+  string status = 4;               // "loaded", "loading", or "error"
+  bool is_default = 5;             // True if this version is the default for its model_name
+}
+
+// Response containing a list of loaded models.
 message ListModelsResponse {
   ResponseHeader response_header = 1;
   repeated ModelInfo models = 2;
 }
 
-message HealthCheckRequest {
-  RequestHeader request_header = 1;
-}
+// ---------- Health check messages ----------
+
+message HealthCheckRequest {}
 
 message HealthCheckResponse {
-  ResponseHeader response_header = 1;
-  string service_name = 2;
-  string version = 3;
+  string status = 1;               // "serving", "not_serving"
+  int64 uptime_seconds = 2;
+  int32 loaded_model_count = 3;
 }
+
+// ---------- Image / video data messages ----------
+
+// Shape information for an image tensor.
+message ShapeInfo {
+  repeated int32 dims = 1;
+}
+
+// A single image, provided either as raw bytes or a cache key.
+message Image {
+  oneof input {
+    bytes data = 1;
+    string key = 5;
+  }
+  int32 id = 2;                    // Image identifier
+  ShapeInfo shape = 3;             // Image shape
+  Polygon region_of_interest = 4;  // Per-image region of interest
+  bool enable_cache = 6;           // Whether to cache this image server-side
+}
+
+// A sequence of images (e.g. video clip frames).
+message ImageSequence {
+  repeated Image images = 1;
+  int32 id = 2;
+}
+
+// Raw video data.
+message Video {
+  bytes data = 1;
+  int32 id = 2;
+}
+
+// Server-side image/frame cache information returned with each result.
+message ImageCacheInfo {
+  string key = 1;                  // Cache key assigned to this item
+  bool hit = 2;                    // Whether this result was served from cache
+  int32 id = 3;                    // Corresponding Image/Video id
+  int32 size = 4;                  // Size in bytes of the cached data
+}
+
+

@@ -17,9 +17,12 @@ if TYPE_CHECKING:
 
 class ProcessorManager:
     """Manages the lifecycle of all running video processors.
+    管理所有运行中视频处理器的生命周期。
 
     Processors are keyed by ``source_id``. Each is an asyncio Task.
     An ``AnalysisAgent`` aggregates results from all processors.
+    处理器以 ``source_id`` 为键。每个都是一个 asyncio 任务。
+    ``AnalysisAgent`` 汇总所有处理器的结果。
     """
 
     def __init__(
@@ -36,17 +39,21 @@ class ProcessorManager:
         self._agent = AnalysisAgent(ws_manager=ws_manager)
 
     async def start_agent(self) -> None:
-        """Start the analysis agent (called once during app startup)."""
+        """Start the analysis agent (called once during app startup).
+        启动分析代理（应用启动时调用一次）。"""
         await self._agent.start()
 
     async def stop_agent(self) -> None:
-        """Stop the analysis agent (called during shutdown)."""
+        """Stop the analysis agent (called during shutdown).
+        停止分析代理（关闭时调用）。"""
         await self._agent.stop()
 
     async def start_processor(self, source_id: str) -> dict:
         """Start a processor for the given source_id.
+        为指定的 source_id 启动处理器。
 
         Returns a status dict. Raises ``ValueError`` if source not found.
+        返回状态字典。如果未找到视频源则抛出 ``ValueError``。
         """
         async with self._lock:
             if source_id in self._processors:
@@ -81,7 +88,8 @@ class ProcessorManager:
             }
 
     async def stop_processor(self, source_id: str) -> dict:
-        """Stop the processor for the given source_id."""
+        """Stop the processor for the given source_id.
+        停止指定 source_id 的处理器。"""
         async with self._lock:
             proc = self._processors.pop(source_id, None)
             if proc is None:
@@ -91,7 +99,8 @@ class ProcessorManager:
             return {"status": "stopped", "source_id": source_id}
 
     async def start_all_processors(self) -> dict:
-        """Start processors for all configured video sources."""
+        """Start processors for all configured video sources.
+        为所有已配置的视频源启动处理器。"""
         sources = await list_sources()
         if not sources:
             return {
@@ -125,7 +134,8 @@ class ProcessorManager:
         }
 
     async def stop_all_processors(self) -> dict:
-        """Stop all currently running processors."""
+        """Stop all currently running processors.
+        停止所有当前运行中的处理器。"""
         async with self._lock:
             source_ids = list(self._processors.keys())
 
@@ -149,12 +159,14 @@ class ProcessorManager:
         }
 
     async def stop_all(self) -> None:
-        """Stop all running processors (called during shutdown)."""
+        """Stop all running processors (called during shutdown).
+        停止所有运行中的处理器（关闭时调用）。"""
         await self.stop_all_processors()
         logger.info("ProcessorManager: all processors stopped")
 
     def get_all_status(self) -> list[ProcessorStatus]:
-        """Return status of all currently tracked processors."""
+        """Return status of all currently tracked processors.
+        返回所有当前跟踪的处理器状态。"""
         statuses: list[ProcessorStatus] = []
         for source_id, proc in self._processors.items():
             statuses.append(

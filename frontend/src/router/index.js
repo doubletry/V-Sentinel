@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import VideoWall from '../views/VideoWall.vue'
-import Messages from '../views/Messages.vue'
-import ProcessingLogs from '../views/ProcessingLogs.vue'
-import Settings from '../views/Settings.vue'
+
+const VideoWall = () => import('../views/VideoWall.vue')
+const Messages = () => import('../views/Messages.vue')
+const ProcessingLogs = () => import('../views/ProcessingLogs.vue')
+const Settings = () => import('../views/Settings.vue')
 
 const routes = [
   {

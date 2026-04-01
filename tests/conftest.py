@@ -47,6 +47,15 @@ async def init_db() -> None:
     await init_db()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _close_shared_db(_tmp_db: str) -> AsyncGenerator[None, None]:
+    """Close the shared SQLite connection after each test.
+    在每个测试结束后关闭共享 SQLite 连接。"""
+    yield
+    from backend.db.database import close_db
+    await close_db()
+
+
 @pytest_asyncio.fixture
 async def async_client(init_db: None) -> AsyncGenerator[AsyncClient, None]:
     """Create an httpx AsyncClient using the FastAPI ASGI app.

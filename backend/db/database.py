@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 import aiosqlite
@@ -56,19 +58,109 @@ CREATE TABLE IF NOT EXISTS vehicle_visits (
 """
 
 PRAGMA_FK = "PRAGMA foreign_keys = ON;"
+PRAGMA_WAL = "PRAGMA journal_mode = WAL;"
+PRAGMA_SYNCHRONOUS = "PRAGMA synchronous = NORMAL;"
+PRAGMA_BUSY_TIMEOUT = "PRAGMA busy_timeout = 5000;"
+
+_shared_db: aiosqlite.Connection | None = None
+_shared_db_path: str | None = None
+_shared_db_loop: asyncio.AbstractEventLoop | None = None
+_db_lock_loop: asyncio.AbstractEventLoop | None = None
+_db_init_lock: asyncio.Lock | None = None
+_db_use_lock: asyncio.Lock | None = None
+
+
+def _get_db_locks() -> tuple[asyncio.Lock, asyncio.Lock]:
+    """Return loop-local locks for shared SQLite connection access.
+    返回用于共享 SQLite 连接访问的事件循环局部锁。"""
+    global _db_lock_loop, _db_init_lock, _db_use_lock
+
+    loop = asyncio.get_running_loop()
+    if _db_lock_loop is not loop or _db_init_lock is None or _db_use_lock is None:
+        _db_lock_loop = loop
+        _db_init_lock = asyncio.Lock()
+        _db_use_lock = asyncio.Lock()
+    return _db_init_lock, _db_use_lock
+
+
+async def _configure_db_connection(db: aiosqlite.Connection) -> None:
+    """Apply SQLite pragmas for correctness and concurrent-read performance.
+    配置 SQLite pragma，以提升正确性和并发读性能。"""
+    await db.execute(PRAGMA_FK)
+    await db.execute(PRAGMA_WAL)
+    await db.execute(PRAGMA_SYNCHRONOUS)
+    await db.execute(PRAGMA_BUSY_TIMEOUT)
+    await db.commit()
+
+
+async def _close_shared_db_unlocked() -> None:
+    """Close the shared database connection without reacquiring init lock.
+    关闭共享数据库连接，不重复获取初始化锁。"""
+    global _shared_db, _shared_db_path, _shared_db_loop
+
+    if _shared_db is None:
+        return
+
+    try:
+        await _shared_db.close()
+    except Exception as exc:  # pragma: no cover - best effort cleanup
+        logger.warning("Failed to close shared SQLite connection: {}", exc)
+    finally:
+        _shared_db = None
+        _shared_db_path = None
+        _shared_db_loop = None
+
+
+async def _get_shared_db() -> aiosqlite.Connection:
+    """Return a reusable SQLite connection configured for this DB path.
+    返回为当前 DB 路径配置好的可复用 SQLite 连接。"""
+    global _shared_db, _shared_db_path, _shared_db_loop
+
+    init_lock, _ = _get_db_locks()
+    loop = asyncio.get_running_loop()
+    async with init_lock:
+        if _shared_db is not None and (
+            _shared_db_path != _DB_PATH or _shared_db_loop is not loop
+        ):
+            await _close_shared_db_unlocked()
+
+        if _shared_db is None:
+            db = await aiosqlite.connect(_DB_PATH)
+            await _configure_db_connection(db)
+            _shared_db = db
+            _shared_db_path = _DB_PATH
+            _shared_db_loop = loop
+            logger.info("Opened shared SQLite connection at {}", _DB_PATH)
+
+        return _shared_db
+
+
+@asynccontextmanager
+async def _db_session() -> aiosqlite.Connection:
+    """Serialize access through the shared SQLite connection.
+    通过共享 SQLite 连接串行化数据库访问。"""
+    db = await _get_shared_db()
+    _, use_lock = _get_db_locks()
+    async with use_lock:
+        yield db
+
+
+async def close_db() -> None:
+    """Close the shared SQLite connection if one is open.
+    如果共享 SQLite 连接已打开，则关闭它。"""
+    init_lock, _ = _get_db_locks()
+    async with init_lock:
+        await _close_shared_db_unlocked()
 
 
 async def init_db() -> None:
     """Create database tables if they don't exist.
     创建数据库表（如果不存在）。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         await db.execute(CREATE_SOURCES_TABLE)
         await db.execute(CREATE_ROIS_TABLE)
         await db.execute(CREATE_SETTINGS_TABLE)
         await db.execute(CREATE_VEHICLE_VISITS_TABLE)
-        # Ensure all default keys exist, while preserving user-modified values.
-        # 确保所有默认键存在，同时保留用户修改过的值。
         for key, value in DEFAULT_APP_SETTINGS.items():
             await db.execute(
                 "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
@@ -118,8 +210,7 @@ async def create_source(source: VideoSourceCreate) -> VideoSource:
     向数据库插入新的视频源。"""
     source_id = str(uuid.uuid4())
     created_at = _now_iso()
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         await db.execute(
             "INSERT INTO video_sources (id, name, rtsp_url, created_at) VALUES (?, ?, ?, ?)",
             (source_id, source.name, source.rtsp_url, created_at),
@@ -137,8 +228,7 @@ async def create_source(source: VideoSourceCreate) -> VideoSource:
 async def get_source(source_id: str) -> VideoSource | None:
     """Retrieve a single video source by ID, or None if not found.
     按 ID 获取单个视频源，未找到则返回 None。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         async with db.execute(
             "SELECT id, name, rtsp_url, created_at FROM video_sources WHERE id = ?",
             (source_id,),
@@ -153,8 +243,7 @@ async def get_source(source_id: str) -> VideoSource | None:
 async def get_source_by_rtsp(rtsp_url: str) -> VideoSource | None:
     """Retrieve a video source by its RTSP URL, or None if not found.
     按 RTSP URL 获取视频源，未找到则返回 None。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         async with db.execute(
             "SELECT id, name, rtsp_url, created_at FROM video_sources WHERE rtsp_url = ?",
             (rtsp_url,),
@@ -169,8 +258,7 @@ async def get_source_by_rtsp(rtsp_url: str) -> VideoSource | None:
 async def list_sources() -> list[VideoSource]:
     """List all video sources ordered by creation time.
     按创建时间列出所有视频源。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         async with db.execute(
             "SELECT id, name, rtsp_url, created_at FROM video_sources ORDER BY created_at"
         ) as cursor:
@@ -185,11 +273,9 @@ async def list_sources() -> list[VideoSource]:
 async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource | None:
     """Update a video source's fields and/or ROIs.
     更新视频源的字段和/或 ROI。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
-        # Build update query dynamically / 动态构建更新查询
+    async with _db_session() as db:
         fields: list[str] = []
-        values: list = []
+        values: list[str] = []
         if data.name is not None:
             fields.append("name = ?")
             values.append(data.name)
@@ -202,7 +288,6 @@ async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource 
                 f"UPDATE video_sources SET {', '.join(fields)} WHERE id = ?",
                 values,
             )
-        # Update ROIs if provided / 如果提供了 ROI 则更新
         if data.rois is not None:
             await _save_rois_in_db(db, source_id, data.rois)
         await db.commit()
@@ -220,8 +305,7 @@ async def update_source(source_id: str, data: VideoSourceUpdate) -> VideoSource 
 async def delete_source(source_id: str) -> bool:
     """Delete a video source by ID. Returns True if a row was deleted.
     按 ID 删除视频源。如果删除了记录则返回 True。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         cursor = await db.execute(
             "DELETE FROM video_sources WHERE id = ?", (source_id,)
         )
@@ -248,8 +332,7 @@ async def _save_rois_in_db(
 async def save_rois(source_id: str, rois: list[ROICreate]) -> list[ROI]:
     """Save ROIs for a source (replaces existing ROIs).
     保存视频源的 ROI（替换现有 ROI）。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute(PRAGMA_FK)
+    async with _db_session() as db:
         await _save_rois_in_db(db, source_id, rois)
         await db.commit()
         return await _get_rois_for_source(db, source_id)
@@ -258,16 +341,14 @@ async def save_rois(source_id: str, rois: list[ROICreate]) -> list[ROI]:
 async def get_rois(source_id: str) -> list[ROI]:
     """Get all ROIs for a given source.
     获取指定视频源的所有 ROI。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _db_session() as db:
         return await _get_rois_for_source(db, source_id)
 
-
-# ── App Settings / 应用设置 ────────────────────────────────────────────────────
 
 async def get_all_settings() -> dict[str, str]:
     """Return all app settings as a key→value dict.
     以键→值字典形式返回所有应用设置。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _db_session() as db:
         async with db.execute("SELECT key, value FROM app_settings") as cursor:
             rows = await cursor.fetchall()
     return {row[0]: row[1] for row in rows}
@@ -276,7 +357,7 @@ async def get_all_settings() -> dict[str, str]:
 async def get_setting(key: str) -> str | None:
     """Return a single setting value, or None if not found.
     返回单个设置值，未找到则返回 None。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _db_session() as db:
         async with db.execute(
             "SELECT value FROM app_settings WHERE key = ?", (key,)
         ) as cursor:
@@ -287,7 +368,7 @@ async def get_setting(key: str) -> str | None:
 async def update_settings(data: dict[str, str]) -> dict[str, str]:
     """Update multiple settings at once. Returns all settings after update.
     批量更新设置。返回更新后的所有设置。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _db_session() as db:
         for key, value in data.items():
             await db.execute(
                 "INSERT INTO app_settings (key, value) VALUES (?, ?) "
@@ -296,9 +377,6 @@ async def update_settings(data: dict[str, str]) -> dict[str, str]:
             )
         await db.commit()
     return await get_all_settings()
-
-
-# ── Vehicle Visits / 车辆到访记录 ────────────────────────────────────────────
 
 
 async def save_vehicle_visit(
@@ -315,7 +393,7 @@ async def save_vehicle_visit(
     插入一条车辆到访记录并返回其 ID。"""
     visit_id = str(uuid.uuid4())
     created_at = _now_iso()
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _db_session() as db:
         await db.execute(
             "INSERT INTO vehicle_visits "
             "(id, source_id, source_name, track_id, enter_time, exit_time, "
@@ -341,7 +419,7 @@ async def save_vehicle_visit(
 async def get_vehicle_visits_since(since_iso: str) -> list[dict]:
     """Return all vehicle visits created after *since_iso* (ISO 8601 string).
     返回 *since_iso*（ISO 8601 字符串）之后创建的所有车辆到访记录。"""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _db_session() as db:
         async with db.execute(
             "SELECT id, source_id, source_name, track_id, enter_time, exit_time, "
             "plate, confirmed_actions, missing_actions, created_at "

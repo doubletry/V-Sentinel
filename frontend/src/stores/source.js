@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { sourcesApi, processorApi } from '../api/index.js'
-import { ElMessage } from 'element-plus'
+import ElMessage from 'element-plus/es/components/message/index'
 import { i18n } from '../i18n/index.js'
 
 export const useSourceStore = defineStore('source', () => {

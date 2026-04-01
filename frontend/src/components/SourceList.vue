@@ -119,7 +119,8 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessageBox, ElMessage } from 'element-plus'
+import ElMessage from 'element-plus/es/components/message/index'
+import ElMessageBox from 'element-plus/es/components/message-box/index'
 import { useSourceStore } from '../stores/source.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { buildRtspUrl, extractRoutePath, normalizeRoutePath } from '../utils/sourceAddress.js'

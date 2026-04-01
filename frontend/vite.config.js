@@ -8,6 +8,40 @@ const backendOrigin = `http://localhost:${backendPort}`
 
 export default defineConfig({
   plugins: [vue()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined
+          }
+
+          if (id.includes('@element-plus/icons-vue')) {
+            return 'vendor-element-icons'
+          }
+
+          if (id.includes('element-plus')) {
+            return 'vendor-ui'
+          }
+
+          if (
+            id.includes('/vue/')
+            || id.includes('vue-router')
+            || id.includes('pinia')
+            || id.includes('vue-i18n')
+          ) {
+            return 'vendor-vue'
+          }
+
+          if (id.includes('axios')) {
+            return 'vendor-http'
+          }
+
+          return 'vendor'
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': backendOrigin,

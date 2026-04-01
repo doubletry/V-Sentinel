@@ -4,6 +4,8 @@ from __future__ import annotations
 import pytest
 
 from backend.db.database import (
+    _get_shared_db,
+    close_db,
     create_source,
     delete_source,
     get_rois,
@@ -29,6 +31,13 @@ class TestInitDb:
         from backend.db.database import init_db as _init_db
         await _init_db()  # call again – should not raise
 
+    async def test_enables_wal_mode(self):
+        db = await _get_shared_db()
+        async with db.execute("PRAGMA journal_mode") as cursor:
+            row = await cursor.fetchone()
+        assert row is not None
+        assert str(row[0]).lower() == "wal"
+
 
 class TestCreateSource:
     async def test_creates_and_returns(self):
@@ -45,6 +54,13 @@ class TestCreateSource:
         await create_source(VideoSourceCreate(name="A", rtsp_url="rtsp://x"))
         with pytest.raises(Exception, match="UNIQUE"):
             await create_source(VideoSourceCreate(name="B", rtsp_url="rtsp://x"))
+
+    async def test_reopens_after_close(self):
+        created = await create_source(VideoSourceCreate(name="Cam2", rtsp_url="rtsp://reopen"))
+        await close_db()
+        found = await get_source(created.id)
+        assert found is not None
+        assert found.rtsp_url == "rtsp://reopen"
 
 
 class TestGetSource:

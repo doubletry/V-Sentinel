@@ -15,7 +15,10 @@
       @dblclick.prevent="onDblClick"
     />
 
-    <div class="roi-toolbar">
+    <!-- Consolidated single-line toolbar — hidden while actively drawing to
+         avoid blocking the canvas; shown again on cancel or completion.
+         合并的单行工具栏——绘制时隐藏以免遮挡画布，取消或完成时重新显示。 -->
+    <div v-if="!isDrawing" class="roi-toolbar">
       <template v-if="!readOnly">
         <el-button-group>
           <el-button
@@ -36,16 +39,22 @@
           </el-button>
         </el-button-group>
 
-        <el-button
-          v-if="mode === 'polygon' && isDrawing"
-          size="small"
-          type="primary"
-          :disabled="currentPoints.length < 3"
-          @click="finishPolygon"
-        >
-          <el-icon><Check /></el-icon>
-          {{ t('roi.finishPolygon') }}
-        </el-button>
+        <!-- Tag selector + delete — inline when a shape is selected
+             标签选择器 + 删除——选中形状时内联显示 -->
+        <template v-if="selectedIdx !== null">
+          <el-select
+            v-model="shapes[selectedIdx].tag"
+            size="small"
+            class="tag-select"
+            :placeholder="t('roi.selectTag')"
+          >
+            <el-option v-for="tag in tagOptions" :key="tag" :label="tag" :value="tag" />
+          </el-select>
+          <el-button size="small" type="danger" @click="deleteSelected">
+            <el-icon><Delete /></el-icon>
+            {{ t('roi.deleteShape') }}
+          </el-button>
+        </template>
 
         <el-button size="small" type="success" :loading="saving" @click="save">
           <el-icon><Check /></el-icon>
@@ -81,18 +90,17 @@
       </template>
     </div>
 
-    <div v-if="!readOnly && selectedIdx !== null" class="tag-editor">
-      <el-select
-        v-model="shapes[selectedIdx].tag"
+    <!-- Finish-polygon button shown only during polygon drawing
+         仅在多边形绘制过程中显示完成按钮 -->
+    <div v-if="!readOnly && isDrawing && mode === 'polygon'" class="draw-finish-btn">
+      <el-button
         size="small"
-        class="tag-select"
-        :placeholder="t('roi.selectTag')"
+        type="primary"
+        :disabled="currentPoints.length < 3"
+        @click="finishPolygon"
       >
-        <el-option v-for="tag in tagOptions" :key="tag" :label="tag" :value="tag" />
-      </el-select>
-      <el-button size="small" type="danger" @click="deleteSelected">
-        <el-icon><Delete /></el-icon>
-        {{ t('roi.deleteShape') }}
+        <el-icon><Check /></el-icon>
+        {{ t('roi.finishPolygon') }}
       </el-button>
     </div>
 
@@ -719,10 +727,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   z-index: 110;
-  max-width: min(95%, 520px);
   background: rgba(0, 0, 0, 0.62);
   padding: 6px;
   border-radius: 8px;
@@ -732,23 +739,18 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.tag-editor {
-  position: absolute;
-  right: 8px;
-  bottom: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  z-index: 110;
-  background: rgba(0, 0, 0, 0.72);
-  padding: 6px;
-  border-radius: 6px;
-  max-width: min(90%, 420px);
+.tag-select {
+  min-width: 140px;
 }
 
-.tag-select {
-  min-width: 190px;
+.draw-finish-btn {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 110;
+  background: rgba(0, 0, 0, 0.62);
+  padding: 6px;
+  border-radius: 8px;
 }
 
 .draw-hint {

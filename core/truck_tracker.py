@@ -159,25 +159,15 @@ def _merge_boxes(boxes: list[list[int]]) -> list[int]:
 
 def _boxes_overlap(a: list[int], b: list[int]) -> bool:
     """Return whether *a* and *b* overlap at all.
-    返回 *a* 和 *b* 是否有重叠。"""
-    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+    返回 *a* 和 *b* 是否有重叠。
 
-
-def _box_in_roi(box: list[int], roi: list[list[int]]) -> bool:
-    """Rough check: is the centre of *box* inside the polygon *roi*?
-    粗略检查：*box* 的中心点是否在多边形 *roi* 内？
-
-    *roi* is a list of ``[x, y]`` pairs.  For simplicity we use a bounding-box
-    approximation of the polygon.
-    *roi* 是 ``[x, y]`` 对列表。简化处理，使用多边形的外接矩形近似。
+    Note: this helper is no longer used in the main tracker pipeline (because
+    model_roi-filtered detections already share the same ROI region), but is
+    kept as a general-purpose utility.
+    注意：此辅助函数不再在主跟踪器流水线中使用（因为 model_roi 过滤后的
+    检测已共享相同 ROI 区域），但作为通用工具保留。
     """
-    if not roi:
-        return True  # no ROI means everything is in scope / 无 ROI 表示所有区域都在范围内
-    cx = (box[0] + box[2]) // 2
-    cy = (box[1] + box[3]) // 2
-    xs = [p[0] for p in roi]
-    ys = [p[1] for p in roi]
-    return min(xs) <= cx <= max(xs) and min(ys) <= cy <= max(ys)
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
 
 
 def _det_to_bbox(det: dict) -> list[int]:

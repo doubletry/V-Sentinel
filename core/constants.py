@@ -48,13 +48,31 @@ OTHER_ACTION_LABEL: str = "other"
 OCR_INTERVAL: int = 10
 """Frames between OCR attempts on the same truck. 同一卡车两次 OCR 之间的帧数。"""
 
-MAX_MISSING_FRAMES: int = 5
+MAX_MISSING_FRAMES: int = 15
 """Consecutive frames without detection before truck departure.
-连续未检测到卡车的帧数上限，超过后认为离开。"""
+连续未检测到卡车的帧数上限，超过后认为离开。
 
-MIN_PRESENCE_FRAMES: int = 3
+**Tuning guide / 调参指南**:
+  Increase this value when trucks may pause or be momentarily occluded while
+  still present.  At 25 fps with ``FRAME_SAMPLE_INTERVAL=3``, effective
+  processing rate is ~8 fps, so 15 processed frames ≈ ~1.8 s real-time gap
+  tolerance.  Decrease to react faster to genuine departures.
+  当卡车可能暂停或短暂被遮挡时增大此值。在 25fps 且
+  ``FRAME_SAMPLE_INTERVAL=3`` 时，实际处理约 8fps，15 帧处理 ≈ 约 1.8 秒
+  的实时间隙容忍度。减小此值可更快响应真正离开。"""
+
+MIN_PRESENCE_FRAMES: int = 8
 """Minimum consecutive detections to confirm a truck (filter transients).
-确认卡车所需的最少连续检测帧数（过滤路过车辆）。"""
+确认卡车所需的最少连续检测帧数（过滤路过车辆）。
+
+**Tuning guide / 调参指南**:
+  Vehicles may stay in frame for several seconds.  With
+  ``FRAME_SAMPLE_INTERVAL=3`` at 25 fps (~8 effective fps), 8 processed
+  frames ≈ ~1 s.  Increase to filter longer transients; decrease (min 1) to
+  confirm faster.
+  车辆可能在画面中停留数秒。在 ``FRAME_SAMPLE_INTERVAL=3`` 且 25fps
+  （约 8 有效 fps）时，8 帧处理 ≈ 约 1 秒。增大以过滤更长的瞬态检测；
+  减小（最小 1）以更快确认。"""
 
 # ── Classification stability / 分类稳定性 ────────────────────────────────────
 
@@ -95,3 +113,56 @@ DRAW_DETECTION_COLOR: tuple[int, int, int] = (0, 255, 0)
 DRAW_CLASSIFICATION_COLOR: tuple[int, int, int] = (255, 255, 0)
 """BGR/RGB color for classification labels on person boxes.  Yellow.
 人物框分类标签的颜色。黄色。"""
+
+# ── Frame sampling / 帧采样 ──────────────────────────────────────────────────
+
+FRAME_SAMPLE_INTERVAL: int = 3
+"""Process every N-th frame from the RTSP stream; skip the rest.
+从 RTSP 流中每 N 帧处理一帧，跳过其余帧。
+
+**Tuning guide / 调参指南**:
+  Set to 1 to process every frame (no skipping).  At 25 fps, an interval of
+  3 yields ~8 effective processing fps, which is usually sufficient for
+  truck monitoring while reducing GPU/CPU load by ~67%.
+  设为 1 则处理每帧（不跳过）。在 25fps 时，间隔 3 得到约 8 有效处理 fps，
+  通常足以用于卡车监控，同时减少约 67% 的 GPU/CPU 负载。"""
+
+# ── RTSP reconnection / RTSP 重连 ────────────────────────────────────────────
+
+RTSP_RECONNECT_DELAY: float = 3.0
+"""Seconds to wait before attempting to reconnect a failed RTSP reader.
+RTSP 读取失败后重连前的等待秒数。"""
+
+RTSP_MAX_RECONNECT_ATTEMPTS: int = 0
+"""Maximum number of consecutive reconnection attempts.  0 = unlimited.
+连续重连尝试的最大次数。0 = 无限制。"""
+
+# ── Daily summary / 每日总结 ──────────────────────────────────────────────────
+
+DAILY_SUMMARY_HOUR: int = 23
+"""Hour of day (0-23, local time) to generate the daily vehicle-visit summary.
+每日车辆到访总结的生成时间（本地时间 0-23 时）。"""
+
+DAILY_SUMMARY_MINUTE: int = 59
+"""Minute of the hour to generate the daily summary.
+每日总结的分钟数。"""
+
+# ── English → Chinese label mapping / 英中标签对照表 ─────────────────────────
+
+LABEL_EN_TO_ZH: dict[str, str] = {
+    "truck": "卡车",
+    "person": "行人",
+    "action1": "动作1",
+    "action2": "动作2",
+    "action3": "动作3",
+    "action4": "动作4",
+    "action5": "动作5",
+    "action6": "动作6",
+    "other": "其他",
+    "unknown": "未知",
+}
+"""Map English classification / detection labels to Chinese for daily summaries.
+将英文分类/检测标签映射为中文，用于每日总结。
+
+Add new entries here when new models or label sets are deployed.
+部署新模型或标签集时在此添加新条目。"""

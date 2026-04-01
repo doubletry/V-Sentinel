@@ -15,9 +15,30 @@
       @dblclick.prevent="onDblClick"
     />
 
-    <!-- Consolidated single-line toolbar — hidden while actively drawing to
-         avoid blocking the canvas; shown again on cancel or completion.
-         合并的单行工具栏——绘制时隐藏以免遮挡画布，取消或完成时重新显示。 -->
+    <!-- Floating context menu at mouse position when a shape is selected.
+         选中形状时在鼠标位置显示的浮动上下文菜单。 -->
+    <div
+      v-if="!readOnly && !isDrawing && selectedIdx !== null"
+      class="roi-context-menu"
+      :style="contextMenuStyle"
+    >
+      <el-select
+        v-model="shapes[selectedIdx].tag"
+        size="small"
+        class="tag-select"
+        :placeholder="t('roi.selectTag')"
+      >
+        <el-option v-for="tag in tagOptions" :key="tag" :label="tag" :value="tag" />
+      </el-select>
+      <el-button size="small" type="danger" @click="deleteSelected">
+        <el-icon><Delete /></el-icon>
+        {{ t('roi.deleteShape') }}
+      </el-button>
+    </div>
+
+    <!-- Main toolbar — hidden while actively drawing to avoid blocking the
+         canvas; shown again on cancel or completion.
+         主工具栏——绘制时隐藏以免遮挡画布，取消或完成时重新显示。 -->
     <div v-if="!isDrawing" class="roi-toolbar">
       <template v-if="!readOnly">
         <el-button-group>
@@ -38,23 +59,6 @@
             {{ t('roi.rectangle') }}
           </el-button>
         </el-button-group>
-
-        <!-- Tag selector + delete — inline when a shape is selected
-             标签选择器 + 删除——选中形状时内联显示 -->
-        <template v-if="selectedIdx !== null">
-          <el-select
-            v-model="shapes[selectedIdx].tag"
-            size="small"
-            class="tag-select"
-            :placeholder="t('roi.selectTag')"
-          >
-            <el-option v-for="tag in tagOptions" :key="tag" :label="tag" :value="tag" />
-          </el-select>
-          <el-button size="small" type="danger" @click="deleteSelected">
-            <el-icon><Delete /></el-icon>
-            {{ t('roi.deleteShape') }}
-          </el-button>
-        </template>
 
         <el-button size="small" type="success" :loading="saving" @click="save">
           <el-icon><Check /></el-icon>
@@ -146,8 +150,26 @@ const isDrawing = ref(false)
 const currentPoints = ref([])
 const rectStart = ref(null)
 const pointerPos = ref(null)
+/** Screen-relative position where the shape was selected (for floating menu).
+    形状被选中时的屏幕相对坐标（用于浮动菜单）。 */
+const selectionPos = ref({ x: 0, y: 0 })
 
 const tagOptions = computed(() => appSettingsStore.roiTagOptions)
+
+/** Compute inline style positioning the context menu near the mouse click.
+    计算内联样式，将上下文菜单定位在鼠标点击附近。 */
+const contextMenuStyle = computed(() => {
+  const overlay = overlayEl.value
+  if (!overlay) return {}
+  const rect = overlay.getBoundingClientRect()
+  // Convert screen-relative click coordinates to overlay-relative
+  const left = selectionPos.value.x - rect.left
+  const top = selectionPos.value.y - rect.top
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+  }
+})
 
 let dragState = null
 
@@ -447,6 +469,7 @@ function onMouseDown(event) {
     const hit = hitTestShapes(pos)
     if (hit) {
       selectedIdx.value = hit.shapeIdx
+      selectionPos.value = { x: event.clientX, y: event.clientY }
       dragState = {
         shapeIdx: hit.shapeIdx,
         vertexIdx: hit.vertexIdx,
@@ -718,6 +741,20 @@ onBeforeUnmount(() => {
 
 .roi-drawer-overlay.read-only .roi-canvas {
   cursor: default;
+}
+
+.roi-context-menu {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 120;
+  background: rgba(0, 0, 0, 0.78);
+  padding: 6px;
+  border-radius: 8px;
+  transform: translate(-50%, -140%);
+  pointer-events: auto;
+  white-space: nowrap;
 }
 
 .roi-toolbar {

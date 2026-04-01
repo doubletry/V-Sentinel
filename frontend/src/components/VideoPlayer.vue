@@ -43,6 +43,27 @@ const error = ref('')
 const { t } = useI18n()
 const appSettingsStore = useAppSettingsStore()
 let _conn = null
+let _reconnectTimer = null
+let _reconnectAttempts = 0
+const MAX_RECONNECT_DELAY = 30000 // 30s cap
+
+function _scheduleReconnect() {
+  if (_reconnectTimer) return
+  // Exponential backoff: 2s, 4s, 8s, 16s, 30s cap
+  const delay = Math.min(2000 * Math.pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY)
+  _reconnectAttempts++
+  _reconnectTimer = setTimeout(() => {
+    _reconnectTimer = null
+    if (props.streamPath) connect()
+  }, delay)
+}
+
+function _cancelReconnect() {
+  if (_reconnectTimer) {
+    clearTimeout(_reconnectTimer)
+    _reconnectTimer = null
+  }
+}
 
 async function connect() {
   if (!props.streamPath) return
@@ -57,17 +78,33 @@ async function connect() {
   try {
     _conn = await connectWebRTC(props.streamPath, videoEl.value, appSettingsStore.mediamtxWebrtcAddr)
     connected.value = true
+    _reconnectAttempts = 0
+
+    // Monitor connection state for auto-reconnect
+    if (_conn.pc) {
+      _conn.pc.onconnectionstatechange = () => {
+        const state = _conn?.pc?.connectionState
+        if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+          connected.value = false
+          error.value = t('videoPlayer.connectionLost')
+          _scheduleReconnect()
+        }
+      }
+    }
   } catch (err) {
     error.value = err.message || t('videoPlayer.connectionFailed')
+    _scheduleReconnect()
   }
 }
 
 function disconnect() {
+  _cancelReconnect()
   if (_conn) {
     _conn.stop()
     _conn = null
   }
   connected.value = false
+  _reconnectAttempts = 0
 }
 
 watch(() => props.streamPath, (newPath) => {

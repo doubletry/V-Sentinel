@@ -40,6 +40,21 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 """
 
+CREATE_VEHICLE_VISITS_TABLE = """
+CREATE TABLE IF NOT EXISTS vehicle_visits (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    source_name TEXT NOT NULL DEFAULT '',
+    track_id INTEGER NOT NULL,
+    enter_time TEXT NOT NULL,
+    exit_time TEXT NOT NULL,
+    plate TEXT NOT NULL DEFAULT '',
+    confirmed_actions TEXT NOT NULL DEFAULT '[]',
+    missing_actions TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+"""
+
 PRAGMA_FK = "PRAGMA foreign_keys = ON;"
 
 
@@ -51,6 +66,7 @@ async def init_db() -> None:
         await db.execute(CREATE_SOURCES_TABLE)
         await db.execute(CREATE_ROIS_TABLE)
         await db.execute(CREATE_SETTINGS_TABLE)
+        await db.execute(CREATE_VEHICLE_VISITS_TABLE)
         # Ensure all default keys exist, while preserving user-modified values.
         # 确保所有默认键存在，同时保留用户修改过的值。
         for key, value in DEFAULT_APP_SETTINGS.items():
@@ -280,3 +296,71 @@ async def update_settings(data: dict[str, str]) -> dict[str, str]:
             )
         await db.commit()
     return await get_all_settings()
+
+
+# ── Vehicle Visits / 车辆到访记录 ────────────────────────────────────────────
+
+
+async def save_vehicle_visit(
+    source_id: str,
+    source_name: str,
+    track_id: int,
+    enter_time: str,
+    exit_time: str,
+    plate: str,
+    confirmed_actions: list[str],
+    missing_actions: list[str],
+) -> str:
+    """Insert a vehicle visit record and return its ID.
+    插入一条车辆到访记录并返回其 ID。"""
+    visit_id = str(uuid.uuid4())
+    created_at = _now_iso()
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO vehicle_visits "
+            "(id, source_id, source_name, track_id, enter_time, exit_time, "
+            "plate, confirmed_actions, missing_actions, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                visit_id,
+                source_id,
+                source_name,
+                track_id,
+                enter_time,
+                exit_time,
+                plate,
+                json.dumps(confirmed_actions),
+                json.dumps(missing_actions),
+                created_at,
+            ),
+        )
+        await db.commit()
+    return visit_id
+
+
+async def get_vehicle_visits_since(since_iso: str) -> list[dict]:
+    """Return all vehicle visits created after *since_iso* (ISO 8601 string).
+    返回 *since_iso*（ISO 8601 字符串）之后创建的所有车辆到访记录。"""
+    async with aiosqlite.connect(_DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, source_id, source_name, track_id, enter_time, exit_time, "
+            "plate, confirmed_actions, missing_actions, created_at "
+            "FROM vehicle_visits WHERE created_at >= ? ORDER BY created_at",
+            (since_iso,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    result: list[dict] = []
+    for row in rows:
+        result.append({
+            "id": row[0],
+            "source_id": row[1],
+            "source_name": row[2],
+            "track_id": row[3],
+            "enter_time": row[4],
+            "exit_time": row[5],
+            "plate": row[6],
+            "confirmed_actions": json.loads(row[7]),
+            "missing_actions": json.loads(row[8]),
+            "created_at": row[9],
+        })
+    return result

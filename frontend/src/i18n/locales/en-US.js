@@ -92,6 +92,7 @@ export default {
   videoPlayer: {
     connecting: 'Connecting...',
     connectionFailed: 'Connection failed',
+    connectionLost: 'Connection lost, reconnecting...',
   },
   messages: {
     title: 'Real-time Messages',

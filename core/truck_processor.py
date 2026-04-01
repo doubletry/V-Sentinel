@@ -303,11 +303,29 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 "image_base64": thumbnail,
             })
 
+        # Serialize visit data for agent persistence
+        # 序列化到访数据供代理持久化
+        visit_records: list[dict] = []
+        for visit in decision.visits:
+            visit_records.append({
+                "track_id": visit.track_id,
+                "enter_time": datetime.fromtimestamp(
+                    visit.enter_time, tz=timezone.utc
+                ).isoformat(),
+                "exit_time": datetime.fromtimestamp(
+                    visit.exit_time, tz=timezone.utc
+                ).isoformat(),
+                "plate": visit.plate,
+                "confirmed_actions": sorted(visit.confirmed_actions),
+                "missing_actions": sorted(visit.missing_actions),
+            })
+
         return AnalysisResult(
             detections=detections,
             classifications=classifications,
             ocr_texts=ocr_texts,
             messages=messages,
+            extra={"visits": visit_records} if visit_records else {},
         )
 
     # ── Sub-tasks / 子任务 ────────────────────────────────────────────────

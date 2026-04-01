@@ -157,14 +157,39 @@ const selectionPos = ref({ x: 0, y: 0 })
 const tagOptions = computed(() => appSettingsStore.roiTagOptions)
 
 /** Compute inline style positioning the context menu near the mouse click.
-    计算内联样式，将上下文菜单定位在鼠标点击附近。 */
+    计算内联样式，将上下文菜单定位在鼠标点击附近。
+    Clamps to overlay bounds so the menu stays fully visible.
+    限制在 overlay 边界内以确保菜单完全可见。 */
 const contextMenuStyle = computed(() => {
   const overlay = overlayEl.value
   if (!overlay) return {}
   const rect = overlay.getBoundingClientRect()
   // Convert screen-relative click coordinates to overlay-relative
-  const left = selectionPos.value.x - rect.left
-  const top = selectionPos.value.y - rect.top
+  let left = selectionPos.value.x - rect.left
+  let top = selectionPos.value.y - rect.top
+
+  // Estimate menu dimensions for boundary clamping
+  const menuW = 260 // approximate rendered width
+  const menuH = 48  // approximate rendered height
+
+  // The CSS transform is translate(-50%, -140%), so the effective origin is:
+  //   effectiveLeft = left - menuW/2
+  //   effectiveTop  = top  - menuH*1.4
+  const effLeft = left - menuW / 2
+  const effTop = top - menuH * 1.4
+
+  // If the menu would overflow left / right / top, shift it
+  if (effLeft < 4) left = menuW / 2 + 4
+  if (effLeft + menuW > rect.width - 4) left = rect.width - menuW / 2 - 4
+  if (effTop < 4) {
+    // Place below the click instead — override transform in style
+    return {
+      left: `${left}px`,
+      top: `${top}px`,
+      transform: 'translate(-50%, 20px)',
+    }
+  }
+
   return {
     left: `${left}px`,
     top: `${top}px`,
@@ -547,8 +572,12 @@ function onMouseMove(event) {
   }
 }
 
-function onMouseUp() {
+function onMouseUp(event) {
   if (dragState) {
+    // Update context-menu anchor to the release position so the floating
+    // toolbar follows the shape after dragging.
+    // 更新上下文菜单锚点到释放位置，使浮动工具栏跟随形状拖拽。
+    selectionPos.value = { x: event.clientX, y: event.clientY }
     dragState = null
     render()
   }

@@ -92,6 +92,7 @@ export default {
   videoPlayer: {
     connecting: '连接中...',
     connectionFailed: '连接失败',
+    connectionLost: '连接断开，正在重连...',
   },
   messages: {
     title: '实时消息',

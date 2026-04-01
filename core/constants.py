@@ -48,31 +48,33 @@ OTHER_ACTION_LABEL: str = "other"
 OCR_INTERVAL: int = 10
 """Frames between OCR attempts on the same truck. 同一卡车两次 OCR 之间的帧数。"""
 
-MAX_MISSING_FRAMES: int = 15
+MAX_MISSING_FRAMES: int = 30
 """Consecutive frames without detection before truck departure.
 连续未检测到卡车的帧数上限，超过后认为离开。
 
 **Tuning guide / 调参指南**:
   Increase this value when trucks may pause or be momentarily occluded while
   still present.  At 25 fps with ``FRAME_SAMPLE_INTERVAL=3``, effective
-  processing rate is ~8 fps, so 15 processed frames ≈ ~1.8 s real-time gap
+  processing rate is ~8 fps, so 30 processed frames ≈ ~3.6 s real-time gap
   tolerance.  Decrease to react faster to genuine departures.
   当卡车可能暂停或短暂被遮挡时增大此值。在 25fps 且
-  ``FRAME_SAMPLE_INTERVAL=3`` 时，实际处理约 8fps，15 帧处理 ≈ 约 1.8 秒
+  ``FRAME_SAMPLE_INTERVAL=3`` 时，实际处理约 8fps，30 帧处理 ≈ 约 3.6 秒
   的实时间隙容忍度。减小此值可更快响应真正离开。"""
 
-MIN_PRESENCE_FRAMES: int = 8
+MIN_PRESENCE_FRAMES: int = 16
 """Minimum consecutive detections to confirm a truck (filter transients).
 确认卡车所需的最少连续检测帧数（过滤路过车辆）。
 
 **Tuning guide / 调参指南**:
   Vehicles may stay in frame for several seconds.  With
-  ``FRAME_SAMPLE_INTERVAL=3`` at 25 fps (~8 effective fps), 8 processed
-  frames ≈ ~1 s.  Increase to filter longer transients; decrease (min 1) to
-  confirm faster.
+  ``FRAME_SAMPLE_INTERVAL=3`` at 25 fps (~8 effective fps), 16 processed
+  frames ≈ ~2 s.  Increase to filter longer transients; decrease (min 1) to
+  confirm faster.  If trucks typically stay for 5+ seconds in the scene,
+  this value ensures only genuinely stopped trucks are confirmed.
   车辆可能在画面中停留数秒。在 ``FRAME_SAMPLE_INTERVAL=3`` 且 25fps
-  （约 8 有效 fps）时，8 帧处理 ≈ 约 1 秒。增大以过滤更长的瞬态检测；
-  减小（最小 1）以更快确认。"""
+  （约 8 有效 fps）时，16 帧处理 ≈ 约 2 秒。增大以过滤更长的瞬态检测；
+  减小（最小 1）以更快确认。如果卡车通常在场景中停留 5 秒以上，
+  此值确保只有真正停靠的卡车才会被确认。"""
 
 # ── Classification stability / 分类稳定性 ────────────────────────────────────
 

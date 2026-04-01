@@ -606,6 +606,350 @@ class TestTruckMonitorProcessor:
         assert cls["person_bbox"] == [30, 30, 80, 150]
 
 
+class TestTruckProcessorRoiFlow:
+    """Verify that ROI pixel points flow correctly to all vengine calls.
+    验证 ROI 像素坐标正确传递到所有 vengine 调用。"""
+
+    async def test_detect_receives_roi_points_from_roi_pixel_points(self):
+        """When roi_pixel_points is provided, detect() receives roi_points.
+        当提供 roi_pixel_points 时，detect() 接收到 roi_points。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        roi = [
+            {"x": 50, "y": 50},
+            {"x": 300, "y": 50},
+            {"x": 300, "y": 400},
+            {"x": 50, "y": 400},
+        ]
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[roi],
+        )
+
+        vengine.detect.assert_called_once()
+        call_kwargs = vengine.detect.call_args
+        assert call_kwargs.kwargs.get("roi_points") == roi or call_kwargs[1].get("roi_points") == roi
+
+    async def test_detect_receives_none_roi_when_no_roi_pixel_points(self):
+        """When roi_pixel_points is empty, detect() receives roi_points=None.
+        当 roi_pixel_points 为空时，detect() 接收 roi_points=None。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+
+        vengine.detect.assert_called_once()
+        call_kwargs = vengine.detect.call_args
+        # roi_points should be None when no ROI provided
+        assert call_kwargs.kwargs.get("roi_points") is None or call_kwargs[1].get("roi_points") is None
+
+    async def test_detect_uses_image_key_not_images_param(self):
+        """detect() is called with single-image args (not images list), so
+        roi_points at top level is used correctly.
+        detect() 使用单图参数调用（非 images 列表），因此顶层 roi_points 正确使用。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+
+        call_kwargs = vengine.detect.call_args
+        # detect() must NOT be called with images= (single-image mode)
+        assert "images" not in call_kwargs.kwargs
+
+    async def test_ocr_images_include_truck_bbox_as_roi(self):
+        """OCR batch items contain the truck bounding box as their ROI.
+        OCR 批量项包含卡车检测框作为其 ROI。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(50, 60, 200, 250, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "ABC123", "confidence": 0.85, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+
+        vengine.ocr.assert_called_once()
+        ocr_kwargs = vengine.ocr.call_args.kwargs
+        images = ocr_kwargs["images"]
+        assert len(images) == 1
+        roi = images[0]["roi"]
+        # ROI should be the truck bbox as a 4-point polygon
+        assert len(roi) == 4
+        assert roi[0]["x"] == 50 and roi[0]["y"] == 60
+        assert roi[2]["x"] == 200 and roi[2]["y"] == 250
+
+    async def test_classify_images_include_merged_roi(self):
+        """Classify batch items contain the merged person + truck ROI.
+        分类批量项包含合并的人+卡车 ROI。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+            _person_det(30, 30, 80, 150, label="person"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "X", "confidence": 0.5, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = [
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+
+        vengine.classify.assert_called_once()
+        cls_kwargs = vengine.classify.call_args.kwargs
+        images = cls_kwargs["images"]
+        assert len(images) == 1
+        roi = images[0]["roi"]
+        assert len(roi) == 4
+        # The merged ROI should encompass both person and truck boxes
+        xs = [p["x"] for p in roi]
+        ys = [p["y"] for p in roi]
+        assert min(xs) <= 10  # truck x_min
+        assert max(xs) >= 200  # truck x_max
+        assert min(ys) <= 10  # truck y_min
+        assert max(ys) >= 200  # truck y_max
+
+    async def test_ocr_and_classify_use_image_key_in_items(self):
+        """OCR and classify batch items use image_key (via 'key' alias) when
+        upload succeeds.
+        当上传成功时，OCR 和分类批量项使用 image_key（通过 'key' 别名）。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "my-cache-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+            _person_det(30, 30, 80, 150, label="person"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "ABC", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = [
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+
+        # OCR items should use the cache key
+        ocr_images = vengine.ocr.call_args.kwargs["images"]
+        assert ocr_images[0].get("key") == "my-cache-key"
+        assert "image_bytes" not in ocr_images[0]
+
+        # Classify items should use the cache key
+        cls_images = vengine.classify.call_args.kwargs["images"]
+        assert cls_images[0].get("key") == "my-cache-key"
+        assert "image_bytes" not in cls_images[0]
+
+    async def test_ocr_and_classify_fallback_to_bytes_when_no_key(self):
+        """OCR and classify fall back to image_bytes when upload returns None.
+        当上传返回 None 时，OCR 和分类回退到 image_bytes。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = None  # upload failed
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+            _person_det(30, 30, 80, 150, label="person"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "ABC", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = [
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+
+        # OCR items should use image_bytes
+        ocr_images = vengine.ocr.call_args.kwargs["images"]
+        assert ocr_images[0].get("image_bytes") == b"jpeg"
+        assert "key" not in ocr_images[0]
+
+        # Classify items should use image_bytes
+        cls_images = vengine.classify.call_args.kwargs["images"]
+        assert cls_images[0].get("image_bytes") == b"jpeg"
+        assert "key" not in cls_images[0]
+
+    async def test_detect_with_roi_and_key_passes_both(self):
+        """When both ROI and key are available, detect() receives both.
+        当 ROI 和 key 都可用时，detect() 同时接收两者。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        roi = [
+            {"x": 10, "y": 10},
+            {"x": 300, "y": 10},
+            {"x": 300, "y": 300},
+            {"x": 10, "y": 300},
+        ]
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[roi],
+        )
+
+        call_kwargs = vengine.detect.call_args
+        # Should have roi_points AND image_key (not images list)
+        assert call_kwargs.kwargs.get("roi_points") == roi
+        assert call_kwargs.kwargs.get("image_key") == "frame-key"
+        assert "images" not in call_kwargs.kwargs
+
+    async def test_full_pipeline_with_roi(self):
+        """Full pipeline with ROI: detect passes roi, OCR and classify use
+        item-level ROIs.
+        带 ROI 的完整流水线：检测传递 roi，OCR 和分类使用项级 ROI。"""
+        from core.truck_processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(50, 50, 300, 300, label="truck"),
+            _person_det(100, 100, 180, 250, label="person"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "XY789", "confidence": 0.88, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = [
+            {"label": "action2", "confidence": 0.85, "class_id": 2, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        roi = [
+            {"x": 0, "y": 0},
+            {"x": 640, "y": 0},
+            {"x": 640, "y": 480},
+            {"x": 0, "y": 480},
+        ]
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[roi],
+        )
+
+        # Verify detect was called with ROI
+        detect_kwargs = vengine.detect.call_args.kwargs
+        assert detect_kwargs["roi_points"] == roi
+
+        # Verify detections, OCR and classifications
+        assert len(result.detections) == 2
+        assert len(result.ocr_texts) == 1
+        assert len(result.classifications) == 1
+        assert result.classifications[0]["person_bbox"] == [100, 100, 180, 250]
+
+
 class TestDrawOnFrameWithClassifications:
     def test_person_gets_classification_label(self):
         """Person detection with matching classification shows action label.

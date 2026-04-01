@@ -435,6 +435,74 @@ class TestBatchImageRpcCompatibility:
             }
         ]
 
+    async def test_detect_single_image_with_roi_sets_use_model_roi(self):
+        """Single-image detect() with roi_points sets use_model_roi=True
+        and embeds ROI in the Image protobuf.
+        单图 detect() 带 roi_points 时设置 use_model_roi=True
+        并在 Image protobuf 中嵌入 ROI。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["count"] = len(request.images)
+                seen["roi_points_len"] = len(request.images[0].region_of_interest.points)
+                seen["use_model_roi"] = request.params.base.use_model_roi
+                seen["image_key"] = request.images[0].key
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        await client.detect(
+            shape=(480, 640, 3),
+            model_name="det-model",
+            roi_points=[
+                {"x": 10, "y": 20},
+                {"x": 300, "y": 20},
+                {"x": 300, "y": 400},
+                {"x": 10, "y": 400},
+            ],
+            image_key="frame-key",
+        )
+
+        assert seen["count"] == 1
+        assert seen["roi_points_len"] == 4
+        assert seen["use_model_roi"] is True
+        assert seen["image_key"] == "frame-key"
+
+    async def test_detect_single_image_without_roi_sets_model_roi_false(self):
+        """Single-image detect() without roi_points sets use_model_roi=False.
+        单图 detect() 无 roi_points 时设置 use_model_roi=False。"""
+        client = AsyncVEngineClient(Settings())
+        seen: dict[str, object] = {}
+
+        class Stub:
+            async def Predict(self, request):
+                seen["use_model_roi"] = request.params.base.use_model_roi
+                seen["roi_points_len"] = len(request.images[0].region_of_interest.points)
+                return detection_service_pb2.DetectionResponse(
+                    response_header=base_pb2.ResponseHeader(
+                        status_code=base_pb2.StatusCode.STATUS_OK,
+                    ),
+                    results=[],
+                )
+
+        client._enabled = {"detection": True}
+        client._stubs["detection"] = Stub()
+        await client.detect(
+            shape=(480, 640, 3),
+            model_name="det-model",
+            image_key="frame-key",
+        )
+
+        assert seen["use_model_roi"] is False
+        assert seen["roi_points_len"] == 0
+
     async def test_ocr_sends_multiple_images_and_returns_image_id(self):
         client = AsyncVEngineClient(Settings())
         seen: dict[str, object] = {}

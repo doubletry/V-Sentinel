@@ -139,7 +139,7 @@ def _majority_vote(history: deque, min_count: int = 3) -> str:
     counts: dict[str, int] = {}
     for label in history:
         counts[label] = counts.get(label, 0) + 1
-    best_label = max(counts, key=counts.get)  # type: ignore[arg-type]
+    best_label = max(counts, key=lambda k: counts[k])
     return best_label if counts[best_label] >= min_count else ""
 
 

@@ -510,10 +510,10 @@ class BaseVideoProcessor(ABC):
                 if self._push_proc.stdin is not None:
                     self._push_proc.stdin.write(frame.tobytes())
             except (BrokenPipeError, OSError) as exc:
-                logger.debug("Push error for {}: {}", output_rtsp_path, exc)
+                logger.warning("Push error for {}: {}", output_rtsp_path, exc)
                 self._close_push_container()
             except Exception as exc:
-                logger.debug("Push error for {}: {}", output_rtsp_path, exc)
+                logger.warning("Push error for {}: {}", output_rtsp_path, exc)
                 self._close_push_container()
 
     def _close_push_container(self) -> None:

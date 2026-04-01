@@ -384,6 +384,13 @@ class AsyncVEngineClient:
         batched request.
         既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
         ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
+
+        ROI handling: detection uses ``use_model_roi`` (server-side
+        post-processing filter on detection results), so only detections whose
+        centre falls inside the ROI are returned.
+        ROI 处理：检测使用 ``use_model_roi``（服务端对检测结果的后处理过滤），
+        仅返回中心点在 ROI 内的检测框。
+
         Returns list of {x_min, y_min, x_max, y_max, confidence, class_id, label}.
         Returns empty list when service is disabled.
         服务禁用时返回空列表。
@@ -400,10 +407,16 @@ class AsyncVEngineClient:
             )
             if not request_images:
                 return []
+            has_roi = any(bool(img.region_of_interest.points) for img in request_images)
             params = detection_service_pb2.DetectionParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
-                    use_image_roi=any(bool(img.region_of_interest.points) for img in request_images),
+                    # Detection uses model_roi: the server runs detection on the
+                    # full image, then filters results to keep only boxes inside
+                    # the ROI (post-processing).
+                    # 检测使用 model_roi：服务端在完整图像上运行检测，然后过滤结果
+                    # 仅保留 ROI 内的检测框（后处理）。
+                    use_model_roi=has_roi,
                 ),
                 confidence_threshold=conf,
                 nms_iou_threshold=nms,
@@ -459,6 +472,12 @@ class AsyncVEngineClient:
         既支持单图参数（*shape* + *image_bytes*/*image_key*），也支持
         ``images=[{shape, image_bytes|image_key, roi_points?}, ...]`` 的批量请求。
 
+        ROI handling: classification uses ``use_image_roi`` (server-side
+        pre-processing crop on input images before classification), so the
+        model only sees the ROI region.
+        ROI 处理：分类使用 ``use_image_roi``（服务端对输入图像的预处理裁剪），
+        模型仅看到 ROI 区域。
+
         Returns list of {label, confidence, class_id}. Batched responses also
         include ``image_id`` to identify which input image/ROI produced the
         result.
@@ -482,6 +501,11 @@ class AsyncVEngineClient:
             params = classification_service_pb2.ClassificationParams(
                 base=base_pb2.InferenceParams(
                     model_name=model_name,
+                    # Classification uses image_roi: the server crops the input
+                    # image to the ROI region before feeding it to the model
+                    # (pre-processing).
+                    # 分类使用 image_roi：服务端在将图像送入模型前裁剪到 ROI 区域
+                    #（前处理）。
                     use_image_roi=any(bool(img.region_of_interest.points) for img in request_images),
                 )
             )

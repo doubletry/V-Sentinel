@@ -3,22 +3,41 @@ person + truck composite ROI.
 
 卡车监控处理器：检测 → 卡车 ROI OCR → 人+卡车复合 ROI 分类。
 
-Business logic
+Business logic / 业务逻辑
 --------------
-1. Every frame goes through **detection** first (trucks, persons, etc.).
-2. The ``TruckTracker`` matches detections to existing tracks and decides:
+1. Every frame goes through **detection** with the user-defined ROI passed as
+   ``model_roi`` (server filters results to keep only boxes inside the ROI —
+   post-processing).
+   每帧通过**检测**，用户定义的 ROI 作为 ``model_roi`` 传入（服务端过滤结果
+   仅保留 ROI 内的检测框——后处理）。
+
+2. The ``TruckTracker`` single-truck state machine decides:
+   ``TruckTracker`` 单卡车状态机决定：
+   - Whether the truck is confirmed (not a passing vehicle).
+     卡车是否已确认（非路过车辆）。
    - Which trucks need **OCR** this frame (license-plate recognition).
+     哪些卡车本帧需要 **OCR**（车牌识别）。
    - Which person + truck pairs need **action classification**.
-3. OCR and classification requests are issued **concurrently** (cache-key based).
-4. Results are fed back into the tracker for temporal stability filtering.
-5. When a truck **leaves** the scene, a ``VehicleVisit`` record is produced
+     哪些人+卡车对需要**动作分类**。
+
+3. OCR and classification requests are issued **concurrently**.
+   OCR 和分类请求**并发**发出。
+
+4. Classification uses ``image_roi`` — the combined person + truck bounding box
+   is sent as a crop region so the server crops the input before classification
+   (pre-processing).
+   分类使用 ``image_roi``——合并的人+卡车检测框作为裁剪区域发送，
+   服务端在分类前裁剪输入（前处理）。
+
+5. Results are fed back into the tracker for temporal stability filtering.
+   结果反馈给跟踪器进行时间稳定性滤波。
+
+6. When a truck **leaves** the scene, a ``VehicleVisit`` record is produced
    containing the plate, confirmed actions, and any missing actions.
+   当卡车**离开**场景时，产生 ``VehicleVisit`` 记录，包含车牌、已确认动作
+   和缺少的动作。
 
-Usage::
-
-    python -m core.truck_processor --input rtsp://localhost:8554/cam1
-
-用法::
+Usage / 用法::
 
     python -m core.truck_processor --input rtsp://localhost:8554/cam1
 """
@@ -56,6 +75,21 @@ class TruckMonitorProcessor(BaseVideoProcessor):
     actions using cross-frame state tracking.
 
     使用跨帧状态跟踪监控卡车到达、车牌和工人动作的处理器。
+
+    The pipeline per frame is:
+    每帧流水线：
+    1. Upload frame → get cache key.
+       上传帧 → 获取缓存 key。
+    2. Detection with ``model_roi`` (server filters results by ROI).
+       使用 ``model_roi`` 进行检测（服务端按 ROI 过滤结果）。
+    3. Tracker update → decisions.
+       跟踪器更新 → 决策。
+    4. Concurrent OCR + classification (classification uses ``image_roi``).
+       并发 OCR + 分类（分类使用 ``image_roi``）。
+    5. Feed results back to tracker.
+       将结果反馈给跟踪器。
+    6. Generate messages for departures.
+       为离开事件生成消息。
     """
 
     DETECTION_MODEL = "huotai"
@@ -63,23 +97,23 @@ class TruckMonitorProcessor(BaseVideoProcessor):
     OCR_MODEL = "paddleocr"
 
     # Configurable via app_settings or constructor kwargs
-    OCR_INTERVAL: int = 10  # every N frames
+    # 可通过 app_settings 或构造函数参数配置
+    OCR_INTERVAL: int = 10  # every N frames / 每 N 帧
     TRUCK_LABELS: frozenset[str] = frozenset({"truck"})
 
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self._frame_count = 0
 
-        # Build ROI for tracker from first ROI polygon (pixel coords resolved
-        # per-frame, so tracker uses normalized or pixel ROI passed at init).
-        # We will pass the pixel-coordinate ROI on each frame instead.
+        # Tracker is created with settings from app_settings if available.
+        # 如果可用，使用 app_settings 中的设置创建跟踪器。
         self.tracker = TruckTracker(
             ocr_interval=int(
                 self.app_settings.get("ocr_interval", str(self.OCR_INTERVAL))
             ),
         )
 
-    # ── Main frame handler ────────────────────────────────────────────────
+    # ── Main frame handler / 主帧处理器 ──────────────────────────────────
 
     async def process_frame(
         self,
@@ -89,16 +123,31 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         roi_pixel_points: list[list[dict]],
     ) -> AnalysisResult:
         """Process one frame through the truck-monitoring pipeline.
-        通过卡车监控流水线处理一帧。"""
+        通过卡车监控流水线处理一帧。
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Raw RGB frame (H, W, 3). 原始 RGB 帧。
+        encoded : bytes
+            JPEG-encoded bytes of *frame*. *frame* 的 JPEG 编码字节。
+        shape : tuple
+            (H, W, C) shape of *frame*. *frame* 的 (H, W, C) 形状。
+        roi_pixel_points : list[list[dict]]
+            Pixel-coordinate ROI polygons from ``_normalize_rois_to_pixels``.
+            来自 ``_normalize_rois_to_pixels`` 的像素坐标 ROI 多边形。
+        """
         self._frame_count += 1
 
-        # Set tracker ROI from first polygon (if any)
+        # Set tracker ROI from first polygon (if any, once).
+        # 从第一个多边形设置跟踪器 ROI（如果有，仅一次）。
         if roi_pixel_points and self.tracker.roi is None:
             self.tracker.roi = [
                 [p["x"], p["y"]] for p in roi_pixel_points[0]
             ]
 
-        # Guard: if no vengine, echo-only
+        # Guard: if no vengine, echo-only mode (draw frame number).
+        # 保护：如无 vengine，仅回显模式（绘制帧号）。
         if self.vengine is None:
             annotated = frame.copy()
             ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
@@ -110,9 +159,15 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             return AnalysisResult(annotated_frame=annotated)
 
         h, w = shape[:2]
+        # The user-defined ROI is used as model_roi for detection: the server
+        # filters detection results to keep only boxes inside the ROI
+        # (post-processing).
+        # 用户定义的 ROI 用作检测的 model_roi：服务端过滤检测结果仅保留 ROI 内
+        # 的检测框（后处理）。
         primary_roi = roi_pixel_points[0] if roi_pixel_points else None
 
-        # 0. Upload frame to cache
+        # 0. Upload frame to cache to avoid duplicate transmission.
+        # 0. 上传帧到缓存以避免重复传输。
         image_key = await self.vengine.upload_and_get_key(encoded)
         img_kwargs: dict = {}
         if image_key:
@@ -120,7 +175,10 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         else:
             img_kwargs["image_bytes"] = encoded
 
-        # 1. Detection
+        # 1. Detection — ROI is passed as model_roi (post-processing filter).
+        #    Returned detections are already filtered to those inside the ROI.
+        # 1. 检测——ROI 作为 model_roi 传递（后处理过滤）。
+        #    返回的检测结果已被过滤为 ROI 内的检测框。
         detections = await self.vengine.detect(
             shape=shape,
             model_name=self.DETECTION_MODEL,
@@ -129,7 +187,8 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             **img_kwargs,
         )
 
-        # 2. Classify detections into trucks / persons / others
+        # 2. Classify detections into trucks / persons / others.
+        # 2. 将检测结果分为卡车/行人/其他。
         analysis = FrameAnalysis()
         for det in detections:
             label = str(det.get("label", "")).lower()
@@ -140,15 +199,23 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             else:
                 analysis.others.append(det)
 
-        # 3. Tracker update
+        # 3. Tracker update — the tracker's internal ROI filter is already
+        #    set, but since detection already uses model_roi, all returned
+        #    trucks are within the ROI.
+        # 3. 跟踪器更新——跟踪器的内部 ROI 过滤已设置，但由于检测已使用
+        #    model_roi，所有返回的卡车都在 ROI 内。
         decision: TrackingDecision = self.tracker.update(analysis)
 
-        # 4. Concurrent OCR + classification
+        # 4. Concurrent OCR + classification.
+        # 4. 并发 OCR + 分类。
         ocr_texts: list[dict] = []
         classifications: list[dict] = []
         coros: list = []
 
-        # 4a. OCR for trucks that need it
+        # 4a. OCR for the truck (if needed this frame).
+        #     OCR uses image_roi — the truck bounding box is the crop region.
+        # 4a. 卡车的 OCR（如果本帧需要）。
+        #     OCR 使用 image_roi——卡车检测框作为裁剪区域。
         ocr_track_ids = decision.ocr_truck_ids
         ocr_rois: list[dict] = []
         for tid in ocr_track_ids:
@@ -170,7 +237,13 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         if ocr_rois:
             coros.append(self._do_ocr(ocr_rois, ocr_track_ids))
 
-        # 4b. Classification for combined person+truck ROIs
+        # 4b. Classification for combined person + truck ROIs.
+        #     Classification uses image_roi — the merged bounding box is
+        #     sent as a crop region so the server crops before classifying
+        #     (pre-processing).
+        # 4b. 合并的人+卡车 ROI 的分类。
+        #     分类使用 image_roi——合并的检测框作为裁剪区域发送，
+        #     服务端在分类前裁剪（前处理）。
         cls_items = decision.classify_rois
         cls_rois: list[dict] = []
         cls_track_ids: list[int] = []
@@ -191,7 +264,8 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         if cls_rois:
             coros.append(self._do_classify(cls_rois, cls_track_ids))
 
-        # Gather OCR + classify concurrently
+        # Gather OCR + classify concurrently for real-time performance.
+        # 并发收集 OCR + 分类以保证实时性能。
         results = await asyncio.gather(*coros, return_exceptions=True)
         for r in results:
             if isinstance(r, dict):
@@ -202,7 +276,8 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             elif isinstance(r, BaseException):
                 logger.error("Truck processing sub-task error: {}", r)
 
-        # 5. Assemble messages
+        # 5. Assemble messages — particularly for vehicle departures.
+        # 5. 组装消息——特别是车辆离开事件。
         messages: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()
 
@@ -238,7 +313,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             messages=messages,
         )
 
-    # ── Sub-tasks ─────────────────────────────────────────────────────────
+    # ── Sub-tasks / 子任务 ────────────────────────────────────────────────
 
     async def _do_ocr(
         self,
@@ -246,7 +321,13 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         track_ids: list[int],
     ) -> dict:
         """Run batched OCR and feed results back to tracker.
-        运行批量 OCR 并将结果反馈给跟踪器。"""
+        运行批量 OCR 并将结果反馈给跟踪器。
+
+        The OCR ROI is the truck bounding box — the server crops the image
+        to this region before OCR (image_roi pre-processing).
+        OCR 的 ROI 是卡车检测框——服务端在 OCR 前裁剪图像到该区域
+        （image_roi 前处理）。
+        """
         raw = await self.vengine.ocr(
             shape=None,
             model_name=self.OCR_MODEL,
@@ -270,7 +351,14 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         track_ids: list[int],
     ) -> dict:
         """Run batched classification and feed results back to tracker.
-        运行批量分类并将结果反馈给跟踪器。"""
+        运行批量分类并将结果反馈给跟踪器。
+
+        Classification uses image_roi — the combined person + truck bounding
+        box is sent as a crop region, so the server crops the input image
+        before running the classifier (pre-processing).
+        分类使用 image_roi——合并的人+卡车检测框作为裁剪区域发送，
+        服务端在运行分类器前裁剪输入图像（前处理）。
+        """
         raw = await self.vengine.classify(
             shape=None,
             model_name=self.CLASSIFICATION_MODEL,
@@ -293,11 +381,13 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 })
         return {"classifications": classifications}
 
-    # ── Thumbnail ─────────────────────────────────────────────────────────
+    # ── Thumbnail / 缩略图 ───────────────────────────────────────────────
 
     def _encode_thumbnail(
         self, frame: np.ndarray | None, max_width: int = 320
     ) -> str | None:
+        """Encode a frame as a base64 JPEG thumbnail using TurboJPEG (RGB).
+        使用 TurboJPEG 将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
         if frame is None:
             return None
         h, w = frame.shape[:2]
@@ -317,7 +407,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         return base64.b64encode(encoded).decode()
 
 
-# ── CLI entry point ──────────────────────────────────────────────────────────
+# ── CLI entry point / 命令行入口 ─────────────────────────────────────────────
 
 
 def main() -> None:

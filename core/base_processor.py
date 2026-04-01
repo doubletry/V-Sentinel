@@ -9,6 +9,7 @@ into the full V-Sentinel backend without any changes.
 from __future__ import annotations
 
 import asyncio
+import fractions
 import queue
 import threading
 from abc import ABC, abstractmethod
@@ -477,7 +478,7 @@ class BaseVideoProcessor(ABC):
                     stream.width = w
                     stream.height = h
                     stream.pix_fmt = "yuv420p"
-                    stream.codec_context.time_base = "1/25"
+                    stream.time_base = fractions.Fraction(1, 25)
                     stream.options = {
                         "preset": "ultrafast",
                         "tune": "zerolatency",

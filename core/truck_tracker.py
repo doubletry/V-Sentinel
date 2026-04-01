@@ -1,21 +1,33 @@
-"""Cross-frame truck tracking, license-plate OCR, action classification
-stabilisation and vehicle visit logging.
+"""Cross-frame single-truck state machine for the truck-monitoring pipeline.
+单卡车跨帧状态机，用于卡车监控流水线。
 
-跨帧卡车跟踪、车牌 OCR、动作分类稳定化及车辆到访日志。
-
-Design
+Design / 设计
 ------
-* Each tracked truck is represented by a ``TrackedTruck`` dataclass.
-* ``TruckTracker`` is the main state-machine that should be called once per
-  frame with fresh detection results.  It is *pure logic* — no I/O, no gRPC.
-* The tracker takes care of:
-  - Matching new truck detections to existing tracks (IoU).
-  - Keeping the highest-confidence license-plate per truck.
-  - Merging person + truck bounding boxes into a combined ROI for action
-    classification.
-  - Temporal filtering (majority-vote) to stabilise flicker-prone
-    classifications.
-  - Recording a ``VehicleVisit`` log entry when a truck leaves the frame.
+In a given ROI area there is typically **at most one truck** at a time.
+Occasional passing trucks are filtered by requiring a minimum number of
+consecutive detection frames (``min_presence_frames``) before a truck is
+"confirmed" and enters the active state.
+在给定 ROI 区域内，通常**同一时间最多只有一辆卡车**。
+偶尔路过的卡车通过要求最少连续检测帧数（``min_presence_frames``）来过滤，
+达到阈值后卡车才被 "确认" 进入活跃状态。
+
+The tracker is pure logic — no I/O, no gRPC.
+跟踪器是纯逻辑——无 I/O，无 gRPC。
+
+Key responsibilities / 主要职责:
+* Match the single primary truck across frames (no complex IoU multi-tracker).
+  在帧间匹配单辆主卡车（无复杂 IoU 多目标跟踪器）。
+* Filter out transient / passing truck detections.
+  过滤掉瞬态/路过的卡车检测。
+* Keep the highest-confidence license plate per truck via OCR.
+  通过 OCR 保留每辆卡车最高置信度的车牌。
+* Merge person + truck bounding boxes into a combined ROI for action
+  classification.
+  将人和卡车的检测框合并为复合 ROI 用于动作分类。
+* Temporal majority-vote filtering to stabilise flicker-prone classifications.
+  时间多数投票滤波以稳定容易闪烁的分类结果。
+* Record a ``VehicleVisit`` log when the truck leaves.
+  卡车离开时记录 ``VehicleVisit`` 日志。
 """
 
 from __future__ import annotations
@@ -31,19 +43,22 @@ from typing import Any
 
 @dataclass
 class TrackedTruck:
-    """State for a single tracked truck across frames.
+    """State for the single tracked truck across frames.
     单辆被跟踪卡车在多帧间的状态。"""
 
     track_id: int
-    bbox: list[int]  # [x1, y1, x2, y2]
-    first_seen: float  # monotonic time
-    last_seen: float
-    frames_since_ocr: int = 0
-    best_plate: str = ""
-    best_plate_conf: float = 0.0
+    bbox: list[int]  # [x1, y1, x2, y2] — latest detection box / 最新检测框
+    first_seen: float  # monotonic time when first detected / 首次检测的单调时间
+    last_seen: float  # monotonic time of last detection / 最后检测的单调时间
+    presence_frames: int = 1  # consecutive frames detected / 连续检测帧数
+    confirmed: bool = False  # True once min_presence_frames reached / 达到最小帧数后为 True
+    frames_since_ocr: int = 0  # frames since last OCR attempt / 距上次 OCR 的帧数
+    best_plate: str = ""  # best license plate text so far / 目前最佳车牌文本
+    best_plate_conf: float = 0.0  # confidence of best plate / 最佳车牌置信度
     action_history: deque = field(default_factory=lambda: deque(maxlen=15))
     confirmed_actions: set[str] = field(default_factory=set)
-    stable_action: str = ""
+    stable_action: str = ""  # latest stabilised action label / 最新稳定化的动作标签
+    missing_frames: int = 0  # consecutive frames without detection / 连续未检测到的帧数
 
 
 @dataclass
@@ -75,14 +90,17 @@ class TrackingDecision:
     跟踪器的每帧输出，指示调用方下一步操作。"""
 
     ocr_truck_ids: list[int] = field(default_factory=list)
-    """Truck track_ids that need OCR this frame."""
+    """Truck track_ids that need OCR this frame.
+    本帧需要进行 OCR 的卡车 track_id 列表。"""
 
     classify_rois: list[dict] = field(default_factory=list)
     """Combined person+truck ROIs to send to the action classifier.
+    发送到动作分类器的人+卡车合并 ROI。
     Each dict: {track_id, roi: [x1, y1, x2, y2]}"""
 
     visits: list[VehicleVisit] = field(default_factory=list)
-    """Vehicles that left the scene this frame."""
+    """Vehicles that left the scene this frame.
+    本帧离开场景的车辆。"""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -142,7 +160,7 @@ def _box_in_roi(box: list[int], roi: list[list[int]]) -> bool:
     *roi* 是 ``[x, y]`` 对列表。简化处理，使用多边形的外接矩形近似。
     """
     if not roi:
-        return True  # no ROI means everything is in scope
+        return True  # no ROI means everything is in scope / 无 ROI 表示所有区域都在范围内
     cx = (box[0] + box[2]) // 2
     cy = (box[1] + box[3]) // 2
     xs = [p[0] for p in roi]
@@ -151,7 +169,8 @@ def _box_in_roi(box: list[int], roi: list[list[int]]) -> bool:
 
 
 def _det_to_bbox(det: dict) -> list[int]:
-    """Extract [x1, y1, x2, y2] from a detection dict."""
+    """Extract [x1, y1, x2, y2] from a detection dict.
+    从检测字典中提取 [x1, y1, x2, y2]。"""
     return [
         int(det["x_min"]),
         int(det["y_min"]),
@@ -171,20 +190,31 @@ REQUIRED_ACTIONS = frozenset(
 
 
 class TruckTracker:
-    """Frame-by-frame truck state machine.
-    逐帧卡车状态机。
+    """Single-truck-in-ROI state machine.
+    ROI 内单卡车状态机。
+
+    Designed for scenarios where at most one truck occupies the ROI at any
+    time.  Transient / passing trucks are filtered out by requiring
+    ``min_presence_frames`` consecutive detections before a truck becomes
+    "confirmed".  Brief detection gaps (≤ ``max_missing_frames``) are
+    tolerated to avoid premature departure events.
+    适用于同一时间 ROI 内最多一辆卡车的场景。通过要求
+    ``min_presence_frames`` 次连续检测来过滤瞬态/路过的卡车。
+    容忍短暂检测间隙（≤ ``max_missing_frames``）以避免过早触发离开事件。
 
     Parameters
     ----------
-    iou_threshold:
-        IoU threshold for matching a new detection to an existing track.
-        新检测与已有轨迹匹配的 IoU 阈值。
     ocr_interval:
-        Number of frames between OCR attempts on the same truck.
-        同一卡车两次 OCR 尝试之间的帧数间隔。
+        Number of frames between OCR attempts on the tracked truck.
+        同一卡车两次 OCR 之间的帧数间隔。
     max_missing_frames:
-        Number of consecutive missing frames before a truck is considered gone.
-        连续缺失帧数超过此值后认为卡车已离开。
+        Consecutive frames without detection before the truck is considered
+        to have left.
+        连续未检测到卡车的帧数上限，超过后认为卡车已离开。
+    min_presence_frames:
+        Minimum consecutive detection frames before a truck is "confirmed"
+        (not a passing truck).  Set to 1 to disable filtering.
+        卡车被 "确认" 前最少的连续检测帧数（非路过卡车）。设为 1 禁用过滤。
     stability_window:
         Size of the temporal sliding window for majority-vote filtering.
         多数投票滤波的时间滑动窗口大小。
@@ -195,31 +225,33 @@ class TruckTracker:
         The set of action labels that must all be observed during a visit.
         车辆到访期间需全部观测到的动作标签集合。
     roi:
-        Optional ROI polygon as list of ``[x, y]`` pairs.  Trucks whose centre
-        is outside the ROI are ignored.
+        Optional ROI polygon as list of ``[x, y]`` pairs.  Trucks whose
+        centre is outside the ROI are ignored.
         可选 ROI 多边形（``[x, y]`` 对列表）。中心不在 ROI 内的卡车被忽略。
     """
 
     def __init__(
         self,
         *,
-        iou_threshold: float = 0.3,
         ocr_interval: int = 10,
-        max_missing_frames: int = 15,
+        max_missing_frames: int = 5,
+        min_presence_frames: int = 3,
         stability_window: int = 7,
         stability_min_count: int = 3,
         required_actions: frozenset[str] | set[str] = REQUIRED_ACTIONS,
         roi: list[list[int]] | None = None,
     ) -> None:
-        self.iou_threshold = iou_threshold
         self.ocr_interval = ocr_interval
         self.max_missing_frames = max_missing_frames
+        self.min_presence_frames = min_presence_frames
         self.stability_window = stability_window
         self.stability_min_count = stability_min_count
         self.required_actions = frozenset(required_actions)
         self.roi = roi
 
-        self._tracks: dict[int, TrackedTruck] = {}
+        # At most one active truck at a time.
+        # 同一时间最多一辆活跃卡车。
+        self._track: TrackedTruck | None = None
         self._next_id: int = 0
         self._frame_idx: int = 0
         self._visits: list[VehicleVisit] = []
@@ -228,78 +260,115 @@ class TruckTracker:
 
     def update(self, analysis: FrameAnalysis) -> TrackingDecision:
         """Process one frame of detections and return tracking decisions.
-        处理一帧检测结果并返回跟踪决策。"""
+        处理一帧检测结果并返回跟踪决策。
+
+        The state transitions are:
+        状态转换如下：
+
+        1. Filter truck detections to those inside the ROI.
+           过滤卡车检测，仅保留 ROI 内的。
+        2. If a truck is currently tracked:
+           如果当前有被跟踪的卡车：
+           a. If the new detection matches, update the track.
+              如果新检测匹配，更新轨迹。
+           b. Otherwise increment ``missing_frames``; if it exceeds
+              ``max_missing_frames``, the truck has left.
+              否则增加 ``missing_frames``；超过 ``max_missing_frames`` 则认为离开。
+        3. If no truck is tracked, pick the best candidate and start counting
+           ``presence_frames`` towards ``min_presence_frames``.
+           如果没有被跟踪的卡车，选择最佳候选并开始累计 ``presence_frames``。
+        """
         self._frame_idx += 1
         now = time.monotonic()
+        decision = TrackingDecision()
 
-        # 1. Match truck detections to existing tracks
-        matched_ids: set[int] = set()
-        new_trucks: list[dict] = []
-
+        # 1. Filter truck detections to those inside the ROI.
+        # 1. 过滤 ROI 内的卡车检测。
+        roi_trucks: list[dict] = []
         for det in analysis.trucks:
             bbox = _det_to_bbox(det)
-            if not _box_in_roi(bbox, self.roi or []):
-                continue
-            best_id = self._match(bbox)
-            if best_id is not None:
-                track = self._tracks[best_id]
-                track.bbox = bbox
-                track.last_seen = now
-                track.frames_since_ocr += 1
-                matched_ids.add(best_id)
+            if _box_in_roi(bbox, self.roi or []):
+                roi_trucks.append(det)
+
+        # Pick the single best truck detection (highest confidence).
+        # 选择单个最佳卡车检测（最高置信度）。
+        best_det: dict | None = None
+        if roi_trucks:
+            best_det = max(roi_trucks, key=lambda d: d.get("confidence", 0))
+
+        # 2. Update existing track or handle departure.
+        # 2. 更新已有轨迹或处理离开事件。
+        if self._track is not None:
+            if best_det is not None:
+                # Truck still present — update bbox and reset missing counter.
+                # 卡车仍在——更新检测框并重置缺失计数。
+                self._track.bbox = _det_to_bbox(best_det)
+                self._track.last_seen = now
+                self._track.missing_frames = 0
+                self._track.frames_since_ocr += 1
+
+                if not self._track.confirmed:
+                    self._track.presence_frames += 1
+                    if self._track.presence_frames >= self.min_presence_frames:
+                        self._track.confirmed = True
             else:
-                new_trucks.append(det)
+                # No truck detected this frame.
+                # 本帧未检测到卡车。
+                self._track.missing_frames += 1
+                if self._track.missing_frames > self.max_missing_frames:
+                    # Truck has left — log visit only if it was confirmed.
+                    # 卡车已离开——仅当已确认时记录到访日志。
+                    if self._track.confirmed:
+                        visit = VehicleVisit(
+                            track_id=self._track.track_id,
+                            enter_time=self._track.first_seen,
+                            exit_time=self._track.last_seen,
+                            plate=self._track.best_plate,
+                            confirmed_actions=set(self._track.confirmed_actions),
+                            missing_actions=(
+                                self.required_actions - self._track.confirmed_actions
+                            ),
+                        )
+                        decision.visits.append(visit)
+                        self._visits.append(visit)
+                    self._track = None
+        else:
+            # 3. No truck tracked — start a new candidate if detected.
+            # 3. 当前无跟踪卡车——如检测到则启动新候选。
+            if best_det is not None:
+                tid = self._next_id
+                self._next_id += 1
+                self._track = TrackedTruck(
+                    track_id=tid,
+                    bbox=_det_to_bbox(best_det),
+                    first_seen=now,
+                    last_seen=now,
+                    presence_frames=1,
+                    confirmed=(self.min_presence_frames <= 1),
+                )
 
-        # Create new tracks for unmatched truck detections
-        for det in new_trucks:
-            bbox = _det_to_bbox(det)
-            tid = self._next_id
-            self._next_id += 1
-            self._tracks[tid] = TrackedTruck(
-                track_id=tid,
-                bbox=bbox,
-                first_seen=now,
-                last_seen=now,
-            )
-            matched_ids.add(tid)
+        # 4. Build decisions for the confirmed active truck.
+        # 4. 为已确认的活跃卡车构建决策。
+        if self._track is not None and self._track.confirmed:
+            tid = self._track.track_id
 
-        # 2. Remove stale tracks (trucks that left)
-        decision = TrackingDecision()
-        stale_ids = [
-            tid
-            for tid, t in self._tracks.items()
-            if tid not in matched_ids
-        ]
-        for tid in stale_ids:
-            track = self._tracks.pop(tid)
-            # Increment missing counter; only log visit if truck was seen for > 1 frame
-            visit = VehicleVisit(
-                track_id=track.track_id,
-                enter_time=track.first_seen,
-                exit_time=track.last_seen,
-                plate=track.best_plate,
-                confirmed_actions=set(track.confirmed_actions),
-                missing_actions=self.required_actions - track.confirmed_actions,
-            )
-            decision.visits.append(visit)
-            self._visits.append(visit)
-
-        # 3. Determine which trucks need OCR
-        for tid in matched_ids:
-            track = self._tracks[tid]
-            if track.frames_since_ocr >= self.ocr_interval or track.best_plate == "":
+            # OCR needed?  Yes when: no plate yet, or interval reached.
+            # 是否需要 OCR？在以下情况：尚无车牌，或达到间隔。
+            if (
+                self._track.best_plate == ""
+                or self._track.frames_since_ocr >= self.ocr_interval
+            ):
                 decision.ocr_truck_ids.append(tid)
 
-        # 4. Build combined person+truck ROIs for classification
-        for tid in matched_ids:
-            track = self._tracks[tid]
+            # Classification: merge with overlapping persons.
+            # 分类：与重叠的行人合并。
             nearby_persons = [
                 _det_to_bbox(p)
                 for p in analysis.persons
-                if _boxes_overlap(track.bbox, _det_to_bbox(p))
+                if _boxes_overlap(self._track.bbox, _det_to_bbox(p))
             ]
             if nearby_persons:
-                combined = _merge_boxes([track.bbox] + nearby_persons)
+                combined = _merge_boxes([self._track.bbox] + nearby_persons)
                 decision.classify_rois.append(
                     {"track_id": tid, "roi": combined}
                 )
@@ -307,60 +376,61 @@ class TruckTracker:
         return decision
 
     def feed_ocr(self, track_id: int, text: str, confidence: float) -> None:
-        """Feed an OCR result for a specific truck track.
-        为特定卡车轨迹提供 OCR 结果。"""
-        track = self._tracks.get(track_id)
-        if track is None:
+        """Feed an OCR result for the tracked truck.
+        为被跟踪的卡车提供 OCR 结果。
+
+        Only updates if *confidence* exceeds the current best.
+        仅当 *confidence* 超过当前最佳值时更新。
+        """
+        if self._track is None or self._track.track_id != track_id:
             return
-        track.frames_since_ocr = 0
-        if confidence > track.best_plate_conf:
-            track.best_plate = text
-            track.best_plate_conf = confidence
+        self._track.frames_since_ocr = 0
+        if confidence > self._track.best_plate_conf:
+            self._track.best_plate = text
+            self._track.best_plate_conf = confidence
 
     def feed_action(self, track_id: int, label: str) -> str:
         """Feed a classification result and return the stabilised label.
         提供分类结果并返回稳定化后的标签。
 
+        The label is added to a sliding window and the majority-vote
+        winner is returned.  Only non-"other" stable labels are added
+        to ``confirmed_actions``.
+        标签被添加到滑动窗口中，返回多数投票的获胜者。仅非 "other" 的
+        稳定标签会被添加到 ``confirmed_actions``。
+
         Returns the majority-voted stable label (may be ``""`` if not yet
         stable).
         返回多数投票后的稳定标签（若尚未稳定可能返回 ``""``）。
         """
-        track = self._tracks.get(track_id)
-        if track is None:
+        if self._track is None or self._track.track_id != track_id:
             return ""
-        track.action_history.append(label)
+        self._track.action_history.append(label)
         stable = _majority_vote(
-            track.action_history,
+            self._track.action_history,
             min_count=self.stability_min_count,
         )
         if stable and stable != "other":
-            track.confirmed_actions.add(stable)
-        track.stable_action = stable
+            self._track.confirmed_actions.add(stable)
+        self._track.stable_action = stable
         return stable
 
     def get_track(self, track_id: int) -> TrackedTruck | None:
-        """Get the current state of a tracked truck."""
-        return self._tracks.get(track_id)
+        """Get the current active truck state (or ``None``).
+        获取当前活跃卡车状态（如无则返回 ``None``）。"""
+        if self._track is not None and self._track.track_id == track_id:
+            return self._track
+        return None
 
     def get_all_tracks(self) -> dict[int, TrackedTruck]:
-        """Return all active tracks."""
-        return dict(self._tracks)
+        """Return all active tracks (0 or 1 entries).
+        返回所有活跃轨迹（0 或 1 条）。"""
+        if self._track is not None:
+            return {self._track.track_id: self._track}
+        return {}
 
     @property
     def visits(self) -> list[VehicleVisit]:
-        """All recorded vehicle visits (including current session)."""
+        """All recorded vehicle visits (including current session).
+        所有记录的车辆到访（包括当前会话）。"""
         return list(self._visits)
-
-    # ── Internal ──────────────────────────────────────────────────────────
-
-    def _match(self, bbox: list[int]) -> int | None:
-        """Find the existing track with the highest IoU to *bbox*.
-        找到与 *bbox* IoU 最高的已有轨迹。"""
-        best_id: int | None = None
-        best_iou = self.iou_threshold
-        for tid, track in self._tracks.items():
-            score = _iou(bbox, track.bbox)
-            if score > best_iou:
-                best_iou = score
-                best_id = tid
-        return best_id

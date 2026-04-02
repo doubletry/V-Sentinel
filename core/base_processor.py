@@ -778,7 +778,6 @@ class BaseVideoProcessor(ABC):
                     break
                 latest_frame, latest_path = self._prepare_output_item(item)
                 if latest_frame is None:
-                    latest_path = None
                     continue
                 self._push_frame(latest_frame.copy(), latest_path)
                 next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
@@ -805,7 +804,6 @@ class BaseVideoProcessor(ABC):
                 break
             latest_frame, latest_path = self._prepare_output_item(item)
             if latest_frame is None:
-                latest_path = None
                 continue
             self._push_frame(latest_frame.copy(), latest_path)
             next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
@@ -837,7 +835,7 @@ class BaseVideoProcessor(ABC):
         display_frame = self._ensure_even_dims(display_frame)
         if display_frame.shape[0] == 0 or display_frame.shape[1] == 0:
             return None
-        return display_frame.copy()
+        return display_frame
 
     @staticmethod
     def _ensure_even_dims(frame: np.ndarray) -> np.ndarray:

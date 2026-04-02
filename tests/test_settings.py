@@ -20,6 +20,8 @@ class TestSettingsDB:
         assert all_settings["vengine_host"] == "localhost"
         assert all_settings["detection_port"] == "50051"
         assert all_settings["ocr_port"] == "50054"
+        assert all_settings["email_from_address"] == ""
+        assert all_settings["email_to_addresses"] == ""
 
     async def test_get_setting(self, init_db):
         val = await get_setting("vengine_host")
@@ -66,6 +68,10 @@ class TestSettingsAPI:
                 "site_title": "My Sentinel",
                 "processor_plugin": "example",
                 "roi_tag_options": "[\"person\",\"vehicle\"]",
+                "email_from_address": "sender@example.com",
+                "email_from_auth_code": "secret",
+                "email_to_addresses": "to1@example.com,to2@example.com",
+                "email_cc_addresses": "cc@example.com",
             },
         )
         assert resp.status_code == 200
@@ -75,6 +81,10 @@ class TestSettingsAPI:
         assert data["site_title"] == "My Sentinel"
         assert data["processor_plugin"] == "example"
         assert data["roi_tag_options"] == "[\"person\",\"vehicle\"]"
+        assert data["email_from_address"] == "sender@example.com"
+        assert data["email_from_auth_code"] == "secret"
+        assert data["email_to_addresses"] == "to1@example.com,to2@example.com"
+        assert data["email_cc_addresses"] == "cc@example.com"
 
     async def test_update_empty(self, async_client: AsyncClient):
         """Empty update should return current settings."""

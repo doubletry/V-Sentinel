@@ -72,6 +72,11 @@ class TestBaseVideoProcessor:
         proc.rtsp_url = "rtsp://host:8554/stream/"
         assert proc._stream_key() == "stream"
 
+    def test_stream_path_preserves_nested_route(self):
+        proc = self._make_processor()
+        proc.rtsp_url = "rtsp://host:8554/zone/stream/"
+        assert proc._stream_path() == "zone/stream"
+
     async def test_do_detect_maps_and_filters_results(self):
         proc = self._make_processor()
         proc.vengine.detect = AsyncMock(
@@ -320,3 +325,25 @@ class TestBackendBaseProcessorPipeline:
         assert sent.source_id == "s1"
         assert queued
         assert queued[0][2] == "cam1_processed"
+
+    async def test_handle_result_preserves_nested_processed_route(self):
+        proc = DummyProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/zone/cam1",
+            rois=[],
+            vengine_client=MagicMock(),
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+        queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
+        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        frame = np.zeros((32, 32, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[{"x_min": 1, "y_min": 2, "x_max": 3, "y_max": 4, "label": "person"}],
+        )
+
+        await proc._handle_result(frame, result)
+
+        assert queued
+        assert queued[0][2] == "zone/cam1_processed"

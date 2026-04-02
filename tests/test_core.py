@@ -57,6 +57,11 @@ class TestCoreBaseVideoProcessor:
         proc = self._make()
         assert proc._stream_key() == "cam1"
 
+    def test_stream_path_preserves_nested_route(self):
+        proc = self._make()
+        proc.rtsp_url = "rtsp://localhost:8554/zone/a01"
+        assert proc._stream_path() == "zone/a01"
+
     def test_normalize_rois(self):
         proc = self._make()
         result = proc._normalize_rois_to_pixels(1920, 1080)

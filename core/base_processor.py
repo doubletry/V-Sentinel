@@ -16,6 +16,7 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import cv2
 import numpy as np
@@ -652,7 +653,7 @@ class BaseVideoProcessor(ABC):
     async def _handle_result(self, frame: np.ndarray, result: AnalysisResult) -> None:
         """Default per-result handling: enqueue for drawing/pushing if needed."""
         if self._should_display_result(result):
-            output_path = f"{self._stream_key()}_processed"
+            output_path = f"{self._stream_path()}_processed"
             self._enqueue_display(frame, result, output_path)
 
     def _should_display_result(self, result: AnalysisResult) -> bool:
@@ -832,8 +833,23 @@ class BaseVideoProcessor(ABC):
 
     # ── Utility ───────────────────────────────────────────────────────────
 
+    def _stream_path(self) -> str:
+        """Return the full MediaMTX route path for the input RTSP URL.
+        返回输入 RTSP URL 对应的完整 MediaMTX 路由路径。"""
+        raw = self.rtsp_url.rstrip("/")
+        try:
+            parsed = urlparse(raw)
+            path = parsed.path.strip("/")
+            if path:
+                return path
+        except Exception:
+            pass
+        return raw.rsplit("/", 1)[-1]
+
     def _stream_key(self) -> str:
-        return self.rtsp_url.rstrip("/").rsplit("/", 1)[-1]
+        """Return the last path segment of the input RTSP URL.
+        返回输入 RTSP URL 的最后一个路径段。"""
+        return self._stream_path().rsplit("/", 1)[-1]
 
     def _normalize_rois_to_pixels(
         self, width: int, height: int

@@ -13,6 +13,10 @@ const DEFAULT_UI_SETTINGS = {
   roi_tag_options: '["person","vehicle","intrusion"]',
   mediamtx_rtsp_addr: 'rtsp://localhost:8554',
   mediamtx_webrtc_addr: config.mediamtxWebrtcUrl || 'http://localhost:8889',
+  email_from_address: '',
+  email_from_auth_code: '',
+  email_to_addresses: '',
+  email_cc_addresses: '',
 }
 
 function parseRoiTagOptions(raw) {

@@ -121,6 +121,10 @@ class AppSettingsUpdate(BaseModel):
 
     mediamtx_rtsp_addr: str | None = None
     mediamtx_webrtc_addr: str | None = None
+    email_from_address: str | None = None
+    email_from_auth_code: str | None = None
+    email_to_addresses: str | None = None
+    email_cc_addresses: str | None = None
     max_pull_workers: str | None = None
     max_push_workers: str | None = None
     max_cpu_workers: str | None = None

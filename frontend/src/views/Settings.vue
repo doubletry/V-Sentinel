@@ -187,6 +187,43 @@
         </section>
 
         <section class="settings-section">
+          <h2>{{ t('settings.emailSummary') }}</h2>
+          <el-form-item :label="t('settings.emailFromAddress')">
+            <el-input
+              v-model="form.email_from_address"
+              placeholder="sender@example.com"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.emailFromAuthCode')">
+            <el-input
+              v-model="form.email_from_auth_code"
+              type="password"
+              show-password
+              placeholder="授权码 / 密码"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.emailToAddresses')">
+            <div class="field-stack">
+              <el-input
+                v-model="form.email_to_addresses"
+                type="textarea"
+                :rows="2"
+                placeholder="a@example.com,b@example.com"
+              />
+              <p class="form-hint">{{ t('settings.emailAddressesHint') }}</p>
+            </div>
+          </el-form-item>
+          <el-form-item :label="t('settings.emailCcAddresses')">
+            <el-input
+              v-model="form.email_cc_addresses"
+              type="textarea"
+              :rows="2"
+              placeholder="cc1@example.com,cc2@example.com"
+            />
+          </el-form-item>
+        </section>
+
+        <section class="settings-section">
           <h2>{{ t('settings.threadPools') }}</h2>
           <el-form-item :label="t('settings.maxPullWorkers')">
             <el-input v-model="form.max_pull_workers" placeholder="20" />
@@ -252,6 +289,10 @@ const form = ref({
   upload_enabled: 'true',
   mediamtx_rtsp_addr: '',
   mediamtx_webrtc_addr: '',
+  email_from_address: '',
+  email_from_auth_code: '',
+  email_to_addresses: '',
+  email_cc_addresses: '',
   max_pull_workers: '',
   max_push_workers: '',
   max_cpu_workers: '',

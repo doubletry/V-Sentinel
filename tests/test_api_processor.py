@@ -72,14 +72,14 @@ class TestProcessorLogs:
             assert "module" in first
             assert "message" in first
 
-    async def test_processing_logs_capture_uvicorn_access_and_core_modules(
+    async def test_processing_logs_exclude_http_access_logs(
         self, async_client: AsyncClient
     ):
         from backend.main import _should_capture_runtime_log
 
         processing_log_buffer.clear()
         assert _should_capture_runtime_log("core.truck.processor") is True
-        assert _should_capture_runtime_log("uvicorn.access") is True
+        assert _should_capture_runtime_log("uvicorn.access") is False
         assert _should_capture_runtime_log("random.module") is False
 
         uvicorn_logger = logging.getLogger("uvicorn.access")
@@ -90,5 +90,5 @@ class TestProcessorLogs:
         resp = await async_client.get("/api/processor/logs", params={"page": 1, "page_size": 20})
         assert resp.status_code == 200
         items = resp.json()["items"]
-        assert any(item["module"] == "uvicorn.access" for item in items)
+        assert not any(item["module"] == "uvicorn.access" for item in items)
         uvicorn_logger.setLevel(original_level)

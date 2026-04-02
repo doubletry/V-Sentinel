@@ -305,14 +305,32 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
                 confirmed_str = "、".join(confirmed) if confirmed else "无"
                 missing_str = "、".join(missing) if missing else "无"
                 status = "✅ 合规" if not missing else "⚠️ 缺少动作"
+                enter_str = cls._format_visit_time(
+                    visit.get("enter_time", ""), tzinfo=tzinfo
+                )
+                exit_str = cls._format_visit_time(
+                    visit.get("exit_time", ""), tzinfo=tzinfo
+                )
                 parts.append(
                     (
-                        f"  {index}. 车牌: {plate} | 已确认动作: {confirmed_str} | "
+                        f"  {index}. 车牌: {plate} | 到达时间: {enter_str} | "
+                        f"离开时间: {exit_str} | 已确认动作: {confirmed_str} | "
                         f"缺少动作: {missing_str} | {status}"
                     )
                 )
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _format_visit_time(value: str, *, tzinfo: ZoneInfo) -> str:
+        """Format a visit timestamp in the configured timezone.
+        按配置时区格式化到访时间。"""
+        try:
+            return datetime.fromisoformat(value).astimezone(tzinfo).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+        except Exception:
+            return value or "未知"
 
     @staticmethod
     def _normalize_timezone_name(value: Any) -> str:

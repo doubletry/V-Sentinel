@@ -125,6 +125,8 @@ class TestMessagesAPI:
         data = resp.json()
         assert data["visits"][0]["plate"] == "ABC123"
         assert "ABC123" in data["summary_text"]
+        assert "到达时间" in data["summary_text"]
+        assert "离开时间" in data["summary_text"]
 
     async def test_send_summary_now_endpoint(self, async_client: AsyncClient):
         from backend.main import app
@@ -151,4 +153,6 @@ class TestMessagesAPI:
         data = resp.json()
         assert data["status"] == "SUCCESS"
         assert "XYZ888" in data["summary_text"]
+        assert "到达时间" in data["summary_text"]
+        assert "离开时间" in data["summary_text"]
         app.state.email_client.send_daily_summary_email.assert_awaited_once()

@@ -6,6 +6,19 @@
         <p>{{ t('processingLogs.subtitle') }}</p>
       </div>
       <div class="header-right">
+        <el-select
+          v-model="logPageSize"
+          size="small"
+          style="width: 132px"
+          @change="handlePageSizeChange"
+        >
+          <el-option
+            v-for="size in logPageSizeOptions"
+            :key="size"
+            :label="t('processingLogs.pageSizeOption', { size })"
+            :value="size"
+          />
+        </el-select>
         <el-button size="small" @click="loadLogs(logPage)">
           {{ t('processingLogs.refresh') }}
         </el-button>
@@ -45,11 +58,13 @@
     <div class="logs-pagination">
       <el-pagination
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
         :total="logTotal"
+        :page-sizes="logPageSizeOptions"
         :page-size="logPageSize"
         :current-page="logPage"
         @current-change="loadLogs"
+        @size-change="handlePageSizeChange"
       />
     </div>
   </div>
@@ -69,7 +84,8 @@ const logsLoading = ref(false)
 const logItems = ref([])
 const logTotal = ref(0)
 const logPage = ref(1)
-const logPageSize = ref(12)
+const logPageSize = ref(20)
+const logPageSizeOptions = [20, 40, 60, 80, 100]
 const logErrorNotified = ref(false)
 let logTimer = null
 
@@ -89,6 +105,11 @@ async function loadLogs(page = 1) {
   } finally {
     logsLoading.value = false
   }
+}
+
+async function handlePageSizeChange(size) {
+  logPageSize.value = Number(size)
+  await loadLogs(1)
 }
 
 onMounted(() => {

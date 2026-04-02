@@ -16,17 +16,20 @@
     </div>
 
     <div class="summary-card">
-        <div class="summary-range">
-          {{ t('vehicleEvents.range') }}:
+      <div class="summary-range">
+        {{ t('vehicleEvents.range') }}:
         {{ formatDateTimeWithTimezone(eventSince, appSettingsStore.timeZone) }}
         ~
         {{ formatDateTimeWithTimezone(eventUntil, appSettingsStore.timeZone) }}
       </div>
-      <div class="summary-text">{{ summaryText }}</div>
+      <div class="summary-meta">
+        <span>{{ t('vehicleEvents.total', { count: vehicleEvents.length }) }}</span>
+        <span>{{ t('vehicleEvents.pageSize') }}</span>
+      </div>
     </div>
 
     <div class="table-wrap">
-      <el-table :data="vehicleEvents" stripe height="100%" v-loading="loading" class="events-table">
+      <el-table :data="pagedVehicleEvents" stripe height="100%" v-loading="loading" class="events-table">
         <el-table-column prop="source_name" :label="t('vehicleEvents.source')" min-width="120" />
         <el-table-column prop="plate" :label="t('vehicleEvents.plate')" min-width="120" />
         <el-table-column :label="t('vehicleEvents.enterTime')" min-width="170">
@@ -39,18 +42,40 @@
             {{ formatDateTimeWithTimezone(row.exit_time, appSettingsStore.timeZone) }}
           </template>
         </el-table-column>
+        <el-table-column :label="t('vehicleEvents.confirmedActions')" min-width="220">
+          <template #default="{ row }">
+            {{ (row.confirmed_actions || []).join('、') || t('vehicleEvents.none') }}
+          </template>
+        </el-table-column>
         <el-table-column :label="t('vehicleEvents.missingActions')" min-width="220">
           <template #default="{ row }">
             {{ (row.missing_actions || []).join('、') || t('vehicleEvents.none') }}
           </template>
         </el-table-column>
+        <el-table-column :label="t('vehicleEvents.status')" min-width="120">
+          <template #default="{ row }">
+            {{ (row.missing_actions || []).length ? t('vehicleEvents.statusMissing') : t('vehicleEvents.statusComplete') }}
+          </template>
+        </el-table-column>
       </el-table>
+    </div>
+    <div class="events-pagination">
+      <el-pagination
+        background
+        layout="sizes, prev, pager, next, total"
+        :total="vehicleEvents.length"
+        :page-sizes="pageSizeOptions"
+        :page-size="pageSize"
+        :current-page="currentPage"
+        @current-change="handlePageChange"
+        @size-change="handlePageSizeChange"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { vehicleEventsApi } from '../api/index.js'
@@ -62,18 +87,26 @@ const appSettingsStore = useAppSettingsStore()
 const loading = ref(false)
 const sendingSummary = ref(false)
 const vehicleEvents = ref([])
-const summaryText = ref('')
 const eventSince = ref('')
 const eventUntil = ref('')
+const currentPage = ref(1)
+const pageSize = ref(20)
+const pageSizeOptions = [20, 40, 60, 80, 100]
+
+const pagedVehicleEvents = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return vehicleEvents.value.slice(start, end)
+})
 
 async function loadEvents() {
   loading.value = true
   try {
     const result = await vehicleEventsApi.today()
     vehicleEvents.value = Array.isArray(result.visits) ? result.visits : []
-    summaryText.value = result.summary_text || ''
     eventSince.value = result.since || ''
     eventUntil.value = result.until || ''
+    currentPage.value = 1
   } catch (err) {
     ElMessage.error(t('vehicleEvents.loadFailed', { message: err.message }))
   } finally {
@@ -85,7 +118,6 @@ async function sendSummaryNow() {
   sendingSummary.value = true
   try {
     const result = await vehicleEventsApi.sendSummaryNow()
-    summaryText.value = result.summary_text || ''
     eventSince.value = result.since || ''
     eventUntil.value = result.until || ''
     ElMessage.success(
@@ -96,6 +128,15 @@ async function sendSummaryNow() {
   } finally {
     sendingSummary.value = false
   }
+}
+
+function handlePageChange(page) {
+  currentPage.value = page
+}
+
+function handlePageSizeChange(size) {
+  pageSize.value = Number(size)
+  currentPage.value = 1
 }
 
 onMounted(() => {
@@ -154,10 +195,12 @@ onMounted(() => {
   color: #b9cdf0;
 }
 
-.summary-text {
-  line-height: 1.7;
-  white-space: pre-wrap;
+.summary-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
   color: #f5f8ff;
+  font-size: 13px;
 }
 
 .table-wrap {
@@ -168,6 +211,15 @@ onMounted(() => {
 
 .events-table {
   width: 100%;
+}
+
+.events-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 12px;
+  border-top: 1px solid #26314d;
+  background: #131a2e;
+  flex-shrink: 0;
 }
 
 @media (max-width: 900px) {

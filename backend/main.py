@@ -31,7 +31,7 @@ logger.add(sys.stderr, level="INFO", colorize=True)
 def _should_capture_runtime_log(module_name: str) -> bool:
     """Return whether a runtime log should be shown in the log page.
     返回该运行时日志是否应显示在日志页。"""
-    return module_name.startswith(("backend.", "core.", "uvicorn"))
+    return module_name.startswith(("backend.", "core."))
 
 
 def _processing_log_sink(message) -> None:

@@ -25,7 +25,10 @@ export default {
   },
   sourceList: {
     title: 'Video Sources',
+    resultStreams: 'Result Streams',
+    resultSuffix: 'Result',
     noSources: 'No sources yet',
+    noResultStreams: 'Start analysis to see result streams',
     addSource: 'Add Video Source',
     editSource: 'Edit Video Source',
     name: 'Name',

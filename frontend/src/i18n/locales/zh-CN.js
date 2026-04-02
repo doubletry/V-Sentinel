@@ -25,7 +25,10 @@ export default {
   },
   sourceList: {
     title: '视频源',
+    resultStreams: '结果画面',
+    resultSuffix: '结果',
     noSources: '暂无视频源',
+    noResultStreams: '启动分析后自动显示结果画面',
     addSource: '添加视频源',
     editSource: '编辑视频源',
     name: '名称',

@@ -18,8 +18,8 @@ from core.base_processor import (
 from core.constants import FRAME_SAMPLE_INTERVAL, PUSH_FPS
 
 TEST_WAIT_FRAME_COUNT = 3
-TEST_DEFAULT_PUBLISH_FPS = max(PUSH_FPS, 1) / max(FRAME_SAMPLE_INTERVAL, 1)
-TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_DEFAULT_PUBLISH_FPS
+TEST_SAMPLED_PUBLISH_FPS = max(PUSH_FPS, 1) / max(FRAME_SAMPLE_INTERVAL, 1)
+TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_SAMPLED_PUBLISH_FPS
 # Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
 # 为线程调度和 CI 抖动预留适度容差。
 TIMING_TOLERANCE_FACTOR = 1.8
@@ -569,8 +569,8 @@ class TestCoreBaseVideoProcessorPipeline:
             later - earlier for earlier, later in zip(push_times, push_times[1:])
         ]
         assert intervals
-        assert min(intervals) >= (1 / TEST_DEFAULT_PUBLISH_FPS) / TIMING_TOLERANCE_FACTOR
-        assert max(intervals) <= (1 / TEST_DEFAULT_PUBLISH_FPS) * TIMING_TOLERANCE_FACTOR
+        assert min(intervals) >= (1 / TEST_SAMPLED_PUBLISH_FPS) / TIMING_TOLERANCE_FACTOR
+        assert max(intervals) <= (1 / TEST_SAMPLED_PUBLISH_FPS) * TIMING_TOLERANCE_FACTOR
 
     def test_update_publish_fps_tracks_sampled_input_rate(self):
         proc = DummyCoreProcessor(

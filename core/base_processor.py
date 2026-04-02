@@ -342,6 +342,11 @@ class BaseVideoProcessor(ABC):
         """Best-effort FPS extraction from a PyAV video stream.
         尽力从 PyAV 视频流中提取 FPS。"""
         codec_context = getattr(video_stream, "codec_context", None)
+        # In low-delay mode PyAV can leave average_rate empty and expose an
+        # inflated guessed/base rate, while codec_context.framerate keeps the
+        # encoder-declared cadence (for example 25 instead of a guessed 50).
+        # 在低延迟模式下 average_rate 可能为空，而 guessed/base rate 可能偏大；
+        # codec_context.framerate 通常更接近编码器声明的真实帧率。
         for rate in (
             getattr(video_stream, "average_rate", None),
             getattr(codec_context, "framerate", None) if codec_context else None,
@@ -769,9 +774,12 @@ class BaseVideoProcessor(ABC):
         else:
             publish_fps = self._sampled_publish_fps(source_fps, FRAME_SAMPLE_INTERVAL)
         self._publish_fps = publish_fps
+        source_fps_display = (
+            f"{source_fps:.3f}" if source_fps is not None else "unknown"
+        )
         logger.info(
-            "Using source FPS {:.3f} and publish FPS {:.3f} for {}",
-            source_fps if source_fps is not None else -1.0,
+            "Using source FPS {} and publish FPS {:.3f} for {}",
+            source_fps_display,
             publish_fps,
             self.source_id,
         )
@@ -860,6 +868,9 @@ class BaseVideoProcessor(ABC):
         with self._push_lock:
             try:
                 target_fps = self._current_publish_fps()
+                # Keep keyframes about twice per second so new RTSP readers can
+                # lock onto the stream faster under low-latency UDP delivery.
+                # 约每 0.5 秒一个关键帧，帮助低延迟 UDP 读者更快起播。
                 gop = max(1, int(round(target_fps / 2)))
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。

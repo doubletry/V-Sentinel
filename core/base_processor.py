@@ -341,9 +341,10 @@ class BaseVideoProcessor(ABC):
     def _stream_fps(video_stream: av.video.stream.VideoStream) -> float | None:
         """Best-effort FPS extraction from a PyAV video stream.
         尽力从 PyAV 视频流中提取 FPS。"""
+        codec_context = getattr(video_stream, "codec_context", None)
         for rate in (
             getattr(video_stream, "average_rate", None),
-            getattr(getattr(video_stream, "codec_context", None), "framerate", None),
+            getattr(codec_context, "framerate", None) if codec_context else None,
             getattr(video_stream, "base_rate", None),
             getattr(video_stream, "guessed_rate", None),
         ):
@@ -748,9 +749,16 @@ class BaseVideoProcessor(ABC):
         # Non-positive PUSH_FPS values are treated as invalid and fall back to
         # a safe single-frame cadence until real source FPS is known.
         # 非正数 PUSH_FPS 视为无效，在拿到真实源流 FPS 前回退到安全单帧节奏。
+        valid_sample_interval = max(FRAME_SAMPLE_INTERVAL, 1)
         if PUSH_FPS > 0:
-            return max(PUSH_FPS / max(FRAME_SAMPLE_INTERVAL, 1), 1.0)
+            return max(PUSH_FPS / valid_sample_interval, 1.0)
         return float(FALLBACK_PUBLISH_FPS)
+
+    @staticmethod
+    def _sampled_publish_fps(source_fps: float, sample_interval: int) -> float:
+        """Convert input FPS to effective sampled publish FPS.
+        将输入 FPS 转成采样后的有效推流 FPS。"""
+        return max(source_fps / max(sample_interval, 1), 1.0)
 
     def _update_publish_fps(self, source_fps: float | None) -> None:
         """Refresh effective publish FPS from source FPS and sample interval.
@@ -759,7 +767,7 @@ class BaseVideoProcessor(ABC):
         if source_fps is None or not math.isfinite(source_fps) or source_fps <= 0:
             publish_fps = self._default_publish_fps()
         else:
-            publish_fps = max(source_fps / max(FRAME_SAMPLE_INTERVAL, 1), 1.0)
+            publish_fps = self._sampled_publish_fps(source_fps, FRAME_SAMPLE_INTERVAL)
         self._publish_fps = publish_fps
         logger.info(
             "Using source FPS {:.3f} and publish FPS {:.3f} for {}",

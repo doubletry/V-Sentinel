@@ -18,7 +18,7 @@ from core.base_processor import (
 from core.constants import FRAME_SAMPLE_INTERVAL, PUSH_FPS
 
 TEST_WAIT_FRAME_COUNT = 3
-TEST_DEFAULT_PUBLISH_FPS = max(max(PUSH_FPS, 1) / FRAME_SAMPLE_INTERVAL, 1)
+TEST_DEFAULT_PUBLISH_FPS = max(PUSH_FPS, 1) / max(FRAME_SAMPLE_INTERVAL, 1)
 TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_DEFAULT_PUBLISH_FPS
 # Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
 # 为线程调度和 CI 抖动预留适度容差。
@@ -501,7 +501,18 @@ class TestCoreBaseVideoProcessorPipeline:
             async def process_frame(self, frame, encoded, shape, roi_pixel_points):
                 self.started.set()
                 await self.release.wait()
-                return AnalysisResult()
+                return AnalysisResult(
+                    detections=[
+                        {
+                            "x_min": 5,
+                            "y_min": 6,
+                            "x_max": 20,
+                            "y_max": 30,
+                            "confidence": 0.8,
+                            "label": "person",
+                        }
+                    ]
+                )
 
         proc = WarmupProcessor()
         pushed: list[tuple[np.ndarray, str]] = []
@@ -522,7 +533,7 @@ class TestCoreBaseVideoProcessorPipeline:
         assert len(pushed) >= 1
         pushed_frame, path = pushed[0]
         assert path == "cam1_processed"
-        assert pushed_frame.sum() == 0
+        assert pushed_frame.sum() > 0
         proc._stop_display_worker()
         proc._stop_publish_worker()
 

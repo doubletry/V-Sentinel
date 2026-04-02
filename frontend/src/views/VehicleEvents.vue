@@ -24,7 +24,7 @@
       </div>
       <div class="summary-meta">
         <span>{{ t('vehicleEvents.total', { count: vehicleEvents.length }) }}</span>
-        <span>{{ t('vehicleEvents.pageSize') }}</span>
+        <span>{{ t('vehicleEvents.rangeDisplay', { start: pageStart, end: pageEnd }) }}</span>
       </div>
     </div>
 
@@ -79,6 +79,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { vehicleEventsApi } from '../api/index.js'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../constants/pagination.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { formatDateTimeWithTimezone } from '../utils/time.js'
 
@@ -90,13 +91,23 @@ const vehicleEvents = ref([])
 const eventSince = ref('')
 const eventUntil = ref('')
 const currentPage = ref(1)
-const pageSize = ref(20)
-const pageSizeOptions = [20, 40, 60, 80, 100]
+const pageSize = ref(DEFAULT_PAGE_SIZE)
+const pageSizeOptions = PAGE_SIZE_OPTIONS
 
 const pagedVehicleEvents = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   const end = start + pageSize.value
   return vehicleEvents.value.slice(start, end)
+})
+
+const pageStart = computed(() => {
+  if (!vehicleEvents.value.length) return 0
+  return (currentPage.value - 1) * pageSize.value + 1
+})
+
+const pageEnd = computed(() => {
+  if (!vehicleEvents.value.length) return 0
+  return Math.min(currentPage.value * pageSize.value, vehicleEvents.value.length)
 })
 
 async function loadEvents() {

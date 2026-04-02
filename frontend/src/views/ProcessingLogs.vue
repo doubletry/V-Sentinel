@@ -75,6 +75,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { processorApi } from '../api/index.js'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../constants/pagination.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { formatDateTimeWithTimezone } from '../utils/time.js'
 
@@ -84,8 +85,8 @@ const logsLoading = ref(false)
 const logItems = ref([])
 const logTotal = ref(0)
 const logPage = ref(1)
-const logPageSize = ref(20)
-const logPageSizeOptions = [20, 40, 60, 80, 100]
+const logPageSize = ref(DEFAULT_PAGE_SIZE)
+const logPageSizeOptions = PAGE_SIZE_OPTIONS
 const logErrorNotified = ref(false)
 let logTimer = null
 

@@ -141,7 +141,7 @@ export default {
     statusMissing: '缺少动作',
     range: '统计区间',
     total: '共 {count} 条车辆事件',
-    pageSize: '支持分页查看',
+    rangeDisplay: '当前显示 {start}-{end} 条',
     none: '无',
     loadFailed: '加载当天车辆事件失败：{message}',
   },

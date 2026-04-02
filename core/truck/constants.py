@@ -91,8 +91,6 @@ LABEL_EN_TO_ZH: dict[str, str] = {
     "action4": "车外检查",
     "action5": "货物拍照",
     "action6": "封条拍照",
-    "TakePhotosOfGoods": "货物拍照",
-    "TakePhotosOfSeal": "封条拍照",
     "Other": "其他",
     "other": "其他",
     "unknown": "未知",

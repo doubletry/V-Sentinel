@@ -141,7 +141,7 @@ export default {
     statusMissing: 'Missing Actions',
     range: 'Range',
     total: '{count} vehicle event(s) total',
-    pageSize: 'Supports paged browsing',
+    rangeDisplay: 'Showing {start}-{end}',
     none: 'None',
     loadFailed: 'Failed to load vehicle events: {message}',
   },

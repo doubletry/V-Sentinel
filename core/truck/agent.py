@@ -327,7 +327,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         按配置时区格式化到访时间。"""
         try:
             return datetime.fromisoformat(value).astimezone(tzinfo).strftime(
-                "%Y-%m-%d %H:%M"
+                "%Y-%m-%d %H:%M:%S"
             )
         except Exception:
             return value or "未知"

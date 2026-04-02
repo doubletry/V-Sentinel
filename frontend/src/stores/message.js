@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import config from '../config.js'
 import { messagesApi } from '../api/index.js'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../constants/pagination.js'
 
 export const useMessageStore = defineStore('message', () => {
   const messages = ref([])
@@ -9,13 +10,13 @@ export const useMessageStore = defineStore('message', () => {
   const filterSource = ref('')
   const loading = ref(false)
   const page = ref(1)
-  const pageSize = ref(20)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
   const total = ref(0)
   const pendingCount = ref(0)
   let _ws = null
   let _reconnectTimer = null
 
-  const pageSizeOptions = [20, 40, 60, 80, 100]
+  const pageSizeOptions = PAGE_SIZE_OPTIONS
 
   async function fetchMessages(nextPage = page.value, nextPageSize = pageSize.value) {
     loading.value = true

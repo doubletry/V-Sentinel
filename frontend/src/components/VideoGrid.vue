@@ -184,8 +184,8 @@ function onDrop(event, cellIdx) {
     try {
       const resultStream = JSON.parse(resultData)
       store.assignToCell(cellIdx, resultStream)
-    } catch (_) {
-      // Ignore parse errors
+    } catch (e) {
+      console.warn('Failed to parse result-stream drag data:', e)
     }
     return
   }

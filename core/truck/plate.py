@@ -24,6 +24,8 @@ _FALLBACK_PLATE_RE = re.compile(
     rf"^(?={_FALLBACK_BODY_RE}$)(?=.*[A-Z]).+$"
 )
 _SEPARATOR_RE = re.compile(r"[\s\-·.]+")
+PREFIX_PRESENT = 1
+PREFIX_ABSENT = 0
 
 
 def normalize_plate_text(text: str) -> str:
@@ -86,12 +88,12 @@ def should_replace_plate(
         return True
 
     current_rank = (
-        1 if has_plate_prefix(current) else 0,
+        PREFIX_PRESENT if has_plate_prefix(current) else PREFIX_ABSENT,
         len(current),
         float(current_confidence),
     )
     candidate_rank = (
-        1 if has_plate_prefix(candidate) else 0,
+        PREFIX_PRESENT if has_plate_prefix(candidate) else PREFIX_ABSENT,
         len(candidate),
         float(new_confidence),
     )

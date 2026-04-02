@@ -62,3 +62,6 @@ RTSP 读取失败后重连前的等待秒数。"""
 RTSP_MAX_RECONNECT_ATTEMPTS: int = 0
 """Maximum number of consecutive reconnection attempts.  0 = unlimited.
 连续重连尝试的最大次数。0 = 无限制。"""
+
+EMAIL_PORT: str = "50055"
+"""Default gRPC email-service port. 默认 gRPC 邮件服务端口。"""

@@ -54,9 +54,6 @@ DAILY_SUMMARY_HOUR: int = 23
 DAILY_SUMMARY_MINUTE: int = 59
 """Local minute to generate the truck daily summary. 生成 truck 每日总结的本地分钟。"""
 
-EMAIL_PORT: str = "50055"
-"""Default gRPC email-service port. 默认 gRPC 邮件服务端口。"""
-
 LABEL_EN_TO_ZH: dict[str, str] = {
     "truck": "卡车",
     "person": "行人",

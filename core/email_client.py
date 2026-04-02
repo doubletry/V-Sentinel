@@ -8,8 +8,8 @@ from typing import Any
 
 import grpc.aio
 
+from core.constants import EMAIL_PORT
 from core.proto import email_pb2, email_pb2_grpc
-from core.truck.constants import EMAIL_PORT
 
 
 class AsyncEmailClient:

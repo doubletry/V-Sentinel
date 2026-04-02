@@ -94,7 +94,7 @@ LABEL_EN_TO_ZH: dict[str, str] = {
     "Other": "其他",
     "other": "其他",
     "unknown": "未知",
-    "none": "无",
+    "None": "无",
 }
 """English-to-Chinese labels for truck-scene messages. truck 场景中英文标签映射。"""
 

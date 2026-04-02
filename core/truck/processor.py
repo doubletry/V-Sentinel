@@ -378,7 +378,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             missing = ", ".join(
                 LABEL_EN_TO_ZH.get(action, action)
                 for action in sorted(visit.missing_actions)
-            ) or LABEL_EN_TO_ZH["none"]
+            ) or LABEL_EN_TO_ZH["None"]
             plate_info = visit.plate or LABEL_EN_TO_ZH["unknown"]
             messages.append({
                 "timestamp": now,

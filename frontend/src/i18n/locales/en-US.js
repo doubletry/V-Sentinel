@@ -138,7 +138,7 @@ export default {
     missingActions: 'Missing Actions',
     status: 'Status',
     statusComplete: 'Compliant',
-    statusMissing: 'Missing Actions',
+    statusMissing: 'Non-compliant',
     range: 'Range',
     total: '{count} vehicle event(s) total',
     rangeDisplay: 'Showing {start}-{end}',

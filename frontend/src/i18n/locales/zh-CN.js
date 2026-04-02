@@ -138,7 +138,7 @@ export default {
     missingActions: '缺失动作',
     status: '状态',
     statusComplete: '合规',
-    statusMissing: '缺少动作',
+    statusMissing: '不合规',
     range: '统计区间',
     total: '共 {count} 条车辆事件',
     rangeDisplay: '当前显示 {start}-{end} 条',

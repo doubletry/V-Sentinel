@@ -327,12 +327,13 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         # 5a. Vehicle arrival — newly confirmed trucks this frame.
         # 5a. 车辆到达——本帧新确认的卡车。
         for tid in decision.arrivals:
+            track = self.tracker.get_track(tid)
             messages.append({
                 "timestamp": now,
                 "source_name": self.source_name,
                 "source_id": self.source_id,
                 "level": "info",
-                "message": f"Vehicle arrived (track #{tid})",
+                "message": f"Vehicle arrived (track #{track.track_id if track else tid})",
                 "image_base64": thumbnail,
             })
 

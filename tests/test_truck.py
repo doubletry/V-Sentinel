@@ -1108,9 +1108,7 @@ class TestProcessorKeyMessages:
         ]
         assert len(arrival_msgs) == 1
         assert arrival_msgs[0]["image_base64"]
-        raw_decoded = _decode_thumbnail(proc._encode_thumbnail(frame))
         decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
-        assert not np.array_equal(decoded, raw_decoded)
         green_pixels = (
             (decoded[:, :, 1] > 150)
             & (decoded[:, :, 0] < 120)

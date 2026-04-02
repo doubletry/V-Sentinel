@@ -47,7 +47,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         if self._daily_task is not None and not self._daily_task.done():
             self._daily_task.cancel()
             try:
-                await asyncio.wait_for(asyncio.shield(self._daily_task), timeout=3.0)
+                await asyncio.wait_for(self._daily_task, timeout=3.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
         await super().stop()
@@ -199,8 +199,10 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
                 missing_str = "、".join(missing) if missing else "无"
                 status = "✅ 合规" if not missing else "⚠️ 缺少动作"
                 parts.append(
-                    f"  {index}. 车牌: {plate} | 已确认动作: {confirmed_str} | "
-                    f"缺少动作: {missing_str} | {status}"
+                    (
+                        f"  {index}. 车牌: {plate} | 已确认动作: {confirmed_str} | "
+                        f"缺少动作: {missing_str} | {status}"
+                    )
                 )
 
         return "\n".join(parts)

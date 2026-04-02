@@ -13,6 +13,7 @@ import base64
 import queue
 import subprocess
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, BinaryIO, Callable, cast
@@ -131,11 +132,11 @@ class BaseVideoProcessor(ABC):
         ] = queue.Queue(maxsize=2)
         self._display_stop = threading.Event()
         self._display_thread: threading.Thread | None = None
-        self._display_ready = threading.Event()
-        self._prewarm_stop = threading.Event()
-        self._prewarm_thread: threading.Thread | None = None
-        self._prewarm_frame: np.ndarray | None = None
-        self._prewarm_path: str | None = None
+        self._publish_stop = threading.Event()
+        self._publish_thread: threading.Thread | None = None
+        self._publish_state_lock = threading.Lock()
+        self._publish_frame: np.ndarray | None = None
+        self._publish_path: str | None = None
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -146,9 +147,9 @@ class BaseVideoProcessor(ABC):
             return
         self._stop_event.clear()
         self._display_stop.clear()
-        self._display_ready.clear()
-        self._prewarm_stop.clear()
+        self._publish_stop.clear()
         self._start_display_worker()
+        self._start_publish_worker()
         self.status = "running"
         self._task = asyncio.create_task(
             self._run_loop(), name=f"processor-{self.source_id}"
@@ -172,7 +173,7 @@ class BaseVideoProcessor(ABC):
             except Exception:
                 pass
             self._processing_tasks.clear()
-        self._stop_prewarm_worker()
+        self._stop_publish_worker()
         self._stop_display_worker()
         self._close_push_container()
         self.status = "stopped"
@@ -217,7 +218,7 @@ class BaseVideoProcessor(ABC):
                     *list(self._processing_tasks), return_exceptions=True
                 )
                 self._processing_tasks.clear()
-            self._stop_prewarm_worker()
+            self._stop_publish_worker()
             self._stop_display_worker()
 
     # ── Frame Reader (runs in thread) ─────────────────────────────────────
@@ -697,7 +698,6 @@ class BaseVideoProcessor(ABC):
     async def _handle_result(self, frame: np.ndarray, result: AnalysisResult) -> None:
         """Default per-result handling: enqueue for drawing/pushing if needed."""
         if self._should_display_result(result):
-            self._display_ready.set()
             output_path = self._display_output_path()
             self._enqueue_display(frame, result, output_path)
 
@@ -735,14 +735,26 @@ class BaseVideoProcessor(ABC):
             self._display_thread.join(timeout=2.0)
             self._display_thread = None
 
-    def _stop_prewarm_worker(self) -> None:
-        """Stop the placeholder processed-stream keepalive worker."""
-        self._prewarm_stop.set()
-        if self._prewarm_thread is not None:
-            self._prewarm_thread.join(timeout=2.0)
-            self._prewarm_thread = None
-        self._prewarm_frame = None
-        self._prewarm_path = None
+    def _start_publish_worker(self) -> None:
+        """Start the steady RTSP publisher thread if it is not running."""
+        if self._publish_thread is not None and self._publish_thread.is_alive():
+            return
+        self._publish_thread = threading.Thread(
+            target=self._publish_worker,
+            name=f"publisher-{self.source_id}",
+            daemon=True,
+        )
+        self._publish_thread.start()
+
+    def _stop_publish_worker(self) -> None:
+        """Stop the steady RTSP publisher thread."""
+        self._publish_stop.set()
+        if self._publish_thread is not None:
+            self._publish_thread.join(timeout=2.0)
+            self._publish_thread = None
+        with self._publish_state_lock:
+            self._publish_frame = None
+            self._publish_path = None
 
     def _enqueue_display(
         self, frame: np.ndarray, result: AnalysisResult, output_rtsp_path: str
@@ -778,7 +790,7 @@ class BaseVideoProcessor(ABC):
                 except Exception as exc:
                     logger.debug("Display draw error for {}: {}", output_rtsp_path, exc)
                     continue
-            self._push_frame(display_frame, output_rtsp_path)
+            self._set_publish_frame(display_frame, output_rtsp_path)
 
     def _display_output_path(self) -> str:
         """Return the RTSP output path used for processed frames.
@@ -804,46 +816,35 @@ class BaseVideoProcessor(ABC):
     def _prewarm_display_stream(
         self, frame: np.ndarray, output_rtsp_path: str
     ) -> None:
-        """Publish one placeholder frame so MediaMTX exposes the processed path.
-        先发布一帧占位结果，使 MediaMTX 提前暴露 processed 路径。"""
+        """Set a placeholder frame so the steady publisher can prewarm the path.
+        设置占位帧，使恒定节奏发布线程可提前预热 processed 路径。"""
+        self._set_publish_frame(self._make_processing_overlay(frame), output_rtsp_path)
+
+    def _set_publish_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
+        """Update the latest frame that the steady publisher should stream.
+        更新恒定节奏发布线程应持续输出的最新帧。"""
         frame = self._ensure_even_dims(frame)
-        h, w = frame.shape[:2]
-        if h == 0 or w == 0:
+        if frame.shape[0] == 0 or frame.shape[1] == 0:
             return
+        with self._publish_state_lock:
+            self._publish_frame = frame.copy()
+            self._publish_path = output_rtsp_path
 
-        with self._push_lock:
-            if (
-                self._push_proc is not None
-                and self._push_proc.poll() is None
-                and self._push_path == output_rtsp_path
-                and self._push_width == w
-                and self._push_height == h
-            ):
-                return
-
-        self._prewarm_frame = self._make_processing_overlay(frame)
-        self._prewarm_path = output_rtsp_path
-        self._push_frame(self._prewarm_frame, output_rtsp_path)
-
-        if self._display_ready.is_set():
-            return
-        if self._prewarm_thread is None or not self._prewarm_thread.is_alive():
-            self._prewarm_thread = threading.Thread(
-                target=self._prewarm_worker,
-                name=f"prewarm-{self.source_id}",
-                daemon=True,
-            )
-            self._prewarm_thread.start()
-
-    def _prewarm_worker(self) -> None:
-        """Keep the placeholder processed stream alive until real frames arrive.
-        在真实结果帧到来前持续保持占位 processed 流在线。"""
-        while not self._prewarm_stop.wait(1.0):
-            if self._display_ready.is_set():
+    def _publish_worker(self) -> None:
+        """Publish the latest frame at a steady cadence to keep RTSP healthy.
+        以稳定节奏重复推送最新帧，保持 RTSP 输出持续可解码。"""
+        frame_interval = 1.0 / max(PUSH_FPS, 1)
+        next_deadline = time.monotonic()
+        while not self._publish_stop.is_set():
+            with self._publish_state_lock:
+                frame = None if self._publish_frame is None else self._publish_frame.copy()
+                path = self._publish_path
+            if frame is not None and path:
+                self._push_frame(frame, path)
+            next_deadline += frame_interval
+            sleep_for = max(0.0, next_deadline - time.monotonic())
+            if self._publish_stop.wait(sleep_for):
                 break
-            if self._prewarm_frame is None or self._prewarm_path is None:
-                continue
-            self._push_frame(self._prewarm_frame, self._prewarm_path)
 
     @staticmethod
     def _ensure_even_dims(frame: np.ndarray) -> np.ndarray:

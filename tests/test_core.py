@@ -453,6 +453,7 @@ class TestCoreBaseVideoProcessorPipeline:
         pushed: list[tuple[np.ndarray, str]] = []
         proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
         proc._start_display_worker()
+        proc._start_publish_worker()
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
         result = AnalysisResult(
             detections=[
@@ -467,10 +468,11 @@ class TestCoreBaseVideoProcessorPipeline:
             ]
         )
         proc._enqueue_display(frame, result, "cam1_processed")
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.15)
+        proc._stop_publish_worker()
         proc._stop_display_worker()
 
-        assert len(pushed) == 1
+        assert len(pushed) >= 1
         pushed_frame, path = pushed[0]
         assert path == "cam1_processed"
         assert pushed_frame.sum() > 0
@@ -495,15 +497,41 @@ class TestCoreBaseVideoProcessorPipeline:
         proc = WarmupProcessor()
         pushed: list[tuple[np.ndarray, str]] = []
         proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        proc._start_publish_worker()
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
 
         task = asyncio.create_task(proc._process_frame_item(frame, b"jpeg"))
         await asyncio.wait_for(proc.started.wait(), timeout=1.0)
 
-        assert len(pushed) == 1
+        await asyncio.sleep(0.1)
+        assert len(pushed) >= 1
         pushed_frame, path = pushed[0]
         assert path == "cam1_processed"
         assert pushed_frame.sum() > 0
 
         proc.release.set()
         await asyncio.wait_for(task, timeout=1.0)
+        proc._stop_publish_worker()
+
+    async def test_publish_worker_repeats_latest_frame_at_steady_cadence(self):
+        class PublishProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = PublishProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        pushed: list[tuple[np.ndarray, str]] = []
+        proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        proc._set_publish_frame(frame, "cam1_processed")
+        proc._start_publish_worker()
+        await asyncio.sleep(0.15)
+        proc._stop_publish_worker()
+
+        assert len(pushed) >= 2
+        assert all(path == "cam1_processed" for _, path in pushed)

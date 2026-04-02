@@ -10,11 +10,13 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from backend.api import processor as processor_router
+from backend.api import messages as messages_router
 from backend.api import settings as settings_router
 from backend.api import sources as sources_router
+from backend.api import vehicle_events as vehicle_events_router
 from backend.api import ws as ws_module
 from backend.config import settings
-from backend.db.database import close_db, get_all_settings, init_db
+from backend.db.database import close_db, get_all_settings, init_db, save_analysis_message
 from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
@@ -59,7 +61,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting {} ...", settings.app_name)
 
     # Initialize WebSocket manager / 初始化 WebSocket 管理器
-    ws_manager = ws_module.WSManager()
+    async def _persist_message(message) -> None:
+        await save_analysis_message(message.model_dump())
+
+    ws_manager = ws_module.WSManager(persist_message=_persist_message)
 
     # Initialize database / 初始化数据库
     await init_db()
@@ -67,6 +72,7 @@ async def lifespan(app: FastAPI):
     # Initialize V-Engine async gRPC client (addresses from DB settings)
     # 初始化 V-Engine 异步 gRPC 客户端（地址来自数据库设置）
     app_settings = await get_all_settings()
+    app.title = app_settings.get("site_title") or settings.app_name
     vengine_client = AsyncVEngineClient(settings)
     await vengine_client.connect(app_settings)
     email_client = AsyncEmailClient()
@@ -119,7 +125,9 @@ app.add_middleware(
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(sources_router.router)
 app.include_router(processor_router.router)
+app.include_router(messages_router.router)
 app.include_router(settings_router.router)
+app.include_router(vehicle_events_router.router)
 app.include_router(ws_module.router)
 
 
@@ -127,7 +135,7 @@ app.include_router(ws_module.router)
 async def health() -> dict:
     """Health check endpoint.
     健康检查端点。"""
-    return {"status": "ok", "app": settings.app_name}
+    return {"status": "ok", "app": app.title}
 
 
 # ── Static files (production: serve built frontend) / 静态文件（生产环境：托管构建后的前端） ──

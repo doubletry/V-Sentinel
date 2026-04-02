@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.models.schemas import ProcessorStartRequest, ProcessorStopRequest, ProcessorStatus
+from backend.models.schemas import (
+    ProcessorPluginInfo,
+    ProcessorStartRequest,
+    ProcessorStatus,
+    ProcessorStopRequest,
+)
 from backend.processing.log_buffer import processing_log_buffer
+from backend.processing.registry import list_processor_plugins
 
 router = APIRouter(prefix="/api/processor", tags=["processor"])
 
@@ -60,6 +66,13 @@ async def get_status() -> list[ProcessorStatus]:
     from backend.main import processor_manager
 
     return processor_manager.get_all_status()
+
+
+@router.get("/plugins", response_model=list[ProcessorPluginInfo])
+async def get_processor_plugins() -> list[ProcessorPluginInfo]:
+    """Get available processor plugins with display metadata.
+    获取可用处理器插件及其展示元数据。"""
+    return list_processor_plugins()
 
 
 @router.get("/logs")

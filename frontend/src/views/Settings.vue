@@ -101,9 +101,9 @@
                 default-first-option
               >
                 <el-option
-                  v-for="option in processorPluginOptions"
+                  v-for="option in localizedProcessorPluginOptions"
                   :key="option.value"
-                  :label="t(option.labelKey)"
+                  :label="option.label"
                   :value="option.value"
                 />
               </el-select>
@@ -233,6 +233,24 @@
           <el-form-item :label="t('settings.dailySummaryMinute')">
             <el-input v-model="form.daily_summary_minute" placeholder="59" />
           </el-form-item>
+          <el-form-item :label="t('settings.messageRetentionDays')">
+            <el-select v-model="form.message_retention_days" style="width: 100%">
+              <el-option
+                v-for="day in retentionDayOptions"
+                :key="day"
+                :label="t('settings.messageRetentionDaysOption', { days: day })"
+                :value="String(day)"
+              />
+            </el-select>
+          </el-form-item>
+          <div class="summary-actions">
+            <el-button @click="loadTodayVehicleEvents" :loading="loadingVehicleEvents">
+              {{ t('settings.viewTodayVehicleEvents') }}
+            </el-button>
+            <el-button type="primary" @click="sendSummaryNow" :loading="sendingSummaryNow">
+              {{ t('settings.sendSummaryNow') }}
+            </el-button>
+          </div>
         </section>
 
         <section class="settings-section">
@@ -258,33 +276,57 @@
           </el-button>
         </div>
       </el-form>
+
+      <el-dialog
+        v-model="vehicleEventsDialogVisible"
+        :title="t('settings.todayVehicleEvents')"
+        width="78%"
+        top="6vh"
+      >
+        <div class="vehicle-summary-text">{{ vehicleSummaryText }}</div>
+        <el-table :data="vehicleEvents" stripe>
+          <el-table-column prop="source_name" :label="t('settings.vehicleEventSource')" min-width="120" />
+          <el-table-column prop="plate" :label="t('settings.vehicleEventPlate')" min-width="120" />
+          <el-table-column prop="enter_time" :label="t('settings.vehicleEventEnterTime')" min-width="160" />
+          <el-table-column prop="exit_time" :label="t('settings.vehicleEventExitTime')" min-width="160" />
+          <el-table-column :label="t('settings.vehicleEventMissingActions')" min-width="180">
+            <template #default="{ row }">
+              {{ (row.missing_actions || []).join('、') || t('settings.none') }}
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-dialog>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { localeOptions } from '../i18n/index.js'
+import { processorApi, vehicleEventsApi } from '../api/index.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { useSourceStore } from '../stores/source.js'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
-const processorPluginOptions = [
-  { value: 'truck', labelKey: 'settings.processorPluginTruck' },
-  { value: 'example', labelKey: 'settings.processorPluginExample' },
-]
+const processorPluginOptions = ref([])
+const retentionDayOptions = Array.from({ length: 30 }, (_, index) => index + 1)
 
 const loading = ref(false)
 const saving = ref(false)
 const testingEmail = ref(false)
+const sendingSummaryNow = ref(false)
+const loadingVehicleEvents = ref(false)
 const serviceAction = ref('')
 const roiTagInput = ref('')
 const roiTagList = ref([])
+const vehicleEventsDialogVisible = ref(false)
+const vehicleEvents = ref([])
+const vehicleSummaryText = ref('')
 const form = ref({
   ui_language: 'zh-CN',
   processor_plugin: 'truck',
@@ -312,10 +354,18 @@ const form = ref({
   email_port: '50055',
   daily_summary_hour: '23',
   daily_summary_minute: '59',
+  message_retention_days: '7',
   max_pull_workers: '',
   max_push_workers: '',
   max_cpu_workers: '',
 })
+
+const localizedProcessorPluginOptions = computed(() =>
+  processorPluginOptions.value.map((option) => ({
+    ...option,
+    label: locale.value === 'en-US' ? option.label_en : option.label_zh,
+  }))
+)
 
 function parseRoiTagOptions(raw) {
   if (Array.isArray(raw)) {
@@ -365,8 +415,12 @@ function removeRoiTag(tag) {
 async function reload() {
   loading.value = true
   try {
-    const data = await appSettingsStore.fetchSettings(true)
+    const [data, plugins] = await Promise.all([
+      appSettingsStore.fetchSettings(true),
+      processorApi.plugins(),
+    ])
     Object.assign(form.value, data)
+    processorPluginOptions.value = Array.isArray(plugins) ? plugins : []
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     syncRoiTagOptionsToForm()
   } catch (err) {
@@ -445,6 +499,37 @@ async function testEmailConfig() {
     ElMessage.error(t('settings.testEmailFailed', { message: err.message }))
   } finally {
     testingEmail.value = false
+  }
+}
+
+async function loadTodayVehicleEvents() {
+  loadingVehicleEvents.value = true
+  try {
+    const result = await vehicleEventsApi.today()
+    vehicleEvents.value = Array.isArray(result.visits) ? result.visits : []
+    vehicleSummaryText.value = result.summary_text || ''
+    vehicleEventsDialogVisible.value = true
+  } catch (err) {
+    ElMessage.error(t('settings.vehicleEventsLoadFailed', { message: err.message }))
+  } finally {
+    loadingVehicleEvents.value = false
+  }
+}
+
+async function sendSummaryNow() {
+  sendingSummaryNow.value = true
+  try {
+    const result = await vehicleEventsApi.sendSummaryNow()
+    ElMessage.success(
+      t('settings.sendSummaryNowSuccess', {
+        count: result.visit_count ?? 0,
+      })
+    )
+    vehicleSummaryText.value = result.summary_text || ''
+  } catch (err) {
+    ElMessage.error(t('settings.sendSummaryNowFailed', { message: err.message }))
+  } finally {
+    sendingSummaryNow.value = false
   }
 }
 
@@ -613,6 +698,24 @@ onMounted(async () => {
   color: #8f9fbe;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.summary-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.vehicle-summary-text {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(64, 158, 255, 0.08);
+  color: #d9e5ff;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .field-stack {

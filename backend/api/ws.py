@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+from typing import Awaitable, Callable
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -16,9 +16,13 @@ class WSManager:
     """WebSocket connection manager for real-time message broadcasting.
     用于实时消息广播的 WebSocket 连接管理器。"""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        persist_message: Callable[[AnalysisMessage], Awaitable[None]] | None = None,
+    ) -> None:
         self._connections: set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        self._persist_message = persist_message
 
     async def connect(self, websocket: WebSocket) -> None:
         """Accept and register a new WebSocket connection.
@@ -42,6 +46,8 @@ class WSManager:
     async def broadcast(self, message: AnalysisMessage) -> None:
         """Send a message to all connected WebSocket clients.
         向所有已连接的 WebSocket 客户端发送消息。"""
+        if self._persist_message is not None:
+            await self._persist_message(message)
         payload = message.model_dump_json()
         dead: list[WebSocket] = []
         async with self._lock:

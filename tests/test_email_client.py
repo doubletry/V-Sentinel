@@ -32,3 +32,17 @@ class TestAsyncEmailClient:
                 subject="test",
                 plain_text_body="hello",
             )
+
+    def test_product_name_drives_summary_subject(self):
+        client = AsyncEmailClient()
+        request = client.build_request(
+            {
+                "site_title": "My Sentinel",
+                "email_from_address": "sender@example.com",
+                "email_from_auth_code": "secret",
+                "email_to_addresses": "a@example.com",
+            },
+            subject=f"{client._product_name({'site_title': 'My Sentinel'})} 每日总结 2026-01-01",
+            plain_text_body="hello",
+        )
+        assert request.subject == "My Sentinel 每日总结 2026-01-01"

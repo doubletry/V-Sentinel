@@ -59,6 +59,7 @@ DEFAULT_APP_SETTINGS: dict[str, str] = {
     "email_port": "50055",
     "daily_summary_hour": "23",
     "daily_summary_minute": "59",
+    "message_retention_days": "7",
     # Thread pool sizes / 线程池大小
     "max_pull_workers": "20",
     "max_push_workers": "10",

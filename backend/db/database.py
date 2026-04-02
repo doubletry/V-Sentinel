@@ -4,7 +4,7 @@ import asyncio
 import json
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiosqlite
 from loguru import logger
@@ -53,6 +53,19 @@ CREATE TABLE IF NOT EXISTS vehicle_visits (
     plate TEXT NOT NULL DEFAULT '',
     confirmed_actions TEXT NOT NULL DEFAULT '[]',
     missing_actions TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+"""
+
+CREATE_ANALYSIS_MESSAGES_TABLE = """
+CREATE TABLE IF NOT EXISTS analysis_messages (
+    id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    source_name TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    image_base64 TEXT,
     created_at TEXT NOT NULL
 );
 """
@@ -161,6 +174,7 @@ async def init_db() -> None:
         await db.execute(CREATE_ROIS_TABLE)
         await db.execute(CREATE_SETTINGS_TABLE)
         await db.execute(CREATE_VEHICLE_VISITS_TABLE)
+        await db.execute(CREATE_ANALYSIS_MESSAGES_TABLE)
         for key, value in DEFAULT_APP_SETTINGS.items():
             await db.execute(
                 "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
@@ -174,6 +188,16 @@ def _now_iso() -> str:
     """Return current UTC time as an ISO 8601 string.
     返回当前 UTC 时间的 ISO 8601 字符串。"""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _message_retention_cutoff_iso(retention_days_raw: str | int) -> str:
+    """Convert retention-days input into a UTC cutoff timestamp.
+    将保留天数输入转换为 UTC 截止时间戳。"""
+    try:
+        safe_days = min(30, max(1, int(retention_days_raw)))
+    except Exception:
+        safe_days = 7
+    return (datetime.now(timezone.utc) - timedelta(days=safe_days)).isoformat()
 
 
 async def _get_rois_for_source(db: aiosqlite.Connection, source_id: str) -> list[ROI]:
@@ -442,3 +466,119 @@ async def get_vehicle_visits_since(since_iso: str) -> list[dict]:
             "created_at": row[9],
         })
     return result
+
+
+async def get_vehicle_visits_between(start_iso: str, end_iso: str) -> list[dict]:
+    """Return vehicle visits created within an inclusive time range.
+    返回在给定闭区间时间范围内创建的车辆到访记录。"""
+    async with _db_session() as db:
+        async with db.execute(
+            "SELECT id, source_id, source_name, track_id, enter_time, exit_time, "
+            "plate, confirmed_actions, missing_actions, created_at "
+            "FROM vehicle_visits WHERE created_at >= ? AND created_at <= ? "
+            "ORDER BY created_at",
+            (start_iso, end_iso),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    result: list[dict] = []
+    for row in rows:
+        result.append({
+            "id": row[0],
+            "source_id": row[1],
+            "source_name": row[2],
+            "track_id": row[3],
+            "enter_time": row[4],
+            "exit_time": row[5],
+            "plate": row[6],
+            "confirmed_actions": json.loads(row[7]),
+            "missing_actions": json.loads(row[8]),
+            "created_at": row[9],
+        })
+    return result
+
+
+async def prune_analysis_messages(retention_days: int) -> None:
+    """Delete messages older than the configured retention window.
+    删除超过保留期的历史消息。"""
+    cutoff = _message_retention_cutoff_iso(retention_days)
+    async with _db_session() as db:
+        await db.execute(
+            "DELETE FROM analysis_messages WHERE created_at < ?",
+            (cutoff,),
+        )
+        await db.commit()
+
+
+async def save_analysis_message(message: dict[str, str | None]) -> str:
+    """Persist one analysis message and prune expired records.
+    持久化一条分析消息并清理过期记录。"""
+    message_id = str(uuid.uuid4())
+    created_at = str(message.get("timestamp") or _now_iso())
+    async with _db_session() as db:
+        await db.execute(
+            "INSERT INTO analysis_messages "
+            "(id, timestamp, source_name, source_id, level, message, image_base64, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                message_id,
+                str(message.get("timestamp") or created_at),
+                str(message.get("source_name") or ""),
+                str(message.get("source_id") or ""),
+                str(message.get("level") or "info"),
+                str(message.get("message") or ""),
+                message.get("image_base64"),
+                created_at,
+            ),
+        )
+        async with db.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            ("message_retention_days",),
+        ) as cursor:
+            row = await cursor.fetchone()
+        retention_days = 7
+        if row is not None:
+            retention_days = row[0]
+        cutoff = _message_retention_cutoff_iso(retention_days)
+        await db.execute(
+            "DELETE FROM analysis_messages WHERE created_at < ?",
+            (cutoff,),
+        )
+        await db.commit()
+    return message_id
+
+
+async def list_analysis_messages(
+    *,
+    limit: int = 500,
+    source_id: str | None = None,
+) -> list[dict[str, str | None]]:
+    """List persisted analysis messages ordered newest-first.
+    按时间倒序列出持久化分析消息。"""
+    safe_limit = min(1000, max(1, int(limit)))
+    async with _db_session() as db:
+        if source_id:
+            async with db.execute(
+                "SELECT timestamp, source_name, source_id, level, message, image_base64 "
+                "FROM analysis_messages WHERE source_id = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (source_id, safe_limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+        else:
+            async with db.execute(
+                "SELECT timestamp, source_name, source_id, level, message, image_base64 "
+                "FROM analysis_messages ORDER BY created_at DESC LIMIT ?",
+                (safe_limit,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+    return [
+        {
+            "timestamp": row[0],
+            "source_name": row[1],
+            "source_id": row[2],
+            "level": row[3],
+            "message": row[4],
+            "image_base64": row[5],
+        }
+        for row in rows
+    ]

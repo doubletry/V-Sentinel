@@ -56,6 +56,7 @@ watch(
 )
 
 onMounted(() => {
+  store.fetchMessages()
   store.connectWS()
   if (!sourceStore.sources.length) {
     sourceStore.fetchSources()

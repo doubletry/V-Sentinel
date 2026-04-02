@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import config from '../config.js'
+import { messagesApi } from '../api/index.js'
 
 export const useMessageStore = defineStore('message', () => {
   const messages = ref([])
   const wsConnected = ref(false)
   const filterSource = ref('')
+  const loading = ref(false)
   let _ws = null
   let _reconnectTimer = null
 
@@ -13,6 +15,17 @@ export const useMessageStore = defineStore('message', () => {
     if (!filterSource.value) return messages.value
     return messages.value.filter((m) => m.source_id === filterSource.value)
   })
+
+  async function fetchMessages() {
+    loading.value = true
+    try {
+      const data = await messagesApi.list({ limit: 500 })
+      messages.value = Array.isArray(data) ? data : []
+      return messages.value
+    } finally {
+      loading.value = false
+    }
+  }
 
   function connectWS() {
     if (_ws && _ws.readyState === WebSocket.OPEN) return
@@ -80,9 +93,11 @@ export const useMessageStore = defineStore('message', () => {
 
   return {
     messages,
+    loading,
     wsConnected,
     filterSource,
     filteredMessages,
+    fetchMessages,
     connectWS,
     disconnectWS,
     clearMessages,

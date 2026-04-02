@@ -94,6 +94,15 @@ class AnalysisMessage(BaseModel):
     image_base64: str | None = None
 
 
+class ProcessorPluginInfo(BaseModel):
+    """Processor plugin display metadata.
+    处理器插件展示元数据。"""
+
+    value: str
+    label_zh: str
+    label_en: str
+
+
 class AppSettingsUpdate(BaseModel):
     """Partial update for app settings (all fields optional).
     部分更新应用设置（所有字段可选）。"""
@@ -128,6 +137,7 @@ class AppSettingsUpdate(BaseModel):
     email_port: str | None = None
     daily_summary_hour: str | None = None
     daily_summary_minute: str | None = None
+    message_retention_days: str | None = None
     max_pull_workers: str | None = None
     max_push_workers: str | None = None
     max_cpu_workers: str | None = None

@@ -31,6 +31,12 @@ async def update_settings(data: AppSettingsUpdate, request: Request) -> dict[str
         return await db.get_all_settings()
 
     result = await db.update_settings(updates)
+    request.app.title = result.get("site_title") or request.app.title
+    if "message_retention_days" in updates:
+        try:
+            await db.prune_analysis_messages(int(result.get("message_retention_days", "7")))
+        except Exception:
+            pass
 
     # Reconnect V-Engine client with new addresses / 使用新地址重连 V-Engine 客户端
     vengine_client = request.app.state.vengine_client

@@ -22,6 +22,10 @@ class AsyncEmailClient:
         self._address: str | None = None
 
     @staticmethod
+    def _product_name(app_settings: dict[str, str]) -> str:
+        return str(app_settings.get("site_title") or "V-Sentinel").strip() or "V-Sentinel"
+
+    @staticmethod
     def _build_address(app_settings: dict[str, str]) -> str:
         host = app_settings.get("email_host") or app_settings.get(
             "vengine_host", "localhost"
@@ -122,8 +126,11 @@ class AsyncEmailClient:
         使用提供的设置发送测试邮件。"""
         request = self.build_request(
             app_settings,
-            subject="V-Sentinel 邮件配置测试",
-            plain_text_body="这是一封来自 V-Sentinel 的测试邮件，用于验证邮件配置是否正确。",
+            subject=f"{self._product_name(app_settings)} 邮件配置测试",
+            plain_text_body=(
+                f"这是一封来自 {self._product_name(app_settings)} 的测试邮件，"
+                "用于验证邮件配置是否正确。"
+            ),
             overrides=overrides,
         )
         return await self.send_email(request)
@@ -138,7 +145,7 @@ class AsyncEmailClient:
         发送 truck 每日总结邮件。"""
         request = self.build_request(
             app_settings,
-            subject=f"V-Sentinel 每日总结 {until_iso[:10]}",
+            subject=f"{self._product_name(app_settings)} 每日总结 {until_iso[:10]}",
             plain_text_body=summary_text,
         )
         return await self.send_email(request)

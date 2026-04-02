@@ -341,7 +341,7 @@ class BaseVideoProcessor(ABC):
         logger.info("Frame reader exited for {}", self.rtsp_url)
 
     @staticmethod
-    def _stream_fps(video_stream: av.video.stream.VideoStream) -> float | None:
+    def _stream_fps(video_stream: Any) -> float | None:
         """Best-effort FPS extraction from a PyAV video stream.
         尽力从 PyAV 视频流中提取 FPS。
 
@@ -775,12 +775,13 @@ class BaseVideoProcessor(ABC):
     def _update_publish_fps(self, source_fps: float | None) -> None:
         """Refresh effective publish FPS from source FPS and sample interval.
         根据源流 FPS 和采样间隔刷新有效推流 FPS。"""
-        self._source_fps = source_fps
         if source_fps is None or not math.isfinite(source_fps) or source_fps <= 0:
             publish_fps = self._default_publish_fps()
         else:
             publish_fps = self._sampled_publish_fps(source_fps, FRAME_SAMPLE_INTERVAL)
-        self._publish_fps = publish_fps
+        with self._publish_state_lock:
+            self._source_fps = source_fps
+            self._publish_fps = publish_fps
         source_fps_display = (
             f"{source_fps:.3f}" if source_fps is not None else "unknown"
         )
@@ -794,7 +795,8 @@ class BaseVideoProcessor(ABC):
     def _current_publish_fps(self) -> float:
         """Return the current effective publish FPS with a safe fallback.
         返回当前有效推流 FPS，并在异常值时安全回退。"""
-        target_fps = self._publish_fps
+        with self._publish_state_lock:
+            target_fps = self._publish_fps
         if target_fps <= 0:
             logger.warning(
                 "Invalid publish FPS {:.3f} for {}, falling back to {}",

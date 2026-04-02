@@ -646,3 +646,36 @@ class TestCoreBaseVideoProcessorPipeline:
             guessed_rate = 50
 
         assert BaseVideoProcessor._stream_fps(_Stream()) == 25.0
+
+    def test_stream_fps_prefers_average_rate_when_available(self):
+        class _CodecContext:
+            framerate = 24
+
+        class _Stream:
+            average_rate = 30
+            codec_context = _CodecContext()
+            base_rate = 50
+            guessed_rate = 50
+
+        assert BaseVideoProcessor._stream_fps(_Stream()) == 30.0
+
+    def test_stream_fps_handles_missing_codec_context(self):
+        class _Stream:
+            average_rate = None
+            codec_context = None
+            base_rate = 25
+            guessed_rate = 25
+
+        assert BaseVideoProcessor._stream_fps(_Stream()) == 25.0
+
+    def test_stream_fps_returns_none_when_all_rates_are_invalid(self):
+        class _CodecContext:
+            framerate = 0
+
+        class _Stream:
+            average_rate = None
+            codec_context = _CodecContext()
+            base_rate = 1000
+            guessed_rate = None
+
+        assert BaseVideoProcessor._stream_fps(_Stream()) is None

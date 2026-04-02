@@ -835,7 +835,10 @@ class BaseVideoProcessor(ABC):
         以稳定节奏重复推送最新帧，保持 RTSP 输出持续可解码。"""
         target_fps = PUSH_FPS
         if target_fps <= 0:
-            logger.warning("Invalid PUSH_FPS={}, falling back to 1", target_fps)
+            logger.warning(
+                "Invalid PUSH_FPS={} (must be > 0), falling back to 1",
+                target_fps,
+            )
             target_fps = 1
         frame_interval = 1.0 / target_fps
         next_deadline = time.monotonic()

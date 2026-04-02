@@ -106,6 +106,7 @@ class TestPlateFiltering:
 
     def test_rejects_invalid_plate(self):
         assert extract_valid_plate_text("粤B12") == ""
+        assert extract_valid_plate_text("12345") == ""
         assert not is_valid_plate_text("###")
 
 
@@ -1110,6 +1111,12 @@ class TestProcessorKeyMessages:
         raw_decoded = _decode_thumbnail(proc._encode_thumbnail(frame))
         decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
         assert not np.array_equal(decoded, raw_decoded)
+        green_pixels = (
+            (decoded[:, :, 1] > 150)
+            & (decoded[:, :, 0] < 120)
+            & (decoded[:, :, 2] < 120)
+        )
+        assert int(green_pixels.sum()) > 0
         assert decoded.sum() > 0
 
     async def test_no_detection_message(self):

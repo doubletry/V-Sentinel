@@ -362,7 +362,9 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 new_actions = track_after.confirmed_actions - actions_before
                 for action in sorted(new_actions):
                     action_zh = LABEL_EN_TO_ZH.get(action, action)
-                    plate_info = track_after.best_plate or LABEL_EN_TO_ZH["unknown"]
+                    plate_info = track_after.best_plate or LABEL_EN_TO_ZH.get(
+                        "unknown", "unknown"
+                    )
                     messages.append({
                         "timestamp": now,
                         "source_name": self.source_name,
@@ -378,8 +380,8 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             missing = ", ".join(
                 LABEL_EN_TO_ZH.get(action, action)
                 for action in sorted(visit.missing_actions)
-            ) or LABEL_EN_TO_ZH["none"]
-            plate_info = visit.plate or LABEL_EN_TO_ZH["unknown"]
+            ) or LABEL_EN_TO_ZH.get("none", "none")
+            plate_info = visit.plate or LABEL_EN_TO_ZH.get("unknown", "unknown")
             messages.append({
                 "timestamp": now,
                 "source_name": self.source_name,

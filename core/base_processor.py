@@ -945,7 +945,7 @@ class BaseVideoProcessor(ABC):
     def _close_push_container(self) -> None:
         """Close the persistent PyAV RTSP push container.
         关闭持久化 PyAV RTSP 推流容器。"""
-        if self._push_container is not None and self._push_stream is not None:
+        if self._push_stream is not None and self._push_container is not None:
             try:
                 for packet in self._push_stream.encode(None):
                     self._push_container.mux(packet)

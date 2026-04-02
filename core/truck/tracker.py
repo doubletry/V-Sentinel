@@ -114,6 +114,10 @@ class TrackingDecision:
     """Vehicles that left the scene this frame.
     本帧离开场景的车辆。"""
 
+    arrivals: list[int] = field(default_factory=list)
+    """Track IDs of trucks that were newly confirmed this frame.
+    本帧新确认到达的卡车 track_id 列表。"""
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -304,6 +308,7 @@ class TruckTracker:
                     self._track.presence_frames += 1
                     if self._track.presence_frames >= self.min_presence_frames:
                         self._track.confirmed = True
+                        decision.arrivals.append(self._track.track_id)
             else:
                 # No truck detected this frame.
                 # 本帧未检测到卡车。
@@ -331,14 +336,17 @@ class TruckTracker:
             if best_det is not None:
                 tid = self._next_id
                 self._next_id += 1
+                immediately_confirmed = self.min_presence_frames <= 1
                 self._track = TrackedTruck(
                     track_id=tid,
                     bbox=_det_to_bbox(best_det),
                     first_seen=now,
                     last_seen=now,
                     presence_frames=1,
-                    confirmed=(self.min_presence_frames <= 1),
+                    confirmed=immediately_confirmed,
                 )
+                if immediately_confirmed:
+                    decision.arrivals.append(tid)
 
         # 4. Build decisions for the confirmed active truck.
         # 4. 为已确认的活跃卡车构建决策。

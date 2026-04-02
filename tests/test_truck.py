@@ -1002,3 +1002,147 @@ class TestDrawOnFrameWithClassifications:
         )
         drawn = proc.draw_on_frame(frame, result)
         assert drawn.sum() > 0
+
+
+# ── Tracker arrival detection tests / 跟踪器到达检测测试 ────────────────────
+
+
+class TestTruckArrival:
+    """Tests for the arrival detection feature in TrackingDecision."""
+
+    def test_arrival_on_immediate_confirmation(self):
+        """With min_presence_frames=1, truck arrival reported immediately."""
+        tracker = TruckTracker(min_presence_frames=1)
+        analysis = FrameAnalysis(trucks=[_truck_det()])
+        decision = tracker.update(analysis)
+        assert len(decision.arrivals) == 1
+
+    def test_arrival_after_min_presence_frames(self):
+        """With min_presence_frames=3, arrival is reported after 3 frames."""
+        tracker = TruckTracker(min_presence_frames=3)
+        analysis = FrameAnalysis(trucks=[_truck_det()])
+
+        # Frame 1 and 2: not yet confirmed
+        d1 = tracker.update(analysis)
+        assert d1.arrivals == []
+        d2 = tracker.update(analysis)
+        assert d2.arrivals == []
+
+        # Frame 3: confirmed — arrival reported
+        d3 = tracker.update(analysis)
+        assert len(d3.arrivals) == 1
+
+    def test_no_arrival_on_subsequent_frames(self):
+        """Once confirmed, no further arrival events for same truck."""
+        tracker = TruckTracker(min_presence_frames=1)
+        analysis = FrameAnalysis(trucks=[_truck_det()])
+
+        d1 = tracker.update(analysis)
+        assert len(d1.arrivals) == 1
+
+        d2 = tracker.update(analysis)
+        assert d2.arrivals == []
+
+    def test_no_arrival_without_truck(self):
+        """No arrival when no truck is detected."""
+        tracker = TruckTracker(min_presence_frames=1)
+        decision = tracker.update(FrameAnalysis())
+        assert decision.arrivals == []
+
+
+@pytest.mark.asyncio
+class TestProcessorKeyMessages:
+    """Tests for key-only messages in TruckMonitorProcessor."""
+
+    async def test_arrival_message_produced(self):
+        """Arrival message is produced when truck is first confirmed."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        arrival_msgs = [
+            m for m in result.messages if "Vehicle arrived" in m.get("message", "")
+        ]
+        assert len(arrival_msgs) == 1
+
+    async def test_no_detection_message(self):
+        """Per-frame detection messages are NOT produced anymore."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        detect_msgs = [
+            m for m in result.messages if "Detected" in m.get("message", "")
+        ]
+        assert detect_msgs == []
+
+    async def test_plate_recognition_message(self):
+        """OCR plate recognition message is produced when plate is new."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "ABC123", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        plate_msgs = [
+            m for m in result.messages if "Plate recognized" in m.get("message", "")
+        ]
+        assert len(plate_msgs) == 1
+        assert "ABC123" in plate_msgs[0]["message"]

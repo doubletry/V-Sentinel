@@ -42,6 +42,7 @@ INPUT_RTSP_TRANSPORT = "tcp"
 LOW_LATENCY_PROBESIZE = "32"
 LOW_LATENCY_ANALYZEDURATION = "0"
 STREAM_TIMEOUT_MICROSECONDS = "5000000"
+PUBLISH_QUEUE_TIMEOUT_SEC = 0.2
 MAX_REASONABLE_SOURCE_FPS = 120.0
 FPS_CHANGE_THRESHOLD = 0.01
 GOP_DIVISOR = 2
@@ -709,17 +710,7 @@ class BaseVideoProcessor(ABC):
     def _stop_publish_worker(self) -> None:
         """Stop the steady RTSP publisher thread."""
         self._publish_stop.set()
-        try:
-            self._publish_queue.put_nowait(None)
-        except queue.Full:
-            try:
-                self._publish_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._publish_queue.put_nowait(None)
-            except queue.Full:
-                pass
+        self._force_enqueue(self._publish_queue, None)
         if self._publish_thread is not None:
             self._publish_thread.join(timeout=2.0)
             self._publish_thread = None
@@ -834,16 +825,24 @@ class BaseVideoProcessor(ABC):
         frame = self._ensure_even_dims(frame)
         if frame.shape[0] == 0 or frame.shape[1] == 0:
             return
-        item = (frame.copy(), output_rtsp_path)
+        self._force_enqueue(self._publish_queue, (frame.copy(), output_rtsp_path))
+
+    @staticmethod
+    def _force_enqueue(
+        target_queue: "queue.Queue[Any]",
+        item: Any,
+    ) -> None:
+        """Insert an item into a bounded queue, dropping one stale item if needed.
+        向有界队列插入条目；若队列已满则丢弃一个旧条目后重试。"""
         try:
-            self._publish_queue.put_nowait(item)
+            target_queue.put_nowait(item)
         except queue.Full:
             try:
-                self._publish_queue.get_nowait()
+                target_queue.get_nowait()
             except queue.Empty:
                 pass
             try:
-                self._publish_queue.put_nowait(item)
+                target_queue.put_nowait(item)
             except queue.Full:
                 pass
 
@@ -856,7 +855,7 @@ class BaseVideoProcessor(ABC):
         while not self._publish_stop.is_set():
             if latest_frame is None or latest_path is None:
                 try:
-                    item = self._publish_queue.get(timeout=0.2)
+                    item = self._publish_queue.get(timeout=PUBLISH_QUEUE_TIMEOUT_SEC)
                 except queue.Empty:
                     continue
                 if item is None:

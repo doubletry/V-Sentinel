@@ -10,17 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import math
 import queue
 import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, BinaryIO, Callable, cast
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import cv2
 import numpy as np
+import av
 from loguru import logger
 
 from core.constants import (
@@ -129,6 +131,7 @@ class BaseVideoProcessor(ABC):
         self._push_path: str | None = None
         self._push_width: int = 0
         self._push_height: int = 0
+        self._push_fps: float = 0.0
         self._display_queue: queue.Queue[
             tuple[np.ndarray, AnalysisResult, str] | None
         ] = queue.Queue(maxsize=2)
@@ -139,6 +142,8 @@ class BaseVideoProcessor(ABC):
         self._publish_state_lock = threading.Lock()
         self._publish_frame: np.ndarray | None = None
         self._publish_path: str | None = None
+        self._source_fps: float | None = None
+        self._publish_fps: float = self._default_publish_fps()
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -226,19 +231,8 @@ class BaseVideoProcessor(ABC):
     # ── Frame Reader (runs in thread) ─────────────────────────────────────
 
     def _frame_reader(self, loop: asyncio.AbstractEventLoop) -> None:
-        """Read frames from RTSP stream using ffmpeg subprocess (blocking I/O,
-        runs in thread).  Automatically reconnects on stream failure.
-        使用 ffmpeg 子进程从 RTSP 流读取帧（阻塞 I/O，在线程中运行）。
-        流失败时自动重连。
-
-        ffmpeg decodes the RTSP stream and outputs raw RGB24 pixels to stdout.
-        Using TCP transport avoids the green-frame / mosaic artifacts caused by
-        UDP packet loss.  Images are encoded once as RGB JPEG; downstream code
-        reuses the encoded bytes without re-encoding.
-        ffmpeg 解码 RTSP 流并将原始 RGB24 像素输出到 stdout。
-        使用 TCP 传输避免 UDP 丢包导致的绿帧/马赛克。图像仅编码一次为 RGB JPEG；
-        下游代码复用编码字节，无需重新编码。
-        """
+        """Read frames from RTSP using PyAV with low-latency options.
+        使用 PyAV 和低延迟参数从 RTSP 读取帧。"""
         import time as _time
 
         logger.info("Frame reader started for {}", self.rtsp_url)
@@ -247,102 +241,47 @@ class BaseVideoProcessor(ABC):
         frame_counter = 0  # for FRAME_SAMPLE_INTERVAL skipping
 
         while not self._stop_event.is_set():
-            # Step 1 — probe stream dimensions
-            probe_w, probe_h = 1920, 1080
-            try:
-                probe_cmd = [
-                    "ffprobe",
-                    "-v", "error",
-                    "-rtsp_transport", RTSP_TRANSPORT,
-                    "-select_streams", "v:0",
-                    "-show_entries", "stream=width,height",
-                    "-of", "csv=p=0:s=x",
-                    self.rtsp_url,
-                ]
-                probe_out = subprocess.check_output(
-                    probe_cmd, timeout=10, stderr=subprocess.DEVNULL
-                ).decode().strip()
-                if "x" in probe_out:
-                    parts = probe_out.split("x")
-                    probe_w, probe_h = int(parts[0]), int(parts[1])
-            except Exception as exc:
-                logger.warning(
-                    "ffprobe failed for {} (using {}x{}): {}",
-                    self.rtsp_url, probe_w, probe_h, exc,
-                )
-
-            probe_w -= probe_w % 2
-            probe_h -= probe_h % 2
-            frame_bytes = probe_w * probe_h * 3
-
-            logger.info(
-                "Frame reader: {}x{} ({} bytes/frame) for {}",
-                probe_w, probe_h, frame_bytes, self.rtsp_url,
-            )
-            self._prewarm_display_stream(
-                np.zeros((probe_h, probe_w, 3), dtype=np.uint8),
-                self._display_output_path(),
-            )
-
-            # Step 2 — launch ffmpeg reader
-            # Minimize buffering / probing so the first processed frame and the
-            # prewarmed processed RTSP path come up with lower startup latency.
-            # 降低缓冲和探测开销，使第一帧 processed 结果和预热 RTSP 路径更快上线。
-            cmd = [
-                "ffmpeg",
-                "-fflags", "nobuffer",
-                "-flags", "low_delay",
-                "-probesize", "32",
-                "-analyzeduration", "0",
-                "-rtsp_transport", RTSP_TRANSPORT,
-                "-i", self.rtsp_url,
-                "-f", "rawvideo",
-                "-pix_fmt", "rgb24",
-                "-s", f"{probe_w}x{probe_h}",
-                "-an",
-                "-sn",
-                "-vf", f"scale={probe_w}:{probe_h}",
-                "pipe:1",
-            ]
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                # Use unbuffered stdout so Python can incrementally consume
-                # large rawvideo frames instead of waiting on a giant buffered
-                # read, which delays processed-stream startup.
-                # 使用无缓冲 stdout，避免大 rawvideo 帧在缓冲读中长期阻塞，
-                # 从而拖慢 processed 流启动。
-                bufsize=0,
-            )
-
             stream_ok = False
+            container: av.container.InputContainer | None = None
             try:
-                while not self._stop_event.is_set():
-                    raw = self._read_exact(cast(BinaryIO, proc.stdout), frame_bytes)
-                    if len(raw) != frame_bytes:
-                        if not self._stop_event.is_set():
-                            logger.warning(
-                                "Frame reader got {} bytes (expected {}), stream may have ended",
-                                len(raw), frame_bytes,
-                            )
+                container = av.open(
+                    self.rtsp_url,
+                    mode="r",
+                    options={
+                        "rtsp_transport": RTSP_TRANSPORT,
+                        "fflags": "nobuffer",
+                        "flags": "low_delay",
+                        "probesize": "32",
+                        "analyzeduration": "0",
+                        "avioflags": "direct",
+                        "flush_packets": "1",
+                        "max_delay": "0",
+                        "stimeout": "5000000",
+                    },
+                    timeout=(5.0, 5.0),
+                )
+                video_stream = next(
+                    (stream for stream in container.streams if stream.type == "video"),
+                    None,
+                )
+                if video_stream is None:
+                    raise RuntimeError(f"No video stream found for {self.rtsp_url}")
+                video_stream.thread_type = "AUTO"
+                self._update_publish_fps(self._stream_fps(video_stream))
+
+                for frame in container.decode(video=0):
+                    if self._stop_event.is_set():
                         break
-
                     stream_ok = True
-                    reconnect_attempts = 0  # reset on successful read
-
-                    # Frame sampling: skip frames according to interval
-                    # 帧采样：按间隔跳过帧
+                    reconnect_attempts = 0
                     frame_counter += 1
-                    if FRAME_SAMPLE_INTERVAL > 1 and (frame_counter % FRAME_SAMPLE_INTERVAL) != 0:
+                    if (
+                        FRAME_SAMPLE_INTERVAL > 1
+                        and (frame_counter % FRAME_SAMPLE_INTERVAL) != 0
+                    ):
                         continue
-
-                    rgb = np.frombuffer(raw, dtype=np.uint8).reshape(
-                        (probe_h, probe_w, 3)
-                    )
-
+                    rgb = frame.to_ndarray(format="rgb24")
                     if _jpeg is not None:
-                        from turbojpeg import TJPF_RGB
                         encoded = _jpeg.encode(rgb, quality=85, pixel_format=TJPF_RGB)
                     else:
                         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
@@ -350,22 +289,20 @@ class BaseVideoProcessor(ABC):
                             ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85]
                         )
                         encoded = buf.tobytes() if ok else b""
-
                     loop.call_soon_threadsafe(
                         self._enqueue_frame_from_reader, rgb, encoded
                     )
+                if not stream_ok and not self._stop_event.is_set():
+                    logger.warning("PyAV reader ended before yielding frames for {}", self.rtsp_url)
             except Exception as exc:
                 if not self._stop_event.is_set():
                     logger.exception("Frame reader error for {}: {}", self.rtsp_url, exc)
             finally:
                 try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
+                    if container is not None:
+                        container.close()
                 except Exception:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
+                    pass
 
             # Reconnect logic
             if self._stop_event.is_set():
@@ -396,22 +333,24 @@ class BaseVideoProcessor(ABC):
         logger.info("Frame reader exited for {}", self.rtsp_url)
 
     @staticmethod
-    def _read_exact(
-        stream: BinaryIO,
-        expected_bytes: int,
-        chunk_size: int = 65536,
-    ) -> bytes:
-        """Read exactly *expected_bytes* from a pipe unless EOF occurs.
-        从管道中精确读取 *expected_bytes*，除非遇到 EOF。"""
-        chunks: list[bytes] = []
-        remaining = expected_bytes
-        while remaining > 0:
-            chunk = stream.read(min(chunk_size, remaining))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        return b"".join(chunks)
+    def _stream_fps(video_stream: av.video.stream.VideoStream) -> float | None:
+        """Best-effort FPS extraction from a PyAV video stream.
+        尽力从 PyAV 视频流中提取 FPS。"""
+        for rate in (
+            getattr(video_stream, "average_rate", None),
+            getattr(getattr(video_stream, "codec_context", None), "framerate", None),
+            getattr(video_stream, "base_rate", None),
+            getattr(video_stream, "guessed_rate", None),
+        ):
+            if rate is None:
+                continue
+            try:
+                value = float(rate)
+            except (TypeError, ValueError, ZeroDivisionError):
+                continue
+            if math.isfinite(value) and value > 0:
+                return value
+        return None
 
     # ── Abstract method ───────────────────────────────────────────────────
 
@@ -682,7 +621,6 @@ class BaseVideoProcessor(ABC):
         h, w = frame.shape[:2]
         shape = (h, w, frame.shape[2] if frame.ndim == 3 else 1)
         roi_pixel_points = self._normalize_rois_to_pixels(w, h)
-        self._prewarm_display_stream(frame, self._display_output_path())
 
         try:
             result = await self.process_frame(
@@ -799,28 +737,42 @@ class BaseVideoProcessor(ABC):
         返回处理结果帧使用的 RTSP 输出路径。"""
         return f"{self._stream_path()}_processed"
 
-    def _make_processing_overlay(self, frame: np.ndarray) -> np.ndarray:
-        """Create a placeholder frame while inference is still warming up.
-        在推理尚未返回时创建占位结果帧。"""
-        out = frame.copy()
-        cv2.putText(
-            out,
-            "Processing...",
-            (20, 40),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            DRAW_DETECTION_COLOR,
-            DRAW_FONT_THICKNESS,
-            cv2.LINE_AA,
-        )
-        return out
+    def _default_publish_fps(self) -> float:
+        """Fallback publish FPS before the input stream reports a frame rate.
+        输入流未报告帧率前使用的默认推流 FPS。"""
+        if PUSH_FPS > 0:
+            return max(PUSH_FPS / max(FRAME_SAMPLE_INTERVAL, 1), 1.0)
+        return float(FALLBACK_PUBLISH_FPS)
 
-    def _prewarm_display_stream(
-        self, frame: np.ndarray, output_rtsp_path: str
-    ) -> None:
-        """Set a placeholder frame so the steady publisher can prewarm the path.
-        设置占位帧，使恒定节奏发布线程可提前预热 processed 路径。"""
-        self._set_publish_frame(self._make_processing_overlay(frame), output_rtsp_path)
+    def _update_publish_fps(self, source_fps: float | None) -> None:
+        """Refresh effective publish FPS from source FPS and sample interval.
+        根据源流 FPS 和采样间隔刷新有效推流 FPS。"""
+        self._source_fps = source_fps
+        if source_fps is None or not math.isfinite(source_fps) or source_fps <= 0:
+            publish_fps = self._default_publish_fps()
+        else:
+            publish_fps = max(source_fps / max(FRAME_SAMPLE_INTERVAL, 1), 1.0)
+        self._publish_fps = publish_fps
+        logger.info(
+            "Using source FPS {:.3f} and publish FPS {:.3f} for {}",
+            source_fps if source_fps is not None else -1.0,
+            publish_fps,
+            self.source_id,
+        )
+
+    def _current_publish_fps(self) -> float:
+        """Return the current effective publish FPS with a safe fallback.
+        返回当前有效推流 FPS，并在异常值时安全回退。"""
+        target_fps = self._publish_fps
+        if target_fps <= 0:
+            logger.warning(
+                "Invalid publish FPS {:.3f} for {}, falling back to {}",
+                target_fps,
+                self.source_id,
+                FALLBACK_PUBLISH_FPS,
+            )
+            return float(FALLBACK_PUBLISH_FPS)
+        return target_fps
 
     def _set_publish_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Update the latest frame that the steady publisher should stream.
@@ -835,17 +787,9 @@ class BaseVideoProcessor(ABC):
     def _publish_worker(self) -> None:
         """Publish the latest frame at a steady cadence to keep RTSP healthy.
         以稳定节奏重复推送最新帧，保持 RTSP 输出持续可解码。"""
-        target_fps = PUSH_FPS
-        if target_fps <= 0:
-            logger.warning(
-                "Invalid PUSH_FPS={} (must be > 0), falling back to {}",
-                target_fps,
-                FALLBACK_PUBLISH_FPS,
-            )
-            target_fps = FALLBACK_PUBLISH_FPS
-        frame_interval = 1.0 / target_fps
         next_deadline = time.monotonic()
         while not self._publish_stop.is_set():
+            frame_interval = 1.0 / self._current_publish_fps()
             with self._publish_state_lock:
                 frame = None if self._publish_frame is None else self._publish_frame.copy()
                 path = self._publish_path
@@ -899,6 +843,8 @@ class BaseVideoProcessor(ABC):
 
         with self._push_lock:
             try:
+                target_fps = self._current_publish_fps()
+                gop = max(1, int(round(target_fps)))
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (
@@ -907,6 +853,7 @@ class BaseVideoProcessor(ABC):
                     or self._push_path != output_rtsp_path
                     or self._push_width != w
                     or self._push_height != h
+                    or abs(self._push_fps - target_fps) > 0.01
                 ):
                     self._close_push_container()
                     rtsp_url = (
@@ -916,19 +863,24 @@ class BaseVideoProcessor(ABC):
                     cmd = [
                         "ffmpeg",
                         "-y",
+                        "-fflags", "nobuffer",
+                        "-flags", "low_delay",
+                        "-flush_packets", "1",
                         "-f", "rawvideo",
                         "-pix_fmt", "rgb24",
                         "-s", f"{w}x{h}",
-                        "-r", str(PUSH_FPS),
+                        "-r", f"{target_fps:.3f}",
                         "-i", "pipe:0",
                         "-c:v", "libx264",
                         "-pix_fmt", "yuv420p",
                         "-preset", PUSH_PRESET,
                         "-tune", "zerolatency",
-                        "-g", str(PUSH_FPS),
+                        "-g", str(gop),
                         "-bf", "0",
+                        "-muxdelay", "0",
+                        "-muxpreload", "0",
                         "-f", "rtsp",
-                        "-rtsp_transport", "tcp",
+                        "-rtsp_transport", "udp",
                         rtsp_url,
                     ]
                     self._push_proc = subprocess.Popen(
@@ -940,6 +892,7 @@ class BaseVideoProcessor(ABC):
                     self._push_path = output_rtsp_path
                     self._push_width = w
                     self._push_height = h
+                    self._push_fps = target_fps
 
                 # Write raw RGB frame bytes to ffmpeg stdin.
                 # 将原始 RGB 帧字节写入 ffmpeg 的 stdin。
@@ -971,6 +924,7 @@ class BaseVideoProcessor(ABC):
             self._push_path = None
             self._push_width = 0
             self._push_height = 0
+            self._push_fps = 0.0
 
     # ── Utility ───────────────────────────────────────────────────────────
 

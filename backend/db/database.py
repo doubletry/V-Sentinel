@@ -565,28 +565,34 @@ async def list_analysis_messages(
     async with _db_session() as db:
         if source_id:
             async with db.execute(
-                "SELECT COUNT(*) FROM analysis_messages WHERE source_id = ?",
-                (source_id,),
-            ) as cursor:
-                total = int((await cursor.fetchone())[0])
-            async with db.execute(
-                "SELECT timestamp, source_name, source_id, level, message, image_base64 "
+                "SELECT timestamp, source_name, source_id, level, message, image_base64, "
+                "COUNT(*) OVER() AS total_count "
                 "FROM analysis_messages WHERE source_id = ? "
                 "ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (source_id, safe_size, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
+            if rows:
+                total = int(rows[0][6])
+            else:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM analysis_messages WHERE source_id = ?",
+                    (source_id,),
+                ) as cursor:
+                    total = int((await cursor.fetchone())[0])
         else:
             async with db.execute(
-                "SELECT COUNT(*) FROM analysis_messages",
-            ) as cursor:
-                total = int((await cursor.fetchone())[0])
-            async with db.execute(
-                "SELECT timestamp, source_name, source_id, level, message, image_base64 "
+                "SELECT timestamp, source_name, source_id, level, message, image_base64, "
+                "COUNT(*) OVER() AS total_count "
                 "FROM analysis_messages ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (safe_size, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
+            if rows:
+                total = int(rows[0][6])
+            else:
+                async with db.execute("SELECT COUNT(*) FROM analysis_messages") as cursor:
+                    total = int((await cursor.fetchone())[0])
     items = [
         {
             "timestamp": row[0],

@@ -16,11 +16,11 @@
     </div>
 
     <div class="summary-card">
-      <div class="summary-range">
-        {{ t('vehicleEvents.range') }}:
-        {{ formatDateTime(eventSince) }}
+        <div class="summary-range">
+          {{ t('vehicleEvents.range') }}:
+        {{ formatDateTimeWithTimezone(eventSince, appSettingsStore.timeZone) }}
         ~
-        {{ formatDateTime(eventUntil) }}
+        {{ formatDateTimeWithTimezone(eventUntil, appSettingsStore.timeZone) }}
       </div>
       <div class="summary-text">{{ summaryText }}</div>
     </div>
@@ -31,12 +31,12 @@
         <el-table-column prop="plate" :label="t('vehicleEvents.plate')" min-width="120" />
         <el-table-column :label="t('vehicleEvents.enterTime')" min-width="170">
           <template #default="{ row }">
-            {{ formatDateTime(row.enter_time) }}
+            {{ formatDateTimeWithTimezone(row.enter_time, appSettingsStore.timeZone) }}
           </template>
         </el-table-column>
         <el-table-column :label="t('vehicleEvents.exitTime')" min-width="170">
           <template #default="{ row }">
-            {{ formatDateTime(row.exit_time) }}
+            {{ formatDateTimeWithTimezone(row.exit_time, appSettingsStore.timeZone) }}
           </template>
         </el-table-column>
         <el-table-column :label="t('vehicleEvents.missingActions')" min-width="220">
@@ -65,10 +65,6 @@ const vehicleEvents = ref([])
 const summaryText = ref('')
 const eventSince = ref('')
 const eventUntil = ref('')
-
-function formatDateTime(timestamp) {
-  return formatDateTimeWithTimezone(timestamp, appSettingsStore.timeZone)
-}
 
 async function loadEvents() {
   loading.value = true

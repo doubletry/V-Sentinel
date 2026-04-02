@@ -21,11 +21,11 @@
         class="logs-table"
         :empty-text="t('processingLogs.noLogs')"
       >
-        <el-table-column :label="t('processingLogs.logTime')" width="172">
-          <template #default="scope">
-            {{ formatLogTime(scope.row.timestamp) }}
-          </template>
-        </el-table-column>
+          <el-table-column :label="t('processingLogs.logTime')" width="172">
+            <template #default="scope">
+             {{ formatDateTimeWithTimezone(scope.row.timestamp, appSettingsStore.timeZone) }}
+            </template>
+          </el-table-column>
         <el-table-column :label="t('processingLogs.logLevel')" width="100">
           <template #default="scope">
             <el-tag
@@ -72,10 +72,6 @@ const logPage = ref(1)
 const logPageSize = ref(12)
 const logErrorNotified = ref(false)
 let logTimer = null
-
-function formatLogTime(timestamp) {
-  return formatDateTimeWithTimezone(timestamp, appSettingsStore.timeZone)
-}
 
 async function loadLogs(page = 1) {
   logPage.value = page

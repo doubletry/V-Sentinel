@@ -15,7 +15,7 @@
           {{ msg.source_id === '__agent__' ? t('messageList.summary') : msg.level.toUpperCase() }}
         </el-tag>
         <span class="msg-source">{{ msg.source_name }}</span>
-        <span class="msg-time">{{ formatTime(msg.timestamp) }}</span>
+        <span class="msg-time">{{ formatTimeWithTimezone(msg.timestamp, appSettingsStore.timeZone) }}</span>
       </div>
       <div class="msg-body">{{ msg.message }}</div>
       <div v-if="msg.image_base64" class="msg-image">
@@ -59,10 +59,6 @@ const previewImage = ref('')
 function levelType(level) {
   const map = { info: '', warning: 'warning', alert: 'danger' }
   return map[level] ?? ''
-}
-
-function formatTime(ts) {
-  return formatTimeWithTimezone(ts, appSettingsStore.timeZone)
 }
 
 function openPreview(imageBase64) {

@@ -842,7 +842,9 @@ class BaseVideoProcessor(ABC):
             if frame is not None and path:
                 self._push_frame(frame, path)
             now = time.monotonic()
-            next_deadline = max(next_deadline + frame_interval, now + frame_interval)
+            next_deadline += frame_interval
+            if next_deadline < now:
+                next_deadline = now + frame_interval
             sleep_for = max(0.0, next_deadline - now)
             if self._publish_stop.wait(sleep_for):
                 break

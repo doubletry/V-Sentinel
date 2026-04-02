@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock
 
 import numpy as np
@@ -528,7 +529,13 @@ class TestCoreBaseVideoProcessorPipeline:
             app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
         )
         pushed: list[tuple[np.ndarray, str]] = []
-        proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        push_times: list[float] = []
+
+        def _record_push(frame, path):
+            pushed.append((frame.copy(), path))
+            push_times.append(time.monotonic())
+
+        proc._push_frame = _record_push
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
 
         proc._set_publish_frame(frame, "cam1_processed")
@@ -538,3 +545,8 @@ class TestCoreBaseVideoProcessorPipeline:
 
         assert len(pushed) >= 2
         assert all(path == "cam1_processed" for _, path in pushed)
+        intervals = [
+            later - earlier for earlier, later in zip(push_times, push_times[1:])
+        ]
+        assert intervals
+        assert min(intervals) <= (1 / PUSH_FPS) * 1.8

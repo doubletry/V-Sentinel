@@ -63,6 +63,7 @@ from core.truck.constants import (
     TRUCK_LABELS,
 )
 from core.runner import run_processor
+from core.truck.plate import extract_valid_plate_text
 from core.truck.tracker import (
     FrameAnalysis,
     TrackingDecision,
@@ -232,8 +233,11 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 image_id = item.get("image_id", 0)
                 if isinstance(image_id, int) and 0 <= image_id < len(ocr_track_ids):
                     tid = ocr_track_ids[image_id]
+                    valid_plate = extract_valid_plate_text(item.get("text", ""))
+                    if not valid_plate:
+                        return
                     self.tracker.feed_ocr(
-                        tid, item.get("text", ""), item.get("confidence", 0.0)
+                        tid, valid_plate, item.get("confidence", 0.0)
                     )
 
             coros.append(
@@ -306,17 +310,24 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             elif isinstance(r, BaseException):
                 logger.error("Truck processing sub-task error: {}", r)
 
+        annotated_frame = self.draw_on_frame(
+            frame,
+            AnalysisResult(
+                detections=detections,
+                classifications=classifications,
+                ocr_texts=ocr_texts,
+            ),
+        )
+
         # 5. Assemble key messages only: arrival, OCR, actions, departure.
         # 5. 仅组装关键消息：到达、OCR 识别、动作确认、离开。
         messages: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()
-        thumbnail = self._encode_thumbnail(frame)
+        thumbnail = self._encode_thumbnail(annotated_frame)
 
         # 5a. Vehicle arrival — newly confirmed trucks this frame.
         # 5a. 车辆到达——本帧新确认的卡车。
         for tid in decision.arrivals:
-            track = self.tracker.get_track(tid)
-            thumbnail = self._encode_thumbnail(frame)
             messages.append({
                 "timestamp": now,
                 "source_name": self.source_name,
@@ -404,6 +415,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             classifications=classifications,
             ocr_texts=ocr_texts,
             messages=messages,
+            annotated_frame=annotated_frame,
             extra={"visits": visit_records} if visit_records else {},
         )
 

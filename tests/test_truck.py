@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from unittest.mock import AsyncMock
 
+import cv2
 import numpy as np
 import pytest
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
+from core.truck.plate import extract_valid_plate_text, is_valid_plate_text
 from core.truck.constants import REQUIRED_ACTIONS
 from core.truck.tracker import (
     FrameAnalysis,
@@ -40,6 +43,14 @@ def _person_det(x1=20, y1=20, x2=60, y2=80, conf=0.8, label="person"):
         "x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2,
         "confidence": conf, "label": label,
     }
+
+
+def _decode_thumbnail(image_base64: str) -> np.ndarray:
+    raw = base64.b64decode(image_base64)
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    assert image is not None
+    return image
 
 
 # ── Tests for helper functions ────────────────────────────────────────────────
@@ -84,6 +95,18 @@ class TestMajorityVote:
         from collections import deque
         history = deque(["a", "b", "a", "a", "b"])
         assert _majority_vote(history, min_count=2) == "a"
+
+
+class TestPlateFiltering:
+    def test_accepts_prefixed_plate(self):
+        assert extract_valid_plate_text("粤B12345") == "粤B12345"
+
+    def test_accepts_plain_alnum_plate(self):
+        assert extract_valid_plate_text("BLX785") == "BLX785"
+
+    def test_rejects_invalid_plate(self):
+        assert extract_valid_plate_text("粤B12") == ""
+        assert not is_valid_plate_text("###")
 
 
 class TestMergeBoxes:
@@ -1084,6 +1107,8 @@ class TestProcessorKeyMessages:
         ]
         assert len(arrival_msgs) == 1
         assert arrival_msgs[0]["image_base64"]
+        decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
+        assert decoded.sum() > 0
 
     async def test_no_detection_message(self):
         """Per-frame detection messages are NOT produced anymore."""
@@ -1148,6 +1173,70 @@ class TestProcessorKeyMessages:
         assert len(plate_msgs) == 1
         assert "ABC123" in plate_msgs[0]["message"]
         assert plate_msgs[0]["image_base64"]
+
+    async def test_invalid_ocr_text_does_not_emit_plate_message(self):
+        """Invalid OCR plate text should be filtered out before messaging."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "???", "confidence": 0.99, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        assert [
+            m for m in result.messages if "Plate recognized" in m.get("message", "")
+        ] == []
+
+    async def test_plain_plate_text_can_emit_plate_message(self):
+        """Plain alnum plates like BLX785 should pass the filter."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "BLX785", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        plate_msgs = [
+            m for m in result.messages if "Plate recognized" in m.get("message", "")
+        ]
+        assert len(plate_msgs) == 1
+        assert "BLX785" in plate_msgs[0]["message"]
 
     async def test_action_confirmation_message_has_image(self):
         """Action-confirmed message includes an image snapshot."""

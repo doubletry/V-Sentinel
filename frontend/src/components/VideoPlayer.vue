@@ -46,11 +46,12 @@ let _conn = null
 let _reconnectTimer = null
 let _reconnectAttempts = 0
 const MAX_RECONNECT_DELAY = 30000 // 30s cap
+const STREAM_PENDING_RETRY_DELAY = 1000
 
-function _scheduleReconnect() {
+function _scheduleReconnect(delayOverride = null) {
   if (_reconnectTimer) return
   // Exponential backoff: 2s, 4s, 8s, 16s, 30s cap
-  const delay = Math.min(2000 * Math.pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY)
+  const delay = delayOverride ?? Math.min(2000 * Math.pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY)
   _reconnectAttempts++
   _reconnectTimer = setTimeout(() => {
     _reconnectTimer = null
@@ -92,7 +93,13 @@ async function connect() {
       }
     }
   } catch (err) {
-    error.value = err.message || t('videoPlayer.connectionFailed')
+    const message = err.message || t('videoPlayer.connectionFailed')
+    if (message.includes('WHEP error: 404')) {
+      error.value = ''
+      _scheduleReconnect(STREAM_PENDING_RETRY_DELAY)
+      return
+    }
+    error.value = message
     _scheduleReconnect()
   }
 }

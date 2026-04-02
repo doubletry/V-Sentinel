@@ -234,11 +234,10 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 if isinstance(image_id, int) and 0 <= image_id < len(ocr_track_ids):
                     tid = ocr_track_ids[image_id]
                     valid_plate = extract_valid_plate_text(item.get("text", ""))
-                    if not valid_plate:
-                        return
-                    self.tracker.feed_ocr(
-                        tid, valid_plate, item.get("confidence", 0.0)
-                    )
+                    if valid_plate:
+                        self.tracker.feed_ocr(
+                            tid, valid_plate, item.get("confidence", 0.0)
+                        )
 
             coros.append(
                 self._do_ocr(

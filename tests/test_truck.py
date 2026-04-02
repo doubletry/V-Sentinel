@@ -1107,6 +1107,7 @@ class TestProcessorKeyMessages:
         ]
         assert len(arrival_msgs) == 1
         assert arrival_msgs[0]["image_base64"]
+        assert arrival_msgs[0]["image_base64"] != proc._encode_thumbnail(frame)
         decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
         assert decoded.sum() > 0
 

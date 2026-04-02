@@ -15,7 +15,7 @@ import subprocess
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, BinaryIO, Callable, cast
 from urllib.parse import urlparse
 
 import cv2
@@ -308,9 +308,7 @@ class BaseVideoProcessor(ABC):
             stream_ok = False
             try:
                 while not self._stop_event.is_set():
-                    raw = self._read_exact(  # type: ignore[arg-type]
-                        proc.stdout, frame_bytes
-                    )
+                    raw = self._read_exact(cast(BinaryIO, proc.stdout), frame_bytes)
                     if len(raw) != frame_bytes:
                         if not self._stop_event.is_set():
                             logger.warning(
@@ -387,7 +385,11 @@ class BaseVideoProcessor(ABC):
         logger.info("Frame reader exited for {}", self.rtsp_url)
 
     @staticmethod
-    def _read_exact(stream: Any, expected_bytes: int, chunk_size: int = 65536) -> bytes:
+    def _read_exact(
+        stream: BinaryIO,
+        expected_bytes: int,
+        chunk_size: int = 65536,
+    ) -> bytes:
         """Read exactly *expected_bytes* from a pipe unless EOF occurs.
         从管道中精确读取 *expected_bytes*，除非遇到 EOF。"""
         chunks: list[bytes] = []

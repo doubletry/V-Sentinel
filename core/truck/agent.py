@@ -163,7 +163,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             minute = DAILY_SUMMARY_MINUTE
 
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now:
+        if target < now:
             target += timedelta(days=1)
         return target
 

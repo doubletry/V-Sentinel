@@ -33,7 +33,7 @@ from backend.models.schemas import AnalysisMessage, ROI
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
-    from backend.processing.agent import AnalysisAgent
+    from backend.processing.truck.agent import AnalysisAgent
 
 
 class BaseVideoProcessor(_CoreBaseVideoProcessor):

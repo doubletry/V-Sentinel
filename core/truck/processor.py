@@ -62,7 +62,7 @@ from core.constants import (
     TRUCK_LABELS,
 )
 from core.runner import run_processor
-from core.truck_tracker import (
+from core.truck.tracker import (
     FrameAnalysis,
     TrackingDecision,
     TruckTracker,

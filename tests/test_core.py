@@ -291,7 +291,7 @@ class TestCoreBackendVEngineInheritance:
 
 class TestCoreExampleProcessorBatchClassification:
     async def test_process_frame_reuses_image_key_for_person_rois(self):
-        from core.example_processor import ExampleProcessor
+        from core.example.processor import ExampleProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"

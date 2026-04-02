@@ -8,7 +8,7 @@ import pytest
 
 from backend.api.ws import WSManager
 from backend.models.schemas import AnalysisMessage
-from backend.processing.agent import AnalysisAgent
+from backend.processing.truck.agent import AnalysisAgent
 from backend.processing.base import AnalysisResult
 
 

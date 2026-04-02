@@ -7,7 +7,7 @@ from loguru import logger
 
 from backend.db.database import get_source, list_sources
 from backend.models.schemas import ProcessorStatus
-from backend.processing.agent import AnalysisAgent
+from backend.processing.truck.agent import AnalysisAgent
 from backend.processing.base import BaseVideoProcessor
 from backend.processing.registry import resolve_processor_class
 

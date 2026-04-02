@@ -4,17 +4,24 @@ from typing import TYPE_CHECKING
 
 from backend.models.schemas import ROI
 from backend.processing.base import BaseVideoProcessor
-from core.example_processor import ExampleProcessor as _CoreExampleProcessor
+from core.truck.processor import TruckMonitorProcessor as _CoreTruckMonitorProcessor
 
 if TYPE_CHECKING:
     from backend.api.ws import WSManager
-    from backend.processing.agent import AnalysisAgent
+    from backend.processing.truck.agent import AnalysisAgent
     from backend.vengine.client import AsyncVEngineClient
 
 
-class ExampleProcessor(BaseVideoProcessor, _CoreExampleProcessor):
-    """Backend adapter for the example scene plugin.
-    example 场景插件的 backend 适配层。"""
+class TruckMonitorProcessor(BaseVideoProcessor, _CoreTruckMonitorProcessor):
+    """Backend adapter for the truck-monitoring scenario plugin.
+    truck 场景插件的 backend 适配层。
+
+    Inheritance split / 分层：
+    * ``backend.processing.base.BaseVideoProcessor`` provides backend wiring
+      (WS broadcasting, agent dispatch, backend lifecycle integration).
+    * ``core.truck_processor.TruckMonitorProcessor`` provides the truck-specific
+      scene logic (tracking, OCR/classification orchestration, visit messages).
+    """
 
     def __init__(
         self,

@@ -11,7 +11,7 @@ import pytest
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
 from core.constants import REQUIRED_ACTIONS
-from core.truck_tracker import (
+from core.truck.tracker import (
     FrameAnalysis,
     TrackedTruck,
     TrackingDecision,
@@ -472,7 +472,7 @@ class TestTruckMonitorProcessor:
     async def test_no_vengine_echo_mode(self):
         """Without V-Engine, processor runs in echo mode (draws frame number).
         无 V-Engine 时，处理器运行在回显模式（绘制帧号）。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
         proc = TruckMonitorProcessor(
             source_id="s1",
             source_name="cam",
@@ -489,7 +489,7 @@ class TestTruckMonitorProcessor:
     async def test_full_pipeline_with_truck_and_person(self):
         """Full pipeline: detect truck+person → OCR → classify → track.
         完整流水线：检测卡车+行人 → OCR → 分类 → 跟踪。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -530,7 +530,7 @@ class TestTruckMonitorProcessor:
     async def test_truck_leaves_produces_visit_message(self):
         """When truck leaves, a visit message is produced with the plate.
         卡车离开时应产生带车牌的到访消息。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -572,7 +572,7 @@ class TestTruckMonitorProcessor:
     async def test_classification_includes_person_bbox(self):
         """Classification results include person_bbox for per-person labelling.
         分类结果包含 person_bbox 用于每个人的标注。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -613,7 +613,7 @@ class TestTruckProcessorRoiFlow:
     async def test_detect_receives_model_roi_from_roi_pixel_points(self):
         """When roi_pixel_points is provided, detect() receives model_roi.
         当提供 roi_pixel_points 时，detect() 接收到 model_roi。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -645,7 +645,7 @@ class TestTruckProcessorRoiFlow:
     async def test_detect_receives_none_model_roi_when_no_roi_pixel_points(self):
         """When roi_pixel_points is empty, detect() receives model_roi=None.
         当 roi_pixel_points 为空时，detect() 接收 model_roi=None。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -673,7 +673,7 @@ class TestTruckProcessorRoiFlow:
         """detect() is called with single-image args (not images list), so
         model_roi at top level is used correctly.
         detect() 使用单图参数调用（非 images 列表），因此顶层 model_roi 正确使用。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -699,7 +699,7 @@ class TestTruckProcessorRoiFlow:
     async def test_ocr_images_include_truck_bbox_as_roi(self):
         """OCR batch items contain the truck bounding box as their ROI.
         OCR 批量项包含卡车检测框作为其 ROI。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -738,7 +738,7 @@ class TestTruckProcessorRoiFlow:
     async def test_classify_images_include_merged_roi(self):
         """Classify batch items contain the merged person + truck ROI.
         分类批量项包含合并的人+卡车 ROI。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -785,7 +785,7 @@ class TestTruckProcessorRoiFlow:
         """OCR and classify batch items use image_key (via 'key' alias) when
         upload succeeds.
         当上传成功时，OCR 和分类批量项使用 image_key（通过 'key' 别名）。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "my-cache-key"
@@ -827,7 +827,7 @@ class TestTruckProcessorRoiFlow:
     async def test_ocr_and_classify_fallback_to_bytes_when_no_key(self):
         """OCR and classify fall back to image_bytes when upload returns None.
         当上传返回 None 时，OCR 和分类回退到 image_bytes。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = None  # upload failed
@@ -869,7 +869,7 @@ class TestTruckProcessorRoiFlow:
     async def test_detect_with_roi_and_key_passes_both(self):
         """When both ROI and key are available, detect() receives both.
         当 ROI 和 key 都可用时，detect() 同时接收两者。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -904,7 +904,7 @@ class TestTruckProcessorRoiFlow:
         """Full pipeline with ROI: detect passes roi, OCR and classify use
         item-level ROIs.
         带 ROI 的完整流水线：检测传递 roi，OCR 和分类使用项级 ROI。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"

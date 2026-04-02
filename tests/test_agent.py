@@ -105,7 +105,7 @@ class TestAnalysisAgentAggregation:
 
         ws.broadcast.assert_not_awaited()
 
-    async def test_daily_summary_broadcasts_daily_message(self, monkeypatch):
+    async def test_truck_agent_daily_summary_broadcasts_message(self, monkeypatch):
         ws = WSManager()
         ws.broadcast = AsyncMock()
         fake_email_client = AsyncMock()

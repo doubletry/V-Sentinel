@@ -271,7 +271,9 @@ class BaseVideoProcessor(ABC):
                     None,
                 )
                 if video_stream is None:
-                    raise RuntimeError(f"No video stream found for {self.rtsp_url}")
+                    raise RuntimeError(
+                        f"No video track found in stream {self.rtsp_url}"
+                    )
                 video_stream.thread_type = "AUTO"
                 self._update_publish_fps(self._stream_fps(video_stream))
 
@@ -875,6 +877,7 @@ class BaseVideoProcessor(ABC):
                 target_fps = self._current_publish_fps()
                 # Keep keyframes about twice per second so new RTSP readers can
                 # lock onto the stream faster under low-latency UDP delivery.
+                # GOP_DIVISOR = 2 means ~0.5s keyframe spacing.
                 # 约每 0.5 秒一个关键帧，帮助低延迟 UDP 读者更快起播。
                 gop = max(1, int(round(target_fps / GOP_DIVISOR)))
                 # Re-create ffmpeg process when path or dimensions change.

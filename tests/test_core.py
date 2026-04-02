@@ -630,6 +630,7 @@ class TestCoreBaseVideoProcessorPipeline:
         cmd = captured[0]
         assert "-rtsp_transport" in cmd
         assert cmd[cmd.index("-rtsp_transport") + 1] == "udp"
+        assert "-r" in cmd
         assert cmd[cmd.index("-r") + 1] == "10.000"
 
     def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):

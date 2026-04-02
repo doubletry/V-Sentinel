@@ -41,6 +41,8 @@
 <script setup>
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAppSettingsStore } from '../stores/appSettings.js'
+import { formatTimeWithTimezone } from '../utils/time.js'
 
 const props = defineProps({
   messages: {
@@ -50,6 +52,7 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
+const appSettingsStore = useAppSettingsStore()
 const previewVisible = ref(false)
 const previewImage = ref('')
 
@@ -59,9 +62,7 @@ function levelType(level) {
 }
 
 function formatTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return d.toLocaleTimeString()
+  return formatTimeWithTimezone(ts, appSettingsStore.timeZone)
 }
 
 function openPreview(imageBase64) {
@@ -140,11 +141,13 @@ function openPreview(imageBase64) {
 }
 
 .msg-image img {
-  max-width: 100%;
-  max-height: 160px;
+  width: auto;
+  max-width: min(100%, 360px);
+  max-height: 220px;
   border-radius: 4px;
   object-fit: contain;
   cursor: zoom-in;
+  image-rendering: auto;
 }
 
 .preview-image {

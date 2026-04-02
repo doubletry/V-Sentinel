@@ -511,7 +511,7 @@ class BaseVideoProcessor(ABC):
         return {"classifications": classifications}
 
     def _encode_thumbnail(
-        self, frame: np.ndarray | None, max_width: int = 320
+        self, frame: np.ndarray | None, max_width: int = 480
     ) -> str | None:
         """Encode a frame as a base64 JPEG thumbnail (RGB channel order).
         将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
@@ -526,10 +526,10 @@ class BaseVideoProcessor(ABC):
             )
 
         if _jpeg is not None:
-            encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
+            encoded = _jpeg.encode(frame, quality=85, pixel_format=TJPF_RGB)
         else:
             bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
             if not ok:
                 return None
             encoded = buf.tobytes()

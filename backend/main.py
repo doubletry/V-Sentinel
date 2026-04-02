@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,6 +28,12 @@ logger.remove()
 logger.add(sys.stderr, level="INFO", colorize=True)
 
 
+def _should_capture_runtime_log(module_name: str) -> bool:
+    """Return whether a runtime log should be shown in the log page.
+    返回该运行时日志是否应显示在日志页。"""
+    return module_name.startswith(("backend.", "core.", "uvicorn"))
+
+
 def _processing_log_sink(message) -> None:
     """Forward processing logs to the in-memory ring buffer.
     将处理日志转发到内存环形缓冲区。"""
@@ -42,8 +49,38 @@ def _processing_log_sink(message) -> None:
 logger.add(
     _processing_log_sink,
     level="INFO",
-    filter=lambda record: str(record["name"]).startswith("backend.processing"),
+    filter=lambda record: _should_capture_runtime_log(str(record["name"])),
 )
+
+
+class _StdlibProcessingLogHandler(logging.Handler):
+    """Bridge stdlib logging records into the runtime log buffer.
+    将标准库 logging 记录桥接到运行时日志缓冲区。"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not _should_capture_runtime_log(record.name):
+            return
+        processing_log_buffer.append(
+            timestamp=datetime_from_record(record),
+            level=record.levelname,
+            module=record.name,
+            message=record.getMessage(),
+        )
+
+
+def datetime_from_record(record: logging.LogRecord) -> str:
+    """Format a stdlib logging timestamp as ISO string.
+    将标准库 logging 的时间格式化为 ISO 字符串。"""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
+
+
+_STDLIB_LOG_HANDLER = _StdlibProcessingLogHandler()
+for _logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    _logger = logging.getLogger(_logger_name)
+    if not any(isinstance(handler, _StdlibProcessingLogHandler) for handler in _logger.handlers):
+        _logger.addHandler(_STDLIB_LOG_HANDLER)
 
 # Module-level singletons (accessed by API routers) / 模块级单例（供 API 路由使用）
 ws_manager: ws_module.WSManager

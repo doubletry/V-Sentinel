@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 const VideoWall = () => import('../views/VideoWall.vue')
 const Messages = () => import('../views/Messages.vue')
+const VehicleEvents = () => import('../views/VehicleEvents.vue')
 const ProcessingLogs = () => import('../views/ProcessingLogs.vue')
 const Settings = () => import('../views/Settings.vue')
 
@@ -15,6 +16,11 @@ const routes = [
     path: '/messages',
     name: 'Messages',
     component: Messages,
+  },
+  {
+    path: '/vehicle-events',
+    name: 'VehicleEvents',
+    component: VehicleEvents,
   },
   {
     path: '/processing-logs',

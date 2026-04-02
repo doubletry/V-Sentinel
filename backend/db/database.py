@@ -549,29 +549,45 @@ async def save_analysis_message(message: dict[str, str | None]) -> str:
 
 async def list_analysis_messages(
     *,
-    limit: int = 500,
+    limit: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
     source_id: str | None = None,
-) -> list[dict[str, str | None]]:
+) -> dict[str, object]:
     """List persisted analysis messages ordered newest-first.
     按时间倒序列出持久化分析消息。"""
-    safe_limit = min(1000, max(1, int(limit)))
+    safe_page = max(1, int(page))
+    safe_size = min(100, max(1, int(page_size)))
+    if limit is not None:
+        safe_page = 1
+        safe_size = min(100, max(1, int(limit)))
+    offset = (safe_page - 1) * safe_size
     async with _db_session() as db:
         if source_id:
             async with db.execute(
+                "SELECT COUNT(*) FROM analysis_messages WHERE source_id = ?",
+                (source_id,),
+            ) as cursor:
+                total = int((await cursor.fetchone())[0])
+            async with db.execute(
                 "SELECT timestamp, source_name, source_id, level, message, image_base64 "
                 "FROM analysis_messages WHERE source_id = ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (source_id, safe_limit),
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (source_id, safe_size, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
         else:
             async with db.execute(
+                "SELECT COUNT(*) FROM analysis_messages",
+            ) as cursor:
+                total = int((await cursor.fetchone())[0])
+            async with db.execute(
                 "SELECT timestamp, source_name, source_id, level, message, image_base64 "
-                "FROM analysis_messages ORDER BY created_at DESC LIMIT ?",
-                (safe_limit,),
+                "FROM analysis_messages ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (safe_size, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
-    return [
+    items = [
         {
             "timestamp": row[0],
             "source_name": row[1],
@@ -582,3 +598,11 @@ async def list_analysis_messages(
         }
         for row in rows
     ]
+    total_pages = (total + safe_size - 1) // safe_size if total else 0
+    return {
+        "items": items,
+        "page": safe_page,
+        "page_size": safe_size,
+        "total": total,
+        "total_pages": total_pages,
+    }

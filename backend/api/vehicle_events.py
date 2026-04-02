@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.db.database import get_all_settings, get_vehicle_visits_between
 from core.truck.agent import TruckAnalysisAgent
@@ -24,27 +25,43 @@ def _safe_summary_time(app_settings: dict[str, str]) -> tuple[int, int]:
 
 def _previous_summary_boundary(now: datetime, app_settings: dict[str, str]) -> datetime:
     hour, minute = _safe_summary_time(app_settings)
-    boundary = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if boundary > now:
+    tzinfo = _get_timezone(app_settings)
+    local_now = now.astimezone(tzinfo)
+    boundary = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if boundary > local_now:
         boundary -= timedelta(days=1)
-    return boundary
+    return boundary.astimezone(timezone.utc)
+
+
+def _get_timezone(app_settings: dict[str, str]) -> ZoneInfo:
+    timezone_name = str(app_settings.get("timezone") or "Asia/Shanghai").strip()
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("Asia/Shanghai")
 
 
 @router.get("/today")
 async def get_today_vehicle_events() -> dict:
     """Return today's vehicle visits and a summary text.
     返回当天车辆事件及其总结文本。"""
-    now = datetime.now(timezone.utc)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    app_settings = await get_all_settings()
+    tzinfo = _get_timezone(app_settings)
+    local_now = datetime.now(timezone.utc).astimezone(tzinfo)
+    local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = local_start.astimezone(timezone.utc)
+    now = local_now.astimezone(timezone.utc)
     visits = await get_vehicle_visits_between(start.isoformat(), now.isoformat())
     summary_text = TruckAnalysisAgent.build_daily_summary_text(
         visits,
         start.isoformat(),
         now.isoformat(),
+        timezone_name=str(app_settings.get("timezone") or "Asia/Shanghai"),
     )
     return {
         "since": start.isoformat(),
         "until": now.isoformat(),
+        "timezone": str(app_settings.get("timezone") or "Asia/Shanghai"),
         "summary_text": summary_text,
         "visits": visits,
     }
@@ -63,6 +80,7 @@ async def send_summary_now(request: Request) -> dict:
         visits,
         since.isoformat(),
         until_iso,
+        timezone_name=str(app_settings.get("timezone") or "Asia/Shanghai"),
     )
     email_client = request.app.state.email_client
     await email_client.reconnect_from_settings(app_settings)
@@ -75,6 +93,7 @@ async def send_summary_now(request: Request) -> dict:
         "status": result.get("status", "SUCCESS"),
         "since": since.isoformat(),
         "until": until_iso,
+        "timezone": str(app_settings.get("timezone") or "Asia/Shanghai"),
         "visit_count": len(visits),
         "summary_text": summary_text,
     }

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 DEFAULT_APP_SETTINGS: dict[str, str] = {
     # UI / 界面
     "ui_language": "zh-CN",
+    "timezone": "Asia/Shanghai",
     "site_title": "V-Sentinel",
     "site_description": "AI Video Surveillance Analysis Platform",
     "favicon_url": "/favicon.ico",

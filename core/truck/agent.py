@@ -14,6 +14,7 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from loguru import logger
 
@@ -162,22 +163,28 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         except Exception:
             minute = DAILY_SUMMARY_MINUTE
 
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target < now:
+        tz_name = self._normalize_timezone_name(settings.get("timezone"))
+        tzinfo = self._get_zoneinfo(tz_name)
+        local_now = now.astimezone(tzinfo)
+        target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target < local_now:
             target += timedelta(days=1)
-        return target
+        return target.astimezone(timezone.utc)
 
     async def _daily_summary_loop(self) -> None:
         """Generate a daily Chinese summary at the configured local time.
         在配置的本地时间生成中文每日总结。"""
         try:
             while not self._stop_event.is_set():
-                now = datetime.now()
+                settings = await self.load_app_settings()
+                tz_name = self._normalize_timezone_name(settings.get("timezone"))
+                tzinfo = self._get_zoneinfo(tz_name)
+                now = datetime.now(timezone.utc)
                 target = await self._get_daily_summary_target(now)
                 wait_secs = (target - now).total_seconds()
                 logger.info(
                     "Daily summary scheduled at {} (in {:.0f}s)",
-                    target.strftime("%Y-%m-%d %H:%M"),
+                    target.astimezone(tzinfo).strftime("%Y-%m-%d %H:%M"),
                     wait_secs,
                 )
                 await asyncio.sleep(wait_secs)
@@ -195,6 +202,8 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         since = self._last_summary_time
         now_iso = datetime.now(timezone.utc).isoformat()
         self._last_summary_time = now_iso
+        app_settings = await self.load_app_settings()
+        timezone_name = self._normalize_timezone_name(app_settings.get("timezone"))
 
         try:
             visits = await self.load_vehicle_visits_since(since)
@@ -202,7 +211,12 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             logger.error("Failed to query vehicle visits for daily summary: {}", exc)
             return
 
-        summary_text = self._build_daily_summary_text(visits, since, now_iso)
+        summary_text = self._build_daily_summary_text(
+            visits,
+            since,
+            now_iso,
+            timezone_name=timezone_name,
+        )
         await self._broadcast(
             self.normalize_message(
                 {
@@ -232,10 +246,13 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         visits: list[dict[str, Any]],
         since_iso: str,
         until_iso: str,
+        timezone_name: str = "UTC",
     ) -> str:
         """Public wrapper for building a daily summary text.
         对外公开的每日总结文本构建入口。"""
-        return cls._build_daily_summary_text(visits, since_iso, until_iso)
+        return cls._build_daily_summary_text(
+            visits, since_iso, until_iso, timezone_name=timezone_name
+        )
 
     @classmethod
     def _build_daily_summary_text(
@@ -243,16 +260,22 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         visits: list[dict[str, Any]],
         since_iso: str,
         until_iso: str,
+        timezone_name: str = "UTC",
     ) -> str:
         """Build a Chinese daily summary from persisted visit records.
         基于持久化到访记录构建中文每日总结。"""
+        tzinfo = cls._get_zoneinfo(timezone_name)
         try:
-            since_str = datetime.fromisoformat(since_iso).strftime("%Y-%m-%d %H:%M")
+            since_str = datetime.fromisoformat(since_iso).astimezone(tzinfo).strftime(
+                "%Y-%m-%d %H:%M"
+            )
         except Exception:
             since_str = since_iso
 
         try:
-            until_str = datetime.fromisoformat(until_iso).strftime("%Y-%m-%d %H:%M")
+            until_str = datetime.fromisoformat(until_iso).astimezone(tzinfo).strftime(
+                "%Y-%m-%d %H:%M"
+            )
         except Exception:
             until_str = until_iso
 
@@ -290,3 +313,15 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
                 )
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _normalize_timezone_name(value: Any) -> str:
+        text = str(value or "").strip()
+        return text or "UTC"
+
+    @staticmethod
+    def _get_zoneinfo(timezone_name: str) -> ZoneInfo:
+        try:
+            return ZoneInfo(timezone_name)
+        except ZoneInfoNotFoundError:
+            return ZoneInfo("UTC")

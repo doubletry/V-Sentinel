@@ -26,12 +26,32 @@ PERSON_LABEL: str = "person"
 """Detection label for people. 行人的检测标签。"""
 
 REQUIRED_ACTIONS: frozenset[str] = frozenset(
-    {"action1", "action2", "action3", "action4", "action5", "action6"}
+    {
+        "HandOverKeys",
+        "PlaceWheelChock",
+        "InnerInspectionOfTruck",
+        "ExteriorInspectionOfTruck",
+        "TakePhotoOfGoods",
+        "TakePhotoOfSeal",
+    }
 )
 """Required actions during a truck visit. 卡车到访期间要求识别到的动作。"""
 
-OTHER_ACTION_LABEL: str = "other"
+OTHER_ACTION_LABEL: str = "Other"
 """Classification label for the non-required other class. 非必需 other 分类标签。"""
+
+ACTION_LABEL_ALIASES: dict[str, str] = {
+    "action1": "HandOverKeys",
+    "action2": "PlaceWheelChock",
+    "action3": "InnerInspectionOfTruck",
+    "action4": "ExteriorInspectionOfTruck",
+    "action5": "TakePhotoOfGoods",
+    "action6": "TakePhotoOfSeal",
+    "other": "Other",
+    "TakePhotosOfSeal": "TakePhotoOfSeal",
+    "TakePhotosOfGoods": "TakePhotoOfGoods",
+}
+"""Aliases and typo fixes for action labels. 动作标签别名和拼写修正。"""
 
 OCR_INTERVAL: int = 10
 """Frames between OCR attempts for the same truck. 同一卡车 OCR 间隔帧数。"""
@@ -57,18 +77,30 @@ DAILY_SUMMARY_MINUTE: int = 59
 LABEL_EN_TO_ZH: dict[str, str] = {
     "truck": "卡车",
     "person": "行人",
-    "action1": "动作1",
-    "action2": "动作2",
-    "action3": "动作3",
-    "action4": "动作4",
-    "action5": "动作5",
-    "action6": "动作6",
-    "ExteriorInspectionOfTruck": "车身外检",
+    "HandOverKeys": "上交钥匙",
+    "PlaceWheelChock": "放三角木",
     "InnerInspectionOfTruck": "车内检查",
+    "ExteriorInspectionOfTruck": "车外检查",
     "TakePhotoOfGoods": "货物拍照",
-    "TakePhotoOfSeal": "铅封拍照",
+    "TakePhotoOfSeal": "封条拍照",
+    "action1": "上交钥匙",
+    "action2": "放三角木",
+    "action3": "车内检查",
+    "action4": "车外检查",
+    "action5": "货物拍照",
+    "action6": "封条拍照",
+    "TakePhotosOfGoods": "货物拍照",
+    "TakePhotosOfSeal": "封条拍照",
+    "Other": "其他",
     "other": "其他",
     "unknown": "未知",
     "none": "无",
 }
 """English-to-Chinese labels for truck-scene messages. truck 场景中英文标签映射。"""
+
+
+def normalize_action_label(label: str) -> str:
+    """Normalize raw classifier labels to canonical action names.
+    将分类器原始标签规范化为标准动作名。"""
+    text = str(label or "").strip()
+    return ACTION_LABEL_ALIASES.get(text, text)

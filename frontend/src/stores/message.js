@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import config from '../config.js'
 import { messagesApi } from '../api/index.js'
 
@@ -8,19 +8,26 @@ export const useMessageStore = defineStore('message', () => {
   const wsConnected = ref(false)
   const filterSource = ref('')
   const loading = ref(false)
+  const page = ref(1)
+  const pageSize = ref(20)
+  const total = ref(0)
   let _ws = null
   let _reconnectTimer = null
 
-  const filteredMessages = computed(() => {
-    if (!filterSource.value) return messages.value
-    return messages.value.filter((m) => m.source_id === filterSource.value)
-  })
+  const pageSizeOptions = [20, 40, 60, 80, 100]
 
-  async function fetchMessages() {
+  async function fetchMessages(nextPage = page.value, nextPageSize = pageSize.value) {
     loading.value = true
     try {
-      const data = await messagesApi.list({ limit: 500 })
-      messages.value = Array.isArray(data) ? data : []
+      const data = await messagesApi.list({
+        page: nextPage,
+        page_size: nextPageSize,
+        source_id: filterSource.value || undefined,
+      })
+      page.value = Number(data.page || nextPage)
+      pageSize.value = Number(data.page_size || nextPageSize)
+      total.value = Number(data.total || 0)
+      messages.value = Array.isArray(data.items) ? data.items : []
       return messages.value
     } finally {
       loading.value = false
@@ -51,10 +58,14 @@ export const useMessageStore = defineStore('message', () => {
       try {
         const msg = JSON.parse(event.data)
         if (msg === 'pong') return
-        // Keep newest at front, limit to 500
-        messages.value.unshift(msg)
-        if (messages.value.length > 500) {
-          messages.value = messages.value.slice(0, 500)
+        const matchesFilter = !filterSource.value || msg.source_id === filterSource.value
+        if (!matchesFilter) return
+        total.value += 1
+        if (page.value === 1) {
+          messages.value.unshift(msg)
+          if (messages.value.length > pageSize.value) {
+            messages.value = messages.value.slice(0, pageSize.value)
+          }
         }
       } catch (_) {
         // Ignore parse errors
@@ -85,6 +96,7 @@ export const useMessageStore = defineStore('message', () => {
 
   function clearMessages() {
     messages.value = []
+    total.value = 0
   }
 
   function setFilterSource(sourceId) {
@@ -94,9 +106,12 @@ export const useMessageStore = defineStore('message', () => {
   return {
     messages,
     loading,
+    page,
+    pageSize,
+    total,
+    pageSizeOptions,
     wsConnected,
     filterSource,
-    filteredMessages,
     fetchMessages,
     connectWS,
     disconnectWS,

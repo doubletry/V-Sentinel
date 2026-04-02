@@ -108,6 +108,7 @@ class AppSettingsUpdate(BaseModel):
     部分更新应用设置（所有字段可选）。"""
 
     ui_language: str | None = None
+    timezone: str | None = None
     site_title: str | None = None
     site_description: str | None = None
     favicon_url: str | None = None

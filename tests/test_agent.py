@@ -83,6 +83,16 @@ class TestAnalysisAgentBuildSummary:
         summary = AnalysisAgent._build_summary([("s1", "Camera 1", result)])
         assert summary is None
 
+    def test_daily_summary_text_uses_configured_timezone(self):
+        text = AnalysisAgent.build_daily_summary_text(
+            [],
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-01T01:00:00+00:00",
+            timezone_name="Asia/Shanghai",
+        )
+        assert "2026-01-01 08:00" in text
+        assert "2026-01-01 09:00" in text
+
 
 class TestAnalysisAgentAggregation:
     async def test_aggregation_does_not_broadcast_generic_summary(self):
@@ -117,7 +127,7 @@ class TestAnalysisAgentAggregation:
                 "source_name": "Cam1",
                 "track_id": 1,
                 "plate": "ABC123",
-                "confirmed_actions": ["action1"],
+                "confirmed_actions": ["HandOverKeys"],
                 "missing_actions": [],
             }]
 

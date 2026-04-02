@@ -29,6 +29,16 @@
               />
             </el-select>
           </el-form-item>
+          <el-form-item :label="t('settings.timezone')">
+            <el-select v-model="form.timezone" style="width: 100%" filterable allow-create default-first-option>
+              <el-option
+                v-for="option in timezoneOptions"
+                :key="option"
+                :label="option"
+                :value="option"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item :label="t('settings.siteTitle')">
             <el-input v-model="form.site_title" :placeholder="t('settings.siteTitle')" />
           </el-form-item>
@@ -243,14 +253,6 @@
               />
             </el-select>
           </el-form-item>
-          <div class="summary-actions">
-            <el-button @click="loadTodayVehicleEvents" :loading="loadingVehicleEvents">
-              {{ t('settings.viewTodayVehicleEvents') }}
-            </el-button>
-            <el-button type="primary" @click="sendSummaryNow" :loading="sendingSummaryNow">
-              {{ t('settings.sendSummaryNow') }}
-            </el-button>
-          </div>
         </section>
 
         <section class="settings-section">
@@ -277,25 +279,6 @@
         </div>
       </el-form>
 
-      <el-dialog
-        v-model="vehicleEventsDialogVisible"
-        :title="t('settings.todayVehicleEvents')"
-        width="78%"
-        top="6vh"
-      >
-        <div class="vehicle-summary-text">{{ vehicleSummaryText }}</div>
-        <el-table :data="vehicleEvents" stripe>
-          <el-table-column prop="source_name" :label="t('settings.vehicleEventSource')" min-width="120" />
-          <el-table-column prop="plate" :label="t('settings.vehicleEventPlate')" min-width="120" />
-          <el-table-column prop="enter_time" :label="t('settings.vehicleEventEnterTime')" min-width="160" />
-          <el-table-column prop="exit_time" :label="t('settings.vehicleEventExitTime')" min-width="160" />
-          <el-table-column :label="t('settings.vehicleEventMissingActions')" min-width="180">
-            <template #default="{ row }">
-              {{ (row.missing_actions || []).join('、') || t('settings.none') }}
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-dialog>
     </div>
   </div>
 </template>
@@ -305,7 +288,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { localeOptions } from '../i18n/index.js'
-import { processorApi, vehicleEventsApi } from '../api/index.js'
+import { processorApi } from '../api/index.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { useSourceStore } from '../stores/source.js'
 
@@ -314,21 +297,18 @@ const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
 const processorPluginOptions = ref([])
-const retentionDayOptions = Array.from({ length: 30 }, (_, dayIndex) => dayIndex + 1)
+const retentionDayOptions = [7, 15, 21, 30]
+const timezoneOptions = ['Asia/Shanghai', 'UTC', 'Asia/Tokyo', 'Europe/London', 'America/New_York']
 
 const loading = ref(false)
 const saving = ref(false)
 const testingEmail = ref(false)
-const sendingSummaryNow = ref(false)
-const loadingVehicleEvents = ref(false)
 const serviceAction = ref('')
 const roiTagInput = ref('')
 const roiTagList = ref([])
-const vehicleEventsDialogVisible = ref(false)
-const vehicleEvents = ref([])
-const vehicleSummaryText = ref('')
 const form = ref({
   ui_language: 'zh-CN',
+  timezone: 'Asia/Shanghai',
   processor_plugin: 'truck',
   site_title: '',
   site_description: '',
@@ -502,37 +482,6 @@ async function testEmailConfig() {
   }
 }
 
-async function loadTodayVehicleEvents() {
-  loadingVehicleEvents.value = true
-  try {
-    const result = await vehicleEventsApi.today()
-    vehicleEvents.value = Array.isArray(result.visits) ? result.visits : []
-    vehicleSummaryText.value = result.summary_text || ''
-    vehicleEventsDialogVisible.value = true
-  } catch (err) {
-    ElMessage.error(t('settings.vehicleEventsLoadFailed', { message: err.message }))
-  } finally {
-    loadingVehicleEvents.value = false
-  }
-}
-
-async function sendSummaryNow() {
-  sendingSummaryNow.value = true
-  try {
-    const result = await vehicleEventsApi.sendSummaryNow()
-    ElMessage.success(
-      t('settings.sendSummaryNowSuccess', {
-        count: result.visit_count ?? 0,
-      })
-    )
-    vehicleSummaryText.value = result.summary_text || ''
-  } catch (err) {
-    ElMessage.error(t('settings.sendSummaryNowFailed', { message: err.message }))
-  } finally {
-    sendingSummaryNow.value = false
-  }
-}
-
 function onSiteIconChange(uploadFile) {
   const raw = uploadFile?.raw
   if (!raw) return
@@ -700,23 +649,6 @@ onMounted(async () => {
   line-height: 1.45;
 }
 
-.summary-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  margin-bottom: 12px;
-}
-
-.vehicle-summary-text {
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(64, 158, 255, 0.08);
-  color: #d9e5ff;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
 
 .field-stack {
   width: 100%;

@@ -301,7 +301,7 @@ class TestTruckTracker:
         assert tracker.feed_action(tid, "action1") == ""
         assert tracker.feed_action(tid, "action1") == ""
         # Third: now stable
-        assert tracker.feed_action(tid, "action1") == "action1"
+        assert tracker.feed_action(tid, "action1") == "HandOverKeys"
 
     def test_action_flicker_filtered(self):
         """Flickering labels are filtered by majority vote.
@@ -315,7 +315,7 @@ class TestTruckTracker:
         tracker.feed_action(tid, "action1")
         tracker.feed_action(tid, "action1")
         # action1 appeared 3 times, action2 only once
-        assert tracker.get_track(tid).stable_action == "action1"
+        assert tracker.get_track(tid).stable_action == "HandOverKeys"
 
     def test_confirmed_actions_accumulate(self):
         """Multiple stable actions accumulate in confirmed_actions set.
@@ -327,7 +327,7 @@ class TestTruckTracker:
         # Confirm action1 (2 consecutive → stable)
         tracker.feed_action(tid, "action1")
         tracker.feed_action(tid, "action1")
-        assert "action1" in tracker.get_track(tid).confirmed_actions
+        assert "HandOverKeys" in tracker.get_track(tid).confirmed_actions
 
         # Confirm action2 (feed enough to become the majority)
         tracker.feed_action(tid, "action2")
@@ -335,8 +335,8 @@ class TestTruckTracker:
         tracker.feed_action(tid, "action2")
 
         track = tracker.get_track(tid)
-        assert "action1" in track.confirmed_actions
-        assert "action2" in track.confirmed_actions
+        assert "HandOverKeys" in track.confirmed_actions
+        assert "PlaceWheelChock" in track.confirmed_actions
 
     def test_other_label_not_added_to_confirmed(self):
         """The 'other' label should not be added to confirmed_actions.
@@ -351,12 +351,12 @@ class TestTruckTracker:
 
         track = tracker.get_track(tid)
         assert "other" not in track.confirmed_actions
-        assert track.stable_action == "other"
+        assert track.stable_action == "Other"
 
     def test_missing_actions_in_visit(self):
         """Visit should report actions that were never confirmed.
         到访记录应报告未确认的动作。"""
-        required = {"action1", "action2", "action3"}
+        required = {"HandOverKeys", "PlaceWheelChock", "InnerInspectionOfTruck"}
         tracker = TruckTracker(
             stability_min_count=2,
             required_actions=required,
@@ -373,8 +373,8 @@ class TestTruckTracker:
         # Truck leaves
         decision = tracker.update(FrameAnalysis())
         visit = decision.visits[0]
-        assert visit.confirmed_actions == {"action1"}
-        assert visit.missing_actions == {"action2", "action3"}
+        assert visit.confirmed_actions == {"HandOverKeys"}
+        assert visit.missing_actions == {"PlaceWheelChock", "InnerInspectionOfTruck"}
 
     def test_feed_ocr_unknown_track_noop(self):
         """feed_ocr on unknown track_id should not raise.
@@ -387,6 +387,14 @@ class TestTruckTracker:
         对未知 track_id 调用 feed_action 返回空字符串。"""
         tracker = TruckTracker()
         assert tracker.feed_action(999, "action1") == ""
+
+    def test_feed_action_normalizes_aliases(self):
+        tracker = TruckTracker(stability_min_count=1, min_presence_frames=1)
+        tracker.update(FrameAnalysis(trucks=[_truck_det()]))
+        tid = list(tracker.get_all_tracks().keys())[0]
+
+        assert tracker.feed_action(tid, "TakePhotosOfSeal") == "TakePhotoOfSeal"
+        assert "TakePhotoOfSeal" in tracker.get_track(tid).confirmed_actions
 
     def test_single_truck_replaces_when_old_leaves(self):
         """Only one truck tracked at a time; new one starts after old leaves.
@@ -1301,7 +1309,7 @@ class TestProcessorKeyMessages:
         ]
         assert len(action_msgs) == 1
         assert action_msgs[0]["image_base64"]
-        assert "动作1" in action_msgs[0]["message"]
+        assert "上交钥匙" in action_msgs[0]["message"]
         assert "车牌=未知" in action_msgs[0]["message"]
         assert "轨迹 #" in action_msgs[0]["message"]
 
@@ -1378,5 +1386,5 @@ class TestProcessorKeyMessages:
             m for m in result.messages if "车辆离场" in m.get("message", "")
         ]
         assert len(departure_msgs) == 1
-        assert "车身外检" in departure_msgs[0]["message"]
-        assert "铅封拍照" in departure_msgs[0]["message"]
+        assert "车外检查" in departure_msgs[0]["message"]
+        assert "封条拍照" in departure_msgs[0]["message"]

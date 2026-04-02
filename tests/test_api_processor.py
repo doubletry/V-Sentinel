@@ -1,8 +1,12 @@
 """Tests for the Processor REST API endpoints."""
 from __future__ import annotations
 
+import logging
+
 import pytest
 from httpx import AsyncClient
+
+from backend.processing.log_buffer import processing_log_buffer
 
 
 class TestProcessorStatus:
@@ -67,3 +71,24 @@ class TestProcessorLogs:
             assert "level" in first
             assert "module" in first
             assert "message" in first
+
+    async def test_processing_logs_capture_uvicorn_access_and_core_modules(
+        self, async_client: AsyncClient
+    ):
+        from backend.main import _should_capture_runtime_log
+
+        processing_log_buffer.clear()
+        assert _should_capture_runtime_log("core.truck.processor") is True
+        assert _should_capture_runtime_log("uvicorn.access") is True
+        assert _should_capture_runtime_log("random.module") is False
+
+        uvicorn_logger = logging.getLogger("uvicorn.access")
+        original_level = uvicorn_logger.level
+        uvicorn_logger.setLevel(logging.INFO)
+        uvicorn_logger.info('127.0.0.1 - "GET /health HTTP/1.1" 200 OK')
+
+        resp = await async_client.get("/api/processor/logs", params={"page": 1, "page_size": 20})
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert any(item["module"] == "uvicorn.access" for item in items)
+        uvicorn_logger.setLevel(original_level)

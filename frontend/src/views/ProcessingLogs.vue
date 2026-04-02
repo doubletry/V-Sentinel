@@ -60,8 +60,11 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { processorApi } from '../api/index.js'
+import { useAppSettingsStore } from '../stores/appSettings.js'
+import { formatDateTimeWithTimezone } from '../utils/time.js'
 
 const { t } = useI18n()
+const appSettingsStore = useAppSettingsStore()
 const logsLoading = ref(false)
 const logItems = ref([])
 const logTotal = ref(0)
@@ -71,9 +74,7 @@ const logErrorNotified = ref(false)
 let logTimer = null
 
 function formatLogTime(timestamp) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  return Number.isNaN(date.getTime()) ? String(timestamp) : date.toLocaleString()
+  return formatDateTimeWithTimezone(timestamp, appSettingsStore.timeZone)
 }
 
 async function loadLogs(page = 1) {

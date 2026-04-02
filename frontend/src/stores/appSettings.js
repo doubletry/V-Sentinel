@@ -6,6 +6,7 @@ import { setI18nLocale } from '../i18n/index.js'
 
 const DEFAULT_UI_SETTINGS = {
   ui_language: 'zh-CN',
+  timezone: 'Asia/Shanghai',
   processor_plugin: 'truck',
   site_title: config.siteName,
   site_description: config.siteDescription,
@@ -64,6 +65,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
   const siteTitle = computed(() => settings.value.site_title || DEFAULT_UI_SETTINGS.site_title)
   const siteDescription = computed(() => settings.value.site_description || DEFAULT_UI_SETTINGS.site_description)
   const uiLanguage = computed(() => settings.value.ui_language || DEFAULT_UI_SETTINGS.ui_language)
+  const timeZone = computed(() => settings.value.timezone || DEFAULT_UI_SETTINGS.timezone)
   const faviconUrl = computed(() => settings.value.favicon_url || DEFAULT_UI_SETTINGS.favicon_url)
   const siteIconUrl = computed(() => faviconUrl.value)
   const roiTagOptions = computed(
@@ -122,6 +124,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     siteTitle,
     siteDescription,
     uiLanguage,
+    timeZone,
     faviconUrl,
     siteIconUrl,
     roiTagOptions,

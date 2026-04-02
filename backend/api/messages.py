@@ -8,12 +8,20 @@ from backend.models.schemas import AnalysisMessage
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 
-@router.get("", response_model=list[AnalysisMessage])
+@router.get("")
 async def get_messages(
-    limit: int = Query(default=500, ge=1, le=1000),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     source_id: str | None = Query(default=None),
-) -> list[AnalysisMessage]:
+) -> dict:
     """Return persisted analysis messages ordered newest-first.
     返回按时间倒序排列的持久化分析消息。"""
-    rows = await list_analysis_messages(limit=limit, source_id=source_id)
-    return [AnalysisMessage(**row) for row in rows]
+    result = await list_analysis_messages(
+        page=page,
+        page_size=page_size,
+        source_id=source_id,
+    )
+    return {
+        **result,
+        "items": [AnalysisMessage(**row).model_dump() for row in result["items"]],
+    }

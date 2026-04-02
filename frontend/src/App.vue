@@ -26,6 +26,10 @@
             <el-icon><Bell /></el-icon>
             {{ t('nav.messages') }}
           </el-menu-item>
+          <el-menu-item index="/vehicle-events">
+            <el-icon><Document /></el-icon>
+            {{ t('nav.vehicleEvents') }}
+          </el-menu-item>
           <el-menu-item index="/processing-logs">
             <el-icon><Document /></el-icon>
             {{ t('nav.processingLogs') }}

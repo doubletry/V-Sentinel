@@ -28,8 +28,8 @@ class TestMessagePersistence:
         )
 
         rows = await list_analysis_messages(limit=10)
-        assert len(rows) == 1
-        assert rows[0]["message"] == "hello"
+        assert len(rows["items"]) == 1
+        assert rows["items"][0]["message"] == "hello"
 
     async def test_retention_prunes_old_messages(self, init_db):
         await update_settings({"message_retention_days": "1"})
@@ -56,7 +56,7 @@ class TestMessagePersistence:
         )
 
         rows = await list_analysis_messages(limit=10)
-        assert [row["message"] for row in rows] == ["new"]
+        assert [row["message"] for row in rows["items"]] == ["new"]
 
 
 class TestMessagesAPI:
@@ -75,8 +75,30 @@ class TestMessagesAPI:
         resp = await async_client.get("/api/messages")
         assert resp.status_code == 200
         data = resp.json()
-        assert data[0]["message"] == "persisted"
-        assert data[0]["level"] == "warning"
+        assert data["items"][0]["message"] == "persisted"
+        assert data["items"][0]["level"] == "warning"
+        assert data["total"] == 1
+
+    async def test_list_persisted_messages_paginates(self, async_client: AsyncClient):
+        for index in range(25):
+            await save_analysis_message(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source_name": "Cam1",
+                    "source_id": "s1",
+                    "level": "info",
+                    "message": f"persisted-{index}",
+                    "image_base64": None,
+                }
+            )
+
+        resp = await async_client.get("/api/messages", params={"page": 2, "page_size": 20})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page"] == 2
+        assert data["page_size"] == 20
+        assert data["total"] == 25
+        assert len(data["items"]) == 5
 
     async def test_processor_plugins_endpoint(self, async_client: AsyncClient):
         resp = await async_client.get("/api/processor/plugins")

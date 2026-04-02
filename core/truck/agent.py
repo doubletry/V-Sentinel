@@ -227,6 +227,17 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         return LABEL_EN_TO_ZH.get(label, label)
 
     @classmethod
+    def build_daily_summary_text(
+        cls,
+        visits: list[dict[str, Any]],
+        since_iso: str,
+        until_iso: str,
+    ) -> str:
+        """Public wrapper for building a daily summary text.
+        对外公开的每日总结文本构建入口。"""
+        return cls._build_daily_summary_text(visits, since_iso, until_iso)
+
+    @classmethod
     def _build_daily_summary_text(
         cls,
         visits: list[dict[str, Any]],

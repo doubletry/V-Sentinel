@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger

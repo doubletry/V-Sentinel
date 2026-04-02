@@ -37,7 +37,7 @@ async def get_today_vehicle_events() -> dict:
     now = datetime.now(timezone.utc)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     visits = await get_vehicle_visits_between(start.isoformat(), now.isoformat())
-    summary_text = TruckAnalysisAgent._build_daily_summary_text(
+    summary_text = TruckAnalysisAgent.build_daily_summary_text(
         visits,
         start.isoformat(),
         now.isoformat(),
@@ -59,7 +59,7 @@ async def send_summary_now(request: Request) -> dict:
     since = _previous_summary_boundary(now, app_settings)
     until_iso = now.isoformat()
     visits = await get_vehicle_visits_between(since.isoformat(), until_iso)
-    summary_text = TruckAnalysisAgent._build_daily_summary_text(
+    summary_text = TruckAnalysisAgent.build_daily_summary_text(
         visits,
         since.isoformat(),
         until_iso,

@@ -776,8 +776,7 @@ class BaseVideoProcessor(ABC):
                     continue
                 if item is None:
                     break
-                frame, result, latest_path = item
-                latest_frame = self._render_output_frame(frame, result, latest_path)
+                latest_frame, latest_path = self._prepare_output_item(item)
                 if latest_frame is None:
                     latest_path = None
                     continue
@@ -804,13 +803,21 @@ class BaseVideoProcessor(ABC):
                 continue
             if item is None:
                 break
-            frame, result, latest_path = item
-            latest_frame = self._render_output_frame(frame, result, latest_path)
+            latest_frame, latest_path = self._prepare_output_item(item)
             if latest_frame is None:
                 latest_path = None
                 continue
             self._push_frame(latest_frame.copy(), latest_path)
             next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
+
+    def _prepare_output_item(
+        self,
+        item: tuple[np.ndarray, AnalysisResult, str],
+    ) -> tuple[np.ndarray | None, str]:
+        """Convert one queued output item into a rendered frame/path pair.
+        将单个输出队列项转换为已渲染的帧与路径。"""
+        frame, result, output_rtsp_path = item
+        return self._render_output_frame(frame, result, output_rtsp_path), output_rtsp_path
 
     def _render_output_frame(
         self,

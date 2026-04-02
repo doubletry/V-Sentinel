@@ -464,6 +464,7 @@ class TestCoreBaseVideoProcessorPipeline:
         )
         pushed: list[tuple[np.ndarray, str]] = []
         proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        proc._update_publish_fps(TEST_SOURCE_FPS)
         proc._start_output_worker()
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
         result = AnalysisResult(

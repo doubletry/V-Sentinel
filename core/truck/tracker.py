@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 
 from core.truck.constants import (
     MAX_MISSING_FRAMES,
-    normalize_action_label,
     MIN_PRESENCE_FRAMES,
     OCR_INTERVAL,
     OTHER_ACTION_LABEL,
@@ -249,9 +248,7 @@ class TruckTracker:
         self.min_presence_frames = min_presence_frames
         self.stability_window = stability_window
         self.stability_min_count = stability_min_count
-        self.required_actions = frozenset(
-            normalize_action_label(action) for action in required_actions
-        )
+        self.required_actions = frozenset(required_actions)
 
         # At most one active truck at a time.
         # 同一时间最多一辆活跃卡车。
@@ -423,7 +420,7 @@ class TruckTracker:
         """
         if self._track is None or self._track.track_id != track_id:
             return ""
-        normalized_label = normalize_action_label(label)
+        normalized_label = label
         self._track.action_history.append(normalized_label)
         stable = _majority_vote(
             self._track.action_history,

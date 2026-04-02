@@ -37,7 +37,7 @@ DRAW_CLASSIFICATION_COLOR: tuple[int, int, int] = (255, 255, 0)
 
 # ── Frame sampling / 帧采样 ──────────────────────────────────────────────────
 
-FRAME_SAMPLE_INTERVAL: int = 3
+FRAME_SAMPLE_INTERVAL: int = 1
 """Process every N-th frame from the RTSP stream; skip the rest.
 从 RTSP 流中每 N 帧处理一帧，跳过其余帧。
 

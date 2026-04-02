@@ -282,6 +282,9 @@ class BaseVideoProcessor(ABC):
             )
 
             # Step 2 — launch ffmpeg reader
+            # Minimize buffering / probing so the first processed frame and the
+            # prewarmed processed RTSP path come up with lower startup latency.
+            # 降低缓冲和探测开销，使第一帧 processed 结果和预热 RTSP 路径更快上线。
             cmd = [
                 "ffmpeg",
                 "-fflags", "nobuffer",
@@ -302,6 +305,11 @@ class BaseVideoProcessor(ABC):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
+                # Use unbuffered stdout so Python can incrementally consume
+                # large rawvideo frames instead of waiting on a giant buffered
+                # read, which delays processed-stream startup.
+                # 使用无缓冲 stdout，避免大 rawvideo 帧在缓冲读中长期阻塞，
+                # 从而拖慢 processed 流启动。
                 bufsize=0,
             )
 

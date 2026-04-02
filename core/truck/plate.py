@@ -87,14 +87,16 @@ def should_replace_plate(
     if not current:
         return True
 
-    current_rank = (
-        PREFIX_PRESENT if has_plate_prefix(current) else PREFIX_ABSENT,
-        len(current),
-        float(current_confidence),
-    )
-    candidate_rank = (
-        PREFIX_PRESENT if has_plate_prefix(candidate) else PREFIX_ABSENT,
-        len(candidate),
-        float(new_confidence),
-    )
+    current_rank = _plate_rank(current, current_confidence)
+    candidate_rank = _plate_rank(candidate, new_confidence)
     return candidate_rank > current_rank
+
+
+def _plate_rank(text: str, confidence: float) -> tuple[int, int, float]:
+    """Return the comparison rank for a normalized OCR plate candidate.
+    返回归一化 OCR 车牌候选的比较排序值。"""
+    return (
+        PREFIX_PRESENT if has_plate_prefix(text) else PREFIX_ABSENT,
+        len(text),
+        float(confidence),
+    )

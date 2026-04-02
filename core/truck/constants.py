@@ -36,6 +36,9 @@ REQUIRED_ACTIONS: frozenset[str] = frozenset(
     }
 )
 """Required actions during a truck visit. 卡车到访期间要求识别到的动作。"""
+# Use singular ``TakePhoto*`` names as the canonical action IDs in storage,
+# messages, and missing-action comparison. 历史模型输出中的 ``TakePhotos*``
+# 拼写通过别名兼容，但标准动作 ID 统一使用单数 ``TakePhoto*``。
 
 OTHER_ACTION_LABEL: str = "Other"
 """Classification label for the non-required other class. 非必需 other 分类标签。"""

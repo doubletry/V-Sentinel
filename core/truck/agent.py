@@ -329,7 +329,8 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             return datetime.fromisoformat(value).astimezone(tzinfo).strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed to format visit timestamp {}: {}", value, exc)
             return value or "未知"
 
     @staticmethod

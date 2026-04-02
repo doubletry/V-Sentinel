@@ -51,8 +51,6 @@ class AnalysisAgent(TruckAnalysisAgent):
             return await get_vehicle_visits_since(since_iso)
 
         async def _send_daily_summary_email(summary_text: str, until_iso: str) -> None:
-            if email_client is None:
-                return
             from backend.db.database import get_all_settings
 
             app_settings = await get_all_settings()
@@ -75,5 +73,7 @@ class AnalysisAgent(TruckAnalysisAgent):
             message_factory=_message_factory,
             persist_visit=_persist_visit,
             load_visits_since=_load_visits_since,
-            send_daily_summary_email=_send_daily_summary_email,
+            send_daily_summary_email=(
+                _send_daily_summary_email if email_client is not None else None
+            ),
         )

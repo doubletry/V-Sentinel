@@ -44,7 +44,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         super().__init__(broadcaster=broadcaster, summary_interval=summary_interval)
         self._daily_task: asyncio.Task | None = None
         self._last_summary_time: str = datetime.now(timezone.utc).isoformat()
-        self._message_factory = message_factory
+        self._message_factory_hook = message_factory
         self._persist_visit_hook = persist_visit
         self._load_visits_since_hook = load_visits_since
         self._send_daily_summary_email_hook = send_daily_summary_email
@@ -87,9 +87,9 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
     def normalize_message(self, message: Any) -> Any:
         """Normalize message objects for the configured broadcaster.
         为配置的 broadcaster 规范化消息对象。"""
-        if self._message_factory is None:
+        if self._message_factory_hook is None:
             return message
-        return self._message_factory(message)
+        return self._message_factory_hook(message)
 
     @classmethod
     def _build_summary(

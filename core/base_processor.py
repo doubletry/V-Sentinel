@@ -833,7 +833,11 @@ class BaseVideoProcessor(ABC):
     def _publish_worker(self) -> None:
         """Publish the latest frame at a steady cadence to keep RTSP healthy.
         以稳定节奏重复推送最新帧，保持 RTSP 输出持续可解码。"""
-        frame_interval = 1.0 / max(PUSH_FPS, 1)
+        target_fps = PUSH_FPS
+        if target_fps <= 0:
+            logger.warning("Invalid PUSH_FPS={}, falling back to 1", target_fps)
+            target_fps = 1
+        frame_interval = 1.0 / target_fps
         next_deadline = time.monotonic()
         while not self._publish_stop.is_set():
             with self._publish_state_lock:
@@ -843,6 +847,9 @@ class BaseVideoProcessor(ABC):
                 self._push_frame(frame, path)
             now = time.monotonic()
             next_deadline += frame_interval
+            # Resync when we overrun the target cadence so the publisher does
+            # not spin in a busy loop while still returning to a steady rate.
+            # 当一次发布明显超期时重置节奏，避免发布线程进入忙等循环。
             if next_deadline < now:
                 next_deadline = now + frame_interval
             sleep_for = max(0.0, next_deadline - now)

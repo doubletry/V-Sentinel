@@ -18,6 +18,7 @@ from core.base_processor import (
 from core.constants import PUSH_FPS
 
 TEST_PUBLISH_WAIT = 3 / PUSH_FPS
+TIMING_TOLERANCE_FACTOR = 1.8
 
 
 class DummyCoreProcessor(BaseVideoProcessor):
@@ -549,4 +550,4 @@ class TestCoreBaseVideoProcessorPipeline:
             later - earlier for earlier, later in zip(push_times, push_times[1:])
         ]
         assert intervals
-        assert min(intervals) <= (1 / PUSH_FPS) * 1.8
+        assert min(intervals) <= (1 / PUSH_FPS) * TIMING_TOLERANCE_FACTOR

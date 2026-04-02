@@ -12,11 +12,11 @@ import asyncio
 import base64
 import math
 import queue
+import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from fractions import Fraction
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -31,7 +31,6 @@ from core.constants import (
     DRAW_FONT_SCALE,
     DRAW_FONT_THICKNESS,
     FRAME_SAMPLE_INTERVAL,
-    PUSH_FPS,
     PUSH_PRESET,
     RTSP_MAX_RECONNECT_ATTEMPTS,
     RTSP_RECONNECT_DELAY,
@@ -42,7 +41,7 @@ INPUT_RTSP_TRANSPORT = "tcp"
 LOW_LATENCY_PROBESIZE = "32"
 LOW_LATENCY_ANALYZEDURATION = "0"
 STREAM_TIMEOUT_MICROSECONDS = "5000000"
-PUBLISH_QUEUE_TIMEOUT_SEC = 0.2
+OUTPUT_QUEUE_TIMEOUT_SEC = 0.2
 MAX_REASONABLE_SOURCE_FPS = 120.0
 FPS_CHANGE_THRESHOLD = 0.01
 GOP_DIVISOR = 2
@@ -132,24 +131,18 @@ class BaseVideoProcessor(ABC):
         self.status: str = "stopped"
 
         # Persistent RTSP push state (ffmpeg subprocess)
-        # 持久化 RTSP 推流状态（PyAV 输出容器）
+        # 持久化 RTSP 推流状态（ffmpeg 子进程）
         self._push_lock = threading.Lock()
-        self._push_container: av.container.OutputContainer | None = None
-        self._push_stream: Any = None
+        self._push_proc: subprocess.Popen | None = None
         self._push_path: str | None = None
         self._push_width: int = 0
         self._push_height: int = 0
         self._push_fps: float = 0.0
-        self._display_queue: queue.Queue[
+        self._output_queue: queue.Queue[
             tuple[np.ndarray, AnalysisResult, str] | None
         ] = queue.Queue(maxsize=2)
-        self._display_stop = threading.Event()
-        self._display_thread: threading.Thread | None = None
-        self._publish_queue: queue.Queue[tuple[np.ndarray, str] | None] = (
-            queue.Queue(maxsize=2)
-        )
-        self._publish_stop = threading.Event()
-        self._publish_thread: threading.Thread | None = None
+        self._output_stop = threading.Event()
+        self._output_thread: threading.Thread | None = None
         self._publish_state_lock = threading.Lock()
         self._source_fps: float | None = None
         self._publish_fps: float = self._default_publish_fps()
@@ -162,10 +155,8 @@ class BaseVideoProcessor(ABC):
             logger.warning("Processor already running for {}", self.source_id)
             return
         self._stop_event.clear()
-        self._display_stop.clear()
-        self._publish_stop.clear()
-        self._start_display_worker()
-        self._start_publish_worker()
+        self._output_stop.clear()
+        self._start_output_worker()
         self.status = "running"
         self._task = asyncio.create_task(
             self._run_loop(), name=f"processor-{self.source_id}"
@@ -189,9 +180,8 @@ class BaseVideoProcessor(ABC):
             except Exception:
                 pass
             self._processing_tasks.clear()
-        self._stop_publish_worker()
-        self._stop_display_worker()
-        self._close_push_container()
+        self._stop_output_worker()
+        self._close_push_process()
         self.status = "stopped"
         logger.info("Stopped processor for {}", self.source_id)
 
@@ -234,8 +224,7 @@ class BaseVideoProcessor(ABC):
                     *list(self._processing_tasks), return_exceptions=True
                 )
                 self._processing_tasks.clear()
-            self._stop_publish_worker()
-            self._stop_display_worker()
+            self._stop_output_worker()
 
     # ── Frame Reader (runs in thread) ─────────────────────────────────────
 
@@ -660,97 +649,38 @@ class BaseVideoProcessor(ABC):
         """Default per-result handling: enqueue for drawing/pushing if needed."""
         if self._should_display_result(result):
             output_path = self._display_output_path()
-            self._enqueue_display(frame, result, output_path)
+            self._enqueue_output(frame, result, output_path)
 
     def _should_display_result(self, result: AnalysisResult) -> bool:
         """Return whether a result should be drawn/pushed to the output stream."""
         del result
         return True
 
-    def _start_display_worker(self) -> None:
-        """Start the dedicated display worker thread if it is not running."""
-        if self._display_thread is not None and self._display_thread.is_alive():
+    def _start_output_worker(self) -> None:
+        """Start the unified output worker thread if it is not running."""
+        if self._output_thread is not None and self._output_thread.is_alive():
             return
-        self._display_thread = threading.Thread(
-            target=self._display_worker,
-            name=f"display-{self.source_id}",
+        self._output_thread = threading.Thread(
+            target=self._output_worker,
+            name=f"output-{self.source_id}",
             daemon=True,
         )
-        self._display_thread.start()
+        self._output_thread.start()
 
-    def _stop_display_worker(self) -> None:
-        """Signal the display worker to stop and wait briefly for exit."""
-        self._display_stop.set()
-        try:
-            self._display_queue.put_nowait(None)
-        except queue.Full:
-            try:
-                self._display_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._display_queue.put_nowait(None)
-            except queue.Full:
-                pass
-        if self._display_thread is not None:
-            self._display_thread.join(timeout=2.0)
-            self._display_thread = None
+    def _stop_output_worker(self) -> None:
+        """Stop the unified output worker thread."""
+        self._output_stop.set()
+        self._force_enqueue(self._output_queue, None)
+        if self._output_thread is not None:
+            self._output_thread.join(timeout=2.0)
+            self._output_thread = None
+        self._drain_queue(self._output_queue)
 
-    def _start_publish_worker(self) -> None:
-        """Start the steady RTSP publisher thread if it is not running."""
-        if self._publish_thread is not None and self._publish_thread.is_alive():
-            return
-        self._publish_thread = threading.Thread(
-            target=self._publish_worker,
-            name=f"publisher-{self.source_id}",
-            daemon=True,
-        )
-        self._publish_thread.start()
-
-    def _stop_publish_worker(self) -> None:
-        """Stop the steady RTSP publisher thread."""
-        self._publish_stop.set()
-        self._force_enqueue(self._publish_queue, None)
-        if self._publish_thread is not None:
-            self._publish_thread.join(timeout=2.0)
-            self._publish_thread = None
-        self._drain_queue(self._publish_queue)
-
-    def _enqueue_display(
+    def _enqueue_output(
         self, frame: np.ndarray, result: AnalysisResult, output_rtsp_path: str
     ) -> None:
-        """Queue a frame/result pair for the dedicated draw+push worker."""
-        item = (frame, result, output_rtsp_path)
-        try:
-            self._display_queue.put_nowait(item)
-        except queue.Full:
-            try:
-                self._display_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._display_queue.put_nowait(item)
-            except queue.Full:
-                pass
-
-    def _display_worker(self) -> None:
-        """Dedicated worker that draws result overlays and pushes frames."""
-        while not self._display_stop.is_set():
-            try:
-                item = self._display_queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if item is None:
-                break
-            frame, result, output_rtsp_path = item
-            display_frame = result.annotated_frame
-            if display_frame is None:
-                try:
-                    display_frame = self.draw_on_frame(frame, result)
-                except Exception as exc:
-                    logger.debug("Display draw error for {}: {}", output_rtsp_path, exc)
-                    continue
-            self._enqueue_publish(display_frame, output_rtsp_path)
+        """Queue a frame/result pair for the unified output worker."""
+        self._force_enqueue(self._output_queue, (frame, result, output_rtsp_path))
 
     def _display_output_path(self) -> str:
         """Return the RTSP output path used for processed frames.
@@ -760,12 +690,6 @@ class BaseVideoProcessor(ABC):
     def _default_publish_fps(self) -> float:
         """Fallback publish FPS before the input stream reports a frame rate.
         输入流未报告帧率前使用的默认推流 FPS。"""
-        # Non-positive PUSH_FPS values are treated as invalid and fall back to
-        # a safe single-frame cadence until real source FPS is known.
-        # 非正数 PUSH_FPS 视为无效，在拿到真实源流 FPS 前回退到安全单帧节奏。
-        valid_sample_interval = max(FRAME_SAMPLE_INTERVAL, 1)
-        if PUSH_FPS > 0:
-            return max(PUSH_FPS / valid_sample_interval, 1.0)
         return float(FALLBACK_PUBLISH_FPS)
 
     @staticmethod
@@ -773,12 +697,6 @@ class BaseVideoProcessor(ABC):
         """Convert input FPS to effective sampled publish FPS.
         将输入 FPS 转成采样后的有效推流 FPS。"""
         return max(source_fps / max(sample_interval, 1), 1.0)
-
-    @staticmethod
-    def _av_rate(fps: float) -> Fraction:
-        """Convert float FPS to a PyAV-friendly rational rate.
-        将浮点 FPS 转成 PyAV 可接受的有理数帧率。"""
-        return Fraction(fps).limit_denominator(1000)
 
     def _update_publish_fps(self, source_fps: float | None) -> None:
         """Refresh effective publish FPS from source FPS and sample interval.
@@ -815,14 +733,6 @@ class BaseVideoProcessor(ABC):
             return float(FALLBACK_PUBLISH_FPS)
         return target_fps
 
-    def _enqueue_publish(self, frame: np.ndarray, output_rtsp_path: str) -> None:
-        """Queue the latest processed frame for the dedicated publish worker.
-        将最新处理结果帧排入独立推流线程的队列。"""
-        frame = self._ensure_even_dims(frame)
-        if frame.shape[0] == 0 or frame.shape[1] == 0:
-            return
-        self._force_enqueue(self._publish_queue, (frame.copy(), output_rtsp_path))
-
     @staticmethod
     def _force_enqueue(
         target_queue: "queue.Queue[Any]",
@@ -852,21 +762,25 @@ class BaseVideoProcessor(ABC):
             except queue.Empty:
                 break
 
-    def _publish_worker(self) -> None:
-        """Publish queued frames and repeat the latest one at a steady cadence.
-        消费推流队列，并以稳定节奏重复最新帧以保持 RTSP 输出持续可解码。"""
+    def _output_worker(self) -> None:
+        """Draw queued results and repeat the latest output frame at steady cadence.
+        消费输出队列，完成绘制并以稳定节奏重复推送最新结果帧。"""
         latest_frame: np.ndarray | None = None
         latest_path: str | None = None
         next_deadline = time.monotonic()
-        while not self._publish_stop.is_set():
+        while not self._output_stop.is_set():
             if latest_frame is None or latest_path is None:
                 try:
-                    item = self._publish_queue.get(timeout=PUBLISH_QUEUE_TIMEOUT_SEC)
+                    item = self._output_queue.get(timeout=OUTPUT_QUEUE_TIMEOUT_SEC)
                 except queue.Empty:
                     continue
                 if item is None:
                     break
-                latest_frame, latest_path = item
+                frame, result, latest_path = item
+                latest_frame = self._render_output_frame(frame, result, latest_path)
+                if latest_frame is None:
+                    latest_path = None
+                    continue
                 self._push_frame(latest_frame.copy(), latest_path)
                 next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
                 continue
@@ -874,7 +788,7 @@ class BaseVideoProcessor(ABC):
             now = time.monotonic()
             wait_for = max(0.0, next_deadline - now)
             try:
-                item = self._publish_queue.get(timeout=wait_for)
+                item = self._output_queue.get(timeout=wait_for)
             except queue.Empty:
                 self._push_frame(latest_frame.copy(), latest_path)
                 frame_interval = 1.0 / self._current_publish_fps()
@@ -890,9 +804,33 @@ class BaseVideoProcessor(ABC):
                 continue
             if item is None:
                 break
-            latest_frame, latest_path = item
+            frame, result, latest_path = item
+            latest_frame = self._render_output_frame(frame, result, latest_path)
+            if latest_frame is None:
+                latest_path = None
+                continue
             self._push_frame(latest_frame.copy(), latest_path)
             next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
+
+    def _render_output_frame(
+        self,
+        frame: np.ndarray,
+        result: AnalysisResult,
+        output_rtsp_path: str,
+    ) -> np.ndarray | None:
+        """Render a processed frame before it is pushed.
+        在推流前渲染处理后的结果帧。"""
+        display_frame = result.annotated_frame
+        if display_frame is None:
+            try:
+                display_frame = self.draw_on_frame(frame, result)
+            except Exception as exc:
+                logger.debug("Display draw error for {}: {}", output_rtsp_path, exc)
+                return None
+        display_frame = self._ensure_even_dims(display_frame)
+        if display_frame.shape[0] == 0 or display_frame.shape[1] == 0:
+            return None
+        return display_frame.copy()
 
     @staticmethod
     def _ensure_even_dims(frame: np.ndarray) -> np.ndarray:
@@ -906,8 +844,8 @@ class BaseVideoProcessor(ABC):
         return frame
 
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
-        """Push annotated frame to MediaMTX via a persistent PyAV RTSP stream.
-        通过持久化 PyAV RTSP 输出流将标注帧推送到 MediaMTX。"""
+        """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.
+        通过持久化 ffmpeg 子进程将标注帧推送到 MediaMTX。"""
         frame = self._ensure_even_dims(frame)
         h, w = frame.shape[:2]
         if h == 0 or w == 0:
@@ -924,74 +862,77 @@ class BaseVideoProcessor(ABC):
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (
-                    self._push_container is None
-                    or self._push_stream is None
+                    self._push_proc is None
+                    or self._push_proc.poll() is not None
                     or self._push_path != output_rtsp_path
                     or self._push_width != w
                     or self._push_height != h
                     or abs(self._push_fps - target_fps) > FPS_CHANGE_THRESHOLD
                 ):
-                    self._close_push_container()
+                    self._close_push_process()
                     rtsp_url = (
                         f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
                         f"/{output_rtsp_path}"
                     )
-                    container = av.open(
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-fflags", "nobuffer",
+                        "-flags", "low_delay",
+                        "-flush_packets", "1",
+                        "-f", "rawvideo",
+                        "-pix_fmt", "rgb24",
+                        "-s", f"{w}x{h}",
+                        "-r", f"{target_fps:.3f}",
+                        "-i", "pipe:0",
+                        "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
+                        "-preset", PUSH_PRESET,
+                        "-tune", "zerolatency",
+                        "-g", str(gop),
+                        "-bf", "0",
+                        "-muxdelay", "0",
+                        "-muxpreload", "0",
+                        "-f", "rtsp",
+                        "-rtsp_transport", "udp",
                         rtsp_url,
-                        mode="w",
-                        format="rtsp",
-                        options={
-                            "rtsp_transport": "udp",
-                            "flush_packets": "1",
-                            "muxdelay": "0",
-                            "muxpreload": "0",
-                        },
+                    ]
+                    self._push_proc = subprocess.Popen(
+                        cmd,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                     )
-                    stream = container.add_stream(
-                        "libx264", rate=self._av_rate(target_fps)
-                    )
-                    stream.width = w
-                    stream.height = h
-                    stream.pix_fmt = "yuv420p"
-                    stream.options = {
-                        "preset": PUSH_PRESET,
-                        "tune": "zerolatency",
-                        "bf": "0",
-                        "g": str(gop),
-                    }
-                    self._push_container = container
-                    self._push_stream = stream
                     self._push_path = output_rtsp_path
                     self._push_width = w
                     self._push_height = h
                     self._push_fps = target_fps
 
-                video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
-                for packet in self._push_stream.encode(video_frame):
-                    self._push_container.mux(packet)
-            except (BrokenPipeError, OSError, av.FFmpegError) as exc:
+                if self._push_proc is not None and self._push_proc.stdin is not None:
+                    self._push_proc.stdin.write(frame.tobytes())
+                    self._push_proc.stdin.flush()
+            except (BrokenPipeError, OSError) as exc:
                 logger.warning("Push error for {}: {}", output_rtsp_path, exc)
-                self._close_push_container()
+                self._close_push_process()
             except Exception as exc:
                 logger.warning("Push error for {}: {}", output_rtsp_path, exc)
-                self._close_push_container()
+                self._close_push_process()
 
-    def _close_push_container(self) -> None:
-        """Close the persistent PyAV RTSP push container.
-        关闭持久化 PyAV RTSP 推流容器。"""
-        if self._push_stream is not None and self._push_container is not None:
+    def _close_push_process(self) -> None:
+        """Terminate the persistent ffmpeg push subprocess.
+        终止持久化 ffmpeg 推流子进程。"""
+        if self._push_proc is not None:
             try:
-                for packet in self._push_stream.encode(None):
-                    self._push_container.mux(packet)
+                if self._push_proc.stdin is not None:
+                    self._push_proc.stdin.close()
+                self._push_proc.terminate()
+                self._push_proc.wait(timeout=3.0)
             except Exception:
-                pass
-        if self._push_container is not None:
-            try:
-                self._push_container.close()
-            except Exception:
-                pass
-            self._push_container = None
-            self._push_stream = None
+                try:
+                    self._push_proc.kill()
+                except Exception:
+                    pass
+            self._push_proc = None
             self._push_path = None
             self._push_width = 0
             self._push_height = 0

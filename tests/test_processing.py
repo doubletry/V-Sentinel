@@ -158,29 +158,24 @@ class TestBaseVideoProcessor:
     async def test_start_delegates_to_core_worker_startup(self):
         proc = self._make_processor()
         proc._run_loop = AsyncMock()
-        proc._start_display_worker = MagicMock()
-        proc._start_publish_worker = MagicMock()
+        proc._start_output_worker = MagicMock()
 
         await proc.start()
 
-        proc._start_display_worker.assert_called_once()
-        proc._start_publish_worker.assert_called_once()
+        proc._start_output_worker.assert_called_once()
         assert proc.started_at is not None
         await proc.stop()
 
     async def test_stop_delegates_to_core_worker_shutdown(self):
         proc = self._make_processor()
         proc._run_loop = AsyncMock()
-        proc._start_display_worker = MagicMock()
-        proc._start_publish_worker = MagicMock()
-        proc._stop_display_worker = MagicMock()
-        proc._stop_publish_worker = MagicMock()
+        proc._start_output_worker = MagicMock()
+        proc._stop_output_worker = MagicMock()
 
         await proc.start()
         await proc.stop()
 
-        proc._stop_display_worker.assert_called_once()
-        proc._stop_publish_worker.assert_called_once()
+        proc._stop_output_worker.assert_called_once()
 
 
 class TestProcessorManager:
@@ -335,7 +330,7 @@ class TestBackendBaseProcessorPipeline:
         )
         proc.ws_manager.broadcast = AsyncMock()
         queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
-        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        proc._enqueue_output = lambda frame, result, path: queued.append((frame, result, path))
         frame = np.zeros((32, 32, 3), dtype=np.uint8)
         result = AnalysisResult(
             detections=[{"x_min": 1, "y_min": 2, "x_max": 3, "y_max": 4, "label": "person"}],
@@ -364,7 +359,7 @@ class TestBackendBaseProcessorPipeline:
             app_settings=dict(DEFAULT_APP_SETTINGS),
         )
         queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
-        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        proc._enqueue_output = lambda frame, result, path: queued.append((frame, result, path))
         frame = np.zeros((32, 32, 3), dtype=np.uint8)
         result = AnalysisResult(
             detections=[{"x_min": 1, "y_min": 2, "x_max": 3, "y_max": 4, "label": "person"}],
@@ -386,7 +381,7 @@ class TestBackendBaseProcessorPipeline:
             app_settings=dict(DEFAULT_APP_SETTINGS),
         )
         queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
-        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        proc._enqueue_output = lambda frame, result, path: queued.append((frame, result, path))
         frame = np.zeros((32, 32, 3), dtype=np.uint8)
 
         await proc._handle_result(frame, AnalysisResult())

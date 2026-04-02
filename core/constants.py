@@ -9,11 +9,6 @@ corresponding scene package such as ``core.truck.constants``.
 
 from __future__ import annotations
 
-# ── RTSP push defaults / RTSP 推流默认值 ─────────────────────────────────────
-
-PUSH_FPS: int = 25
-"""Default FPS for RTSP output. RTSP 输出的默认帧率。"""
-
 PUSH_PRESET: str = "ultrafast"
 """x264 preset for RTSP push. RTSP 推流的 x264 预设。"""
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pytest
@@ -15,10 +15,13 @@ from core.base_processor import (
     ROI,
     ROIPoint,
 )
-from core.constants import FRAME_SAMPLE_INTERVAL, PUSH_FPS
+from core.constants import FRAME_SAMPLE_INTERVAL
 
 TEST_WAIT_FRAME_COUNT = 3
-TEST_SAMPLED_PUBLISH_FPS = max(PUSH_FPS, 1) / max(FRAME_SAMPLE_INTERVAL, 1)
+TEST_SOURCE_FPS = 30.0
+TEST_SAMPLED_PUBLISH_FPS = max(
+    TEST_SOURCE_FPS / max(FRAME_SAMPLE_INTERVAL, 1), 1.0
+)
 TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_SAMPLED_PUBLISH_FPS
 # Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
 # 为线程调度和 CI 抖动预留适度容差。
@@ -448,12 +451,12 @@ class TestCoreBaseVideoProcessorPipeline:
 
         assert proc.started_count >= 2
 
-    async def test_display_worker_draws_and_pushes_on_demand(self):
-        class DisplayProcessor(BaseVideoProcessor):
+    async def test_output_worker_draws_and_pushes_on_demand(self):
+        class OutputProcessor(BaseVideoProcessor):
             async def process_frame(self, frame, encoded, shape, roi_pixel_points):
                 return AnalysisResult()
 
-        proc = DisplayProcessor(
+        proc = OutputProcessor(
             source_id="s1",
             source_name="cam",
             rtsp_url="rtsp://localhost:8554/cam1",
@@ -461,8 +464,7 @@ class TestCoreBaseVideoProcessorPipeline:
         )
         pushed: list[tuple[np.ndarray, str]] = []
         proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
-        proc._start_display_worker()
-        proc._start_publish_worker()
+        proc._start_output_worker()
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
         result = AnalysisResult(
             detections=[
@@ -476,10 +478,9 @@ class TestCoreBaseVideoProcessorPipeline:
                 }
             ]
         )
-        proc._enqueue_display(frame, result, "cam1_processed")
+        proc._enqueue_output(frame, result, "cam1_processed")
         await asyncio.sleep(TEST_PUBLISH_WAIT)
-        proc._stop_publish_worker()
-        proc._stop_display_worker()
+        proc._stop_output_worker()
 
         assert len(pushed) >= 1
         pushed_frame, path = pushed[0]
@@ -517,8 +518,8 @@ class TestCoreBaseVideoProcessorPipeline:
         proc = WarmupProcessor()
         pushed: list[tuple[np.ndarray, str]] = []
         proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
-        proc._start_display_worker()
-        proc._start_publish_worker()
+        proc._update_publish_fps(TEST_SOURCE_FPS)
+        proc._start_output_worker()
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
 
         task = asyncio.create_task(proc._process_frame_item(frame, b"jpeg"))
@@ -534,15 +535,14 @@ class TestCoreBaseVideoProcessorPipeline:
         pushed_frame, path = pushed[0]
         assert path == "cam1_processed"
         assert pushed_frame.sum() > 0
-        proc._stop_display_worker()
-        proc._stop_publish_worker()
+        proc._stop_output_worker()
 
-    async def test_publish_worker_repeats_latest_frame_at_steady_cadence(self):
-        class PublishProcessor(BaseVideoProcessor):
+    async def test_output_worker_repeats_latest_frame_at_steady_cadence(self):
+        class OutputProcessor(BaseVideoProcessor):
             async def process_frame(self, frame, encoded, shape, roi_pixel_points):
                 return AnalysisResult()
 
-        proc = PublishProcessor(
+        proc = OutputProcessor(
             source_id="s1",
             source_name="cam",
             rtsp_url="rtsp://localhost:8554/cam1",
@@ -557,11 +557,16 @@ class TestCoreBaseVideoProcessorPipeline:
 
         proc._push_frame = _record_push
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        proc._update_publish_fps(TEST_SOURCE_FPS)
 
-        proc._enqueue_publish(frame, "cam1_processed")
-        proc._start_publish_worker()
+        proc._enqueue_output(
+            frame,
+            AnalysisResult(annotated_frame=frame.copy()),
+            "cam1_processed",
+        )
+        proc._start_output_worker()
         await asyncio.sleep(TEST_PUBLISH_WAIT)
-        proc._stop_publish_worker()
+        proc._stop_output_worker()
 
         assert len(pushed) >= 2
         assert all(path == "cam1_processed" for _, path in pushed)
@@ -572,12 +577,12 @@ class TestCoreBaseVideoProcessorPipeline:
         assert min(intervals) >= (1 / TEST_SAMPLED_PUBLISH_FPS) / TIMING_TOLERANCE_FACTOR
         assert max(intervals) <= (1 / TEST_SAMPLED_PUBLISH_FPS) * TIMING_TOLERANCE_FACTOR
 
-    async def test_publish_worker_uses_latest_frame_from_queue(self):
-        class PublishProcessor(BaseVideoProcessor):
+    async def test_output_worker_uses_latest_frame_from_queue(self):
+        class OutputProcessor(BaseVideoProcessor):
             async def process_frame(self, frame, encoded, shape, roi_pixel_points):
                 return AnalysisResult()
 
-        proc = PublishProcessor(
+        proc = OutputProcessor(
             source_id="s1",
             source_name="cam",
             rtsp_url="rtsp://localhost:8554/cam1",
@@ -589,11 +594,22 @@ class TestCoreBaseVideoProcessorPipeline:
             pushed.append(frame.copy())
 
         proc._push_frame = _record_push
-        proc._start_publish_worker()
-        proc._enqueue_publish(np.zeros((64, 64, 3), dtype=np.uint8), "cam1_processed")
-        proc._enqueue_publish(np.full((64, 64, 3), 255, dtype=np.uint8), "cam1_processed")
+        proc._update_publish_fps(TEST_SOURCE_FPS)
+        proc._start_output_worker()
+        proc._enqueue_output(
+            np.zeros((64, 64, 3), dtype=np.uint8),
+            AnalysisResult(annotated_frame=np.zeros((64, 64, 3), dtype=np.uint8)),
+            "cam1_processed",
+        )
+        proc._enqueue_output(
+            np.full((64, 64, 3), 255, dtype=np.uint8),
+            AnalysisResult(
+                annotated_frame=np.full((64, 64, 3), 255, dtype=np.uint8)
+            ),
+            "cam1_processed",
+        )
         await asyncio.sleep(TEST_PUBLISH_WAIT)
-        proc._stop_publish_worker()
+        proc._stop_output_worker()
 
         assert pushed
         assert any(frame.sum() == frame.size * 255 for frame in pushed)
@@ -622,55 +638,43 @@ class TestCoreBaseVideoProcessorPipeline:
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
         captured: dict[str, object] = {}
 
-        class _FakeStream:
+        class _FakeProc:
             def __init__(self):
-                self.width = None
-                self.height = None
-                self.pix_fmt = None
-                self.options = None
+                self.stdin = MagicMock()
 
-            def encode(self, frame):
-                return [("packet", frame)]
+            def poll(self):
+                return None
 
-        class _FakeContainer:
-            def __init__(self):
-                self.stream = _FakeStream()
-                self.muxed = []
+            def terminate(self):
+                captured["terminated"] = True
 
-            def add_stream(self, codec, rate):
-                captured["codec"] = codec
-                captured["rate"] = rate
-                return self.stream
+            def wait(self, timeout=None):
+                captured["wait_timeout"] = timeout
 
-            def mux(self, packet):
-                self.muxed.append(packet)
+            def kill(self):
+                captured["killed"] = True
 
-            def close(self):
-                captured["closed"] = True
-
-        def _fake_av_open(url, **kwargs):
-            captured["url"] = url
+        def _fake_popen(cmd, **kwargs):
+            captured["cmd"] = cmd
             captured["kwargs"] = kwargs
-            container = _FakeContainer()
-            captured["container"] = container
-            return container
+            proc = _FakeProc()
+            captured["proc"] = proc
+            return proc
 
-        monkeypatch.setattr("core.base_processor.av.open", _fake_av_open)
+        monkeypatch.setattr("core.base_processor.subprocess.Popen", _fake_popen)
 
         proc._push_frame(frame, "cam1_processed")
 
-        assert captured["url"] == "rtsp://localhost:8554/cam1_processed"
-        assert captured["kwargs"]["mode"] == "w"
-        assert captured["kwargs"]["format"] == "rtsp"
-        assert captured["kwargs"]["options"]["rtsp_transport"] == "udp"
-        assert captured["codec"] == "libx264"
-        assert float(captured["rate"]) == 10.0
-        stream = captured["container"].stream
-        assert stream.width == 64
-        assert stream.height == 64
-        assert stream.pix_fmt == "yuv420p"
-        assert stream.options["tune"] == "zerolatency"
-        assert stream.options["preset"]
+        cmd = captured["cmd"]
+        assert cmd[0] == "ffmpeg"
+        assert "-f" in cmd and "rawvideo" in cmd
+        assert "-pix_fmt" in cmd and "rgb24" in cmd
+        assert "-rtsp_transport" in cmd and "udp" in cmd
+        assert "libx264" in cmd
+        assert "rtsp://localhost:8554/cam1_processed" == cmd[-1]
+        assert f"{proc._current_publish_fps():.3f}" in cmd
+        captured["proc"].stdin.write.assert_called_once_with(frame.tobytes())
+        captured["proc"].stdin.flush.assert_called_once()
 
     def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):
         class _CodecContext:

@@ -18,6 +18,8 @@ const DEFAULT_UI_SETTINGS = {
   email_to_addresses: '',
   email_cc_addresses: '',
   email_port: '50055',
+  daily_summary_hour: '23',
+  daily_summary_minute: '59',
 }
 
 function parseRoiTagOptions(raw) {

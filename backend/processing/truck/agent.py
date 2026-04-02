@@ -50,6 +50,11 @@ class AnalysisAgent(TruckAnalysisAgent):
         async def _load_visits_since(since_iso: str) -> list[dict[str, str]]:
             return await get_vehicle_visits_since(since_iso)
 
+        async def _load_app_settings() -> dict[str, str]:
+            from backend.db.database import get_all_settings
+
+            return await get_all_settings()
+
         async def _send_daily_summary_email(summary_text: str, until_iso: str) -> None:
             from backend.db.database import get_all_settings
 
@@ -73,6 +78,7 @@ class AnalysisAgent(TruckAnalysisAgent):
             message_factory=_message_factory,
             persist_visit=_persist_visit,
             load_visits_since=_load_visits_since,
+            load_app_settings=_load_app_settings,
             send_daily_summary_email=(
                 _send_daily_summary_email if email_client is not None else None
             ),

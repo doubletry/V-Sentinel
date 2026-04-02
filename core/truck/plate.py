@@ -50,3 +50,49 @@ def extract_valid_plate_text(text: str) -> str:
     if not normalized:
         return ""
     return normalized if is_valid_plate_text(normalized) else ""
+
+
+def has_plate_prefix(text: str) -> bool:
+    """Return whether text contains a province + region prefix.
+    返回文本是否带有省份 + 地区前缀。"""
+    normalized = normalize_plate_text(text)
+    return bool(_PREFIXED_PLATE_RE.fullmatch(normalized))
+
+
+def should_replace_plate(
+    current_text: str,
+    current_confidence: float,
+    new_text: str,
+    new_confidence: float,
+) -> bool:
+    """Return whether a new OCR result should replace the current plate.
+    判断新的 OCR 结果是否应替换当前车牌。
+
+    Preference order:
+    1. Plate with province/region prefix (e.g. 粤B12345) wins over a shorter
+       fallback without the prefix.
+    2. If prefix completeness is tied, keep the longer normalized plate.
+    3. If completeness is tied, keep the higher-confidence result.
+    优先级：
+    1. 带省份/地区前缀的结果优先于缺少前缀的回退结果。
+    2. 若完整度相同，保留更长的归一化车牌。
+    3. 若完整度相同，再保留更高置信度的结果。
+    """
+    current = normalize_plate_text(current_text)
+    candidate = normalize_plate_text(new_text)
+    if not candidate:
+        return False
+    if not current:
+        return True
+
+    current_rank = (
+        1 if has_plate_prefix(current) else 0,
+        len(current),
+        float(current_confidence),
+    )
+    candidate_rank = (
+        1 if has_plate_prefix(candidate) else 0,
+        len(candidate),
+        float(new_confidence),
+    )
+    return candidate_rank > current_rank

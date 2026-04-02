@@ -126,6 +126,8 @@ class AppSettingsUpdate(BaseModel):
     email_to_addresses: str | None = None
     email_cc_addresses: str | None = None
     email_port: str | None = None
+    daily_summary_hour: str | None = None
+    daily_summary_minute: str | None = None
     max_pull_workers: str | None = None
     max_push_workers: str | None = None
     max_cpu_workers: str | None = None

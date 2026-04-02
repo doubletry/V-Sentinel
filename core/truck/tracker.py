@@ -35,6 +35,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
+
 from core.truck.constants import (
     MAX_MISSING_FRAMES,
     MIN_PRESENCE_FRAMES,
@@ -44,6 +45,7 @@ from core.truck.constants import (
     STABILITY_MIN_COUNT,
     STABILITY_WINDOW,
 )
+from core.truck.plate import should_replace_plate
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -386,13 +388,19 @@ class TruckTracker:
         """Feed an OCR result for the tracked truck.
         为被跟踪的卡车提供 OCR 结果。
 
-        Only updates if *confidence* exceeds the current best.
-        仅当 *confidence* 超过当前最佳值时更新。
+        Prefer the most complete plate text across the full visit; if
+        completeness is tied, keep the higher-confidence result.
+        在整次到访期间优先保留最完整的车牌；若完整度相同，则保留更高置信度结果。
         """
         if self._track is None or self._track.track_id != track_id:
             return
         self._track.frames_since_ocr = 0
-        if confidence > self._track.best_plate_conf:
+        if should_replace_plate(
+            self._track.best_plate,
+            self._track.best_plate_conf,
+            text,
+            confidence,
+        ):
             self._track.best_plate = text
             self._track.best_plate_conf = confidence
 

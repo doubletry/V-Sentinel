@@ -227,6 +227,12 @@
               placeholder="cc1@example.com,cc2@example.com"
             />
           </el-form-item>
+          <el-form-item :label="t('settings.dailySummaryHour')">
+            <el-input v-model="form.daily_summary_hour" placeholder="23" />
+          </el-form-item>
+          <el-form-item :label="t('settings.dailySummaryMinute')">
+            <el-input v-model="form.daily_summary_minute" placeholder="59" />
+          </el-form-item>
         </section>
 
         <section class="settings-section">
@@ -304,6 +310,8 @@ const form = ref({
   email_to_addresses: '',
   email_cc_addresses: '',
   email_port: '50055',
+  daily_summary_hour: '23',
+  daily_summary_minute: '59',
   max_pull_workers: '',
   max_push_workers: '',
   max_cpu_workers: '',

@@ -131,6 +131,11 @@ class BaseVideoProcessor(ABC):
         ] = queue.Queue(maxsize=2)
         self._display_stop = threading.Event()
         self._display_thread: threading.Thread | None = None
+        self._display_ready = threading.Event()
+        self._prewarm_stop = threading.Event()
+        self._prewarm_thread: threading.Thread | None = None
+        self._prewarm_frame: np.ndarray | None = None
+        self._prewarm_path: str | None = None
 
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -141,6 +146,8 @@ class BaseVideoProcessor(ABC):
             return
         self._stop_event.clear()
         self._display_stop.clear()
+        self._display_ready.clear()
+        self._prewarm_stop.clear()
         self._start_display_worker()
         self.status = "running"
         self._task = asyncio.create_task(
@@ -165,6 +172,7 @@ class BaseVideoProcessor(ABC):
             except Exception:
                 pass
             self._processing_tasks.clear()
+        self._stop_prewarm_worker()
         self._stop_display_worker()
         self._close_push_container()
         self.status = "stopped"
@@ -209,6 +217,7 @@ class BaseVideoProcessor(ABC):
                     *list(self._processing_tasks), return_exceptions=True
                 )
                 self._processing_tasks.clear()
+            self._stop_prewarm_worker()
             self._stop_display_worker()
 
     # ── Frame Reader (runs in thread) ─────────────────────────────────────
@@ -267,10 +276,18 @@ class BaseVideoProcessor(ABC):
                 "Frame reader: {}x{} ({} bytes/frame) for {}",
                 probe_w, probe_h, frame_bytes, self.rtsp_url,
             )
+            self._prewarm_display_stream(
+                np.zeros((probe_h, probe_w, 3), dtype=np.uint8),
+                self._display_output_path(),
+            )
 
             # Step 2 — launch ffmpeg reader
             cmd = [
                 "ffmpeg",
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-probesize", "32",
+                "-analyzeduration", "0",
                 "-rtsp_transport", RTSP_TRANSPORT,
                 "-i", self.rtsp_url,
                 "-f", "rawvideo",
@@ -285,13 +302,15 @@ class BaseVideoProcessor(ABC):
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                bufsize=frame_bytes * 2,
+                bufsize=0,
             )
 
             stream_ok = False
             try:
                 while not self._stop_event.is_set():
-                    raw = proc.stdout.read(frame_bytes)  # type: ignore[union-attr]
+                    raw = self._read_exact(  # type: ignore[arg-type]
+                        proc.stdout, frame_bytes
+                    )
                     if len(raw) != frame_bytes:
                         if not self._stop_event.is_set():
                             logger.warning(
@@ -366,6 +385,20 @@ class BaseVideoProcessor(ABC):
         except Exception:
             pass
         logger.info("Frame reader exited for {}", self.rtsp_url)
+
+    @staticmethod
+    def _read_exact(stream: Any, expected_bytes: int, chunk_size: int = 65536) -> bytes:
+        """Read exactly *expected_bytes* from a pipe unless EOF occurs.
+        从管道中精确读取 *expected_bytes*，除非遇到 EOF。"""
+        chunks: list[bytes] = []
+        remaining = expected_bytes
+        while remaining > 0:
+            chunk = stream.read(min(chunk_size, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
     # ── Abstract method ───────────────────────────────────────────────────
 
@@ -636,6 +669,7 @@ class BaseVideoProcessor(ABC):
         h, w = frame.shape[:2]
         shape = (h, w, frame.shape[2] if frame.ndim == 3 else 1)
         roi_pixel_points = self._normalize_rois_to_pixels(w, h)
+        self._prewarm_display_stream(frame, self._display_output_path())
 
         try:
             result = await self.process_frame(
@@ -653,7 +687,8 @@ class BaseVideoProcessor(ABC):
     async def _handle_result(self, frame: np.ndarray, result: AnalysisResult) -> None:
         """Default per-result handling: enqueue for drawing/pushing if needed."""
         if self._should_display_result(result):
-            output_path = f"{self._stream_path()}_processed"
+            self._display_ready.set()
+            output_path = self._display_output_path()
             self._enqueue_display(frame, result, output_path)
 
     def _should_display_result(self, result: AnalysisResult) -> bool:
@@ -689,6 +724,15 @@ class BaseVideoProcessor(ABC):
         if self._display_thread is not None:
             self._display_thread.join(timeout=2.0)
             self._display_thread = None
+
+    def _stop_prewarm_worker(self) -> None:
+        """Stop the placeholder processed-stream keepalive worker."""
+        self._prewarm_stop.set()
+        if self._prewarm_thread is not None:
+            self._prewarm_thread.join(timeout=2.0)
+            self._prewarm_thread = None
+        self._prewarm_frame = None
+        self._prewarm_path = None
 
     def _enqueue_display(
         self, frame: np.ndarray, result: AnalysisResult, output_rtsp_path: str
@@ -726,6 +770,71 @@ class BaseVideoProcessor(ABC):
                     continue
             self._push_frame(display_frame, output_rtsp_path)
 
+    def _display_output_path(self) -> str:
+        """Return the RTSP output path used for processed frames.
+        返回处理结果帧使用的 RTSP 输出路径。"""
+        return f"{self._stream_path()}_processed"
+
+    def _make_processing_overlay(self, frame: np.ndarray) -> np.ndarray:
+        """Create a placeholder frame while inference is still warming up.
+        在推理尚未返回时创建占位结果帧。"""
+        out = frame.copy()
+        cv2.putText(
+            out,
+            "Processing...",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            DRAW_DETECTION_COLOR,
+            DRAW_FONT_THICKNESS,
+            cv2.LINE_AA,
+        )
+        return out
+
+    def _prewarm_display_stream(
+        self, frame: np.ndarray, output_rtsp_path: str
+    ) -> None:
+        """Publish one placeholder frame so MediaMTX exposes the processed path.
+        先发布一帧占位结果，使 MediaMTX 提前暴露 processed 路径。"""
+        frame = self._ensure_even_dims(frame)
+        h, w = frame.shape[:2]
+        if h == 0 or w == 0:
+            return
+
+        with self._push_lock:
+            if (
+                self._push_proc is not None
+                and self._push_proc.poll() is None
+                and self._push_path == output_rtsp_path
+                and self._push_width == w
+                and self._push_height == h
+            ):
+                return
+
+        self._prewarm_frame = self._make_processing_overlay(frame)
+        self._prewarm_path = output_rtsp_path
+        self._push_frame(self._prewarm_frame, output_rtsp_path)
+
+        if self._display_ready.is_set():
+            return
+        if self._prewarm_thread is None or not self._prewarm_thread.is_alive():
+            self._prewarm_thread = threading.Thread(
+                target=self._prewarm_worker,
+                name=f"prewarm-{self.source_id}",
+                daemon=True,
+            )
+            self._prewarm_thread.start()
+
+    def _prewarm_worker(self) -> None:
+        """Keep the placeholder processed stream alive until real frames arrive.
+        在真实结果帧到来前持续保持占位 processed 流在线。"""
+        while not self._prewarm_stop.wait(1.0):
+            if self._display_ready.is_set():
+                break
+            if self._prewarm_frame is None or self._prewarm_path is None:
+                continue
+            self._push_frame(self._prewarm_frame, self._prewarm_path)
+
     @staticmethod
     def _ensure_even_dims(frame: np.ndarray) -> np.ndarray:
         """Crop frame to even width/height required by yuv420p encoding.
@@ -759,6 +868,7 @@ class BaseVideoProcessor(ABC):
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (
                     self._push_proc is None
+                    or self._push_proc.poll() is not None
                     or self._push_path != output_rtsp_path
                     or self._push_width != w
                     or self._push_height != h
@@ -800,6 +910,7 @@ class BaseVideoProcessor(ABC):
                 # 将原始 RGB 帧字节写入 ffmpeg 的 stdin。
                 if self._push_proc.stdin is not None:
                     self._push_proc.stdin.write(frame.tobytes())
+                    self._push_proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
                 logger.warning("Push error for {}: {}", output_rtsp_path, exc)
                 self._close_push_container()

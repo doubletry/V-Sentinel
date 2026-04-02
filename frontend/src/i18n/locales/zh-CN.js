@@ -180,6 +180,8 @@ export default {
     emailFromAuthCode: '发件人密码/授权码',
     emailToAddresses: '收件人',
     emailCcAddresses: '抄送人',
+    dailySummaryHour: '每日总结发送小时',
+    dailySummaryMinute: '每日总结发送分钟',
     emailAddressesHint: '多个邮箱请使用英文逗号分隔。',
     testEmail: '测试邮箱配置',
     testEmailSuccess: '测试邮件发送成功：{status}',

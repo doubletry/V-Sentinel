@@ -25,6 +25,7 @@ MessageFactory = Callable[[Any], Any]
 PersistVisitHook = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 LoadVisitsHook = Callable[[str], Awaitable[list[dict[str, Any]]]]
 SendDailySummaryEmailHook = Callable[[str, str], Awaitable[None]]
+LoadAppSettingsHook = Callable[[], Awaitable[dict[str, str]]]
 
 
 class TruckAnalysisAgent(BaseAnalysisAgent):
@@ -40,6 +41,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         persist_visit: PersistVisitHook | None = None,
         load_visits_since: LoadVisitsHook | None = None,
         send_daily_summary_email: SendDailySummaryEmailHook | None = None,
+        load_app_settings: LoadAppSettingsHook | None = None,
     ) -> None:
         super().__init__(broadcaster=broadcaster, summary_interval=summary_interval)
         self._daily_task: asyncio.Task | None = None
@@ -48,6 +50,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
         self._persist_visit_hook = persist_visit
         self._load_visits_since_hook = load_visits_since
         self._send_daily_summary_email_hook = send_daily_summary_email
+        self._load_app_settings_hook = load_app_settings
 
     async def start(self) -> None:
         """Start periodic aggregation and the daily summary scheduler.
@@ -126,20 +129,51 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             return
         await self._send_daily_summary_email_hook(summary_text, until_iso)
 
+    async def load_app_settings(self) -> dict[str, str]:
+        """Scenario hook for fetching current app settings.
+        场景钩子：获取当前应用设置。"""
+        if self._load_app_settings_hook is None:
+            return {}
+        return await self._load_app_settings_hook()
+
+    async def _get_daily_summary_target(self, now: datetime) -> datetime:
+        """Return the next configured local send time.
+        返回下一个配置的本地发送时间。"""
+        settings = await self.load_app_settings()
+        try:
+            hour = min(
+                23,
+                max(0, int(settings.get("daily_summary_hour", str(DAILY_SUMMARY_HOUR)))),
+            )
+        except Exception:
+            hour = DAILY_SUMMARY_HOUR
+        try:
+            minute = min(
+                59,
+                max(
+                    0,
+                    int(
+                        settings.get(
+                            "daily_summary_minute", str(DAILY_SUMMARY_MINUTE)
+                        )
+                    ),
+                ),
+            )
+        except Exception:
+            minute = DAILY_SUMMARY_MINUTE
+
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return target
+
     async def _daily_summary_loop(self) -> None:
         """Generate a daily Chinese summary at the configured local time.
         在配置的本地时间生成中文每日总结。"""
         try:
             while not self._stop_event.is_set():
                 now = datetime.now()
-                target = now.replace(
-                    hour=DAILY_SUMMARY_HOUR,
-                    minute=DAILY_SUMMARY_MINUTE,
-                    second=0,
-                    microsecond=0,
-                )
-                if target <= now:
-                    target += timedelta(days=1)
+                target = await self._get_daily_summary_target(now)
                 wait_secs = (target - now).total_seconds()
                 logger.info(
                     "Daily summary scheduled at {} (in {:.0f}s)",

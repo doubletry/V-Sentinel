@@ -25,6 +25,8 @@ class TestSettingsDB:
         assert all_settings["email_from_address"] == ""
         assert all_settings["email_to_addresses"] == ""
         assert all_settings["email_port"] == "50055"
+        assert all_settings["daily_summary_hour"] == "23"
+        assert all_settings["daily_summary_minute"] == "59"
 
     async def test_get_setting(self, init_db):
         val = await get_setting("vengine_host")
@@ -76,6 +78,8 @@ class TestSettingsAPI:
                 "email_to_addresses": "to1@example.com,to2@example.com",
                 "email_cc_addresses": "cc@example.com",
                 "email_port": "50060",
+                "daily_summary_hour": "21",
+                "daily_summary_minute": "30",
             },
         )
         assert resp.status_code == 200
@@ -90,6 +94,8 @@ class TestSettingsAPI:
         assert data["email_to_addresses"] == "to1@example.com,to2@example.com"
         assert data["email_cc_addresses"] == "cc@example.com"
         assert data["email_port"] == "50060"
+        assert data["daily_summary_hour"] == "21"
+        assert data["daily_summary_minute"] == "30"
 
     async def test_update_empty(self, async_client: AsyncClient):
         """Empty update should return current settings."""

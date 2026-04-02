@@ -180,6 +180,8 @@ export default {
     emailFromAuthCode: 'Sender Password/Auth Code',
     emailToAddresses: 'Recipients',
     emailCcAddresses: 'CC',
+    dailySummaryHour: 'Daily Summary Hour',
+    dailySummaryMinute: 'Daily Summary Minute',
     emailAddressesHint: 'Separate multiple email addresses with commas.',
     testEmail: 'Test Email Settings',
     testEmailSuccess: 'Test email sent successfully: {status}',

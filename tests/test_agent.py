@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -149,3 +150,24 @@ class TestAnalysisAgentAggregation:
         assert sent.source_id == "__daily_summary__"
         assert "ABC123" in sent.message
         fake_email_client.send_daily_summary_email.assert_awaited_once()
+
+    async def test_truck_agent_daily_summary_target_uses_settings(self, monkeypatch):
+        ws = WSManager()
+        fake_email_client = AsyncMock()
+
+        async def fake_settings() -> dict[str, str]:
+            return {
+                "daily_summary_hour": "21",
+                "daily_summary_minute": "30",
+            }
+
+        monkeypatch.setattr("backend.db.database.get_all_settings", fake_settings)
+        agent = AnalysisAgent(
+            ws_manager=ws,
+            email_client=fake_email_client,
+            summary_interval=60.0,
+        )
+
+        target = await agent._get_daily_summary_target(datetime(2026, 1, 1, 20, 0, 0))
+        assert target.hour == 21
+        assert target.minute == 30

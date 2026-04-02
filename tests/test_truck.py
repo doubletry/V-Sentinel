@@ -12,7 +12,11 @@ import numpy as np
 import pytest
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
-from core.truck.plate import extract_valid_plate_text, is_valid_plate_text
+from core.truck.plate import (
+    extract_valid_plate_text,
+    is_valid_plate_text,
+    should_replace_plate,
+)
 from core.truck.constants import REQUIRED_ACTIONS
 from core.truck.tracker import (
     FrameAnalysis,
@@ -113,6 +117,12 @@ class TestPlateFiltering:
         assert extract_valid_plate_text("12345") == ""
         assert not is_valid_plate_text("###")
 
+    def test_replacement_prefers_more_complete_plate(self):
+        assert should_replace_plate("BLX785", 0.99, "粤B12345", 0.50)
+
+    def test_replacement_prefers_higher_confidence_when_completeness_matches(self):
+        assert should_replace_plate("粤B12345", 0.60, "粤B12345", 0.95)
+
 
 class TestMergeBoxes:
     def test_single_box(self):
@@ -192,11 +202,20 @@ class TestTruckTracker:
         tracker = TruckTracker(min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
-        tracker.feed_ocr(tid, "LOW", 0.5)
-        tracker.feed_ocr(tid, "HIGH", 0.95)
-        tracker.feed_ocr(tid, "LOWER", 0.3)
-        assert tracker.get_track(tid).best_plate == "HIGH"
+        tracker.feed_ocr(tid, "BLX785", 0.5)
+        tracker.feed_ocr(tid, "BLX786", 0.95)
+        tracker.feed_ocr(tid, "BLX787", 0.3)
+        assert tracker.get_track(tid).best_plate == "BLX786"
         assert tracker.get_track(tid).best_plate_conf == 0.95
+
+    def test_best_plate_prefers_prefixed_plate_over_plain_noise(self):
+        tracker = TruckTracker(min_presence_frames=1)
+        tracker.update(FrameAnalysis(trucks=[_truck_det()]))
+        tid = list(tracker.get_all_tracks().keys())[0]
+        tracker.feed_ocr(tid, "BLX785", 0.99)
+        tracker.feed_ocr(tid, "粤B12345", 0.60)
+        assert tracker.get_track(tid).best_plate == "粤B12345"
+        assert tracker.get_track(tid).best_plate_conf == 0.60
 
     def test_ocr_interval_triggers_correctly(self):
         """OCR should trigger on first frame and after ocr_interval frames.

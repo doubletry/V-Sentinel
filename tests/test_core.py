@@ -474,3 +474,69 @@ class TestCoreBaseVideoProcessorPipeline:
         pushed_frame, path = pushed[0]
         assert path == "cam1_processed"
         assert pushed_frame.sum() > 0
+
+    async def test_process_frame_item_prewarms_processed_stream(self):
+        class WarmupProcessor(BaseVideoProcessor):
+            def __init__(self):
+                super().__init__(
+                    source_id="s1",
+                    source_name="cam",
+                    rtsp_url="rtsp://localhost:8554/cam1",
+                    app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+                )
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                self.started.set()
+                await self.release.wait()
+                return AnalysisResult()
+
+        proc = WarmupProcessor()
+        pushed: list[tuple[np.ndarray, str]] = []
+        proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        task = asyncio.create_task(proc._process_frame_item(frame, b"jpeg"))
+        await asyncio.wait_for(proc.started.wait(), timeout=1.0)
+
+        assert len(pushed) == 1
+        pushed_frame, path = pushed[0]
+        assert path == "cam1_processed"
+        assert pushed_frame.sum() > 0
+
+        proc.release.set()
+        await asyncio.wait_for(task, timeout=1.0)
+
+    async def test_process_frame_item_prewarms_processed_stream(self):
+        class WarmupProcessor(BaseVideoProcessor):
+            def __init__(self):
+                super().__init__(
+                    source_id="s1",
+                    source_name="cam",
+                    rtsp_url="rtsp://localhost:8554/cam1",
+                    app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+                )
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                self.started.set()
+                await self.release.wait()
+                return AnalysisResult()
+
+        proc = WarmupProcessor()
+        pushed: list[tuple[np.ndarray, str]] = []
+        proc._push_frame = lambda frame, path: pushed.append((frame.copy(), path))
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        task = asyncio.create_task(proc._process_frame_item(frame, b"jpeg"))
+        await asyncio.wait_for(proc.started.wait(), timeout=1.0)
+
+        assert len(pushed) == 1
+        pushed_frame, path = pushed[0]
+        assert path == "cam1_processed"
+        assert pushed_frame.sum() > 0
+
+        proc.release.set()
+        await asyncio.wait_for(task, timeout=1.0)

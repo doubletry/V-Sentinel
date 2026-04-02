@@ -57,6 +57,8 @@ DEFAULT_APP_SETTINGS: dict[str, str] = {
     "email_to_addresses": "",
     "email_cc_addresses": "",
     "email_port": "50055",
+    "daily_summary_hour": "23",
+    "daily_summary_minute": "59",
     # Thread pool sizes / 线程池大小
     "max_pull_workers": "20",
     "max_push_workers": "10",

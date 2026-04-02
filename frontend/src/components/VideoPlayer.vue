@@ -94,7 +94,7 @@ async function connect() {
     }
   } catch (err) {
     const message = err.message || t('videoPlayer.connectionFailed')
-    if (message.includes('WHEP error: 404')) {
+    if (err?.name === 'WHEPError' && err?.status === 404) {
       error.value = ''
       _scheduleReconnect(STREAM_PENDING_RETRY_DELAY)
       return

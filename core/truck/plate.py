@@ -9,6 +9,12 @@ import re
 _PROVINCE_PREFIX = (
     "京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤青藏川宁琼使领港澳"
 )
+# Supported forms:
+# 1. Province + region letter + 5/6 alnum chars, e.g. 粤B12345 / 粤B123456
+# 2. Plain 5/6 alnum fallback captured by OCR without province prefix, e.g. BLX785
+# 支持两种形式：
+# 1. 省份简称 + 地区字母 + 5/6 位字母数字
+# 2. OCR 丢失省份前缀时的 5/6 位纯字母数字形式
 _PLATE_RE = re.compile(
     rf"^(?:[{_PROVINCE_PREFIX}][A-Z])?[A-Z0-9]{{5,6}}$"
 )

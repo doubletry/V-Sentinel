@@ -1107,8 +1107,9 @@ class TestProcessorKeyMessages:
         ]
         assert len(arrival_msgs) == 1
         assert arrival_msgs[0]["image_base64"]
-        assert arrival_msgs[0]["image_base64"] != proc._encode_thumbnail(frame)
+        raw_decoded = _decode_thumbnail(proc._encode_thumbnail(frame))
         decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
+        assert not np.array_equal(decoded, raw_decoded)
         assert decoded.sum() > 0
 
     async def test_no_detection_message(self):

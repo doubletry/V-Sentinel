@@ -103,6 +103,17 @@ class ProcessorPluginInfo(BaseModel):
     label_en: str
 
 
+class PaginatedMessagesResponse(BaseModel):
+    """Paginated persisted analysis messages.
+    持久化分析消息的分页响应。"""
+
+    items: list[AnalysisMessage]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 class AppSettingsUpdate(BaseModel):
     """Partial update for app settings (all fields optional).
     部分更新应用设置（所有字段可选）。"""

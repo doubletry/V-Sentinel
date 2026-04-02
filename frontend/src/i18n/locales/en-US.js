@@ -105,6 +105,7 @@ export default {
     allSources: 'All sources',
     clear: 'Clear',
     pageSize: 'Page size',
+    newMessages: '{count} new message(s)',
   },
   processingLogs: {
     title: 'Processing Runtime Logs',

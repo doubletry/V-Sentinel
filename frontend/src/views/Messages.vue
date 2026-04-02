@@ -14,6 +14,7 @@
           clearable
           size="small"
           style="width: 200px"
+          @change="handleFilterChange"
         >
           <el-option
             v-for="src in sourceStore.sources"
@@ -22,6 +23,14 @@
             :value="src.id"
           />
         </el-select>
+        <el-button
+          v-if="store.pendingCount > 0"
+          size="small"
+          type="warning"
+          @click="jumpToLatest"
+        >
+          {{ t('messages.newMessages', { count: store.pendingCount }) }}
+        </el-button>
         <el-button size="small" @click="store.clearMessages">{{ t('messages.clear') }}</el-button>
       </div>
     </div>
@@ -66,17 +75,21 @@ watch(
   }
 )
 
-watch(filterSource, async (value) => {
-  store.setFilterSource(value || '')
-  await store.fetchMessages(1, store.pageSize)
-})
-
 async function handlePageChange(nextPage) {
   await store.fetchMessages(nextPage, store.pageSize)
 }
 
 async function handleSizeChange(nextSize) {
   await store.fetchMessages(1, nextSize)
+}
+
+async function handleFilterChange(value) {
+  store.setFilterSource(value || '')
+  await store.fetchMessages(1, store.pageSize)
+}
+
+async function jumpToLatest() {
+  await store.fetchMessages(1, store.pageSize)
 }
 
 onMounted(() => {

@@ -105,6 +105,7 @@ export default {
     allSources: '全部视频源',
     clear: '清空',
     pageSize: '每页条数',
+    newMessages: '有 {count} 条新消息',
   },
   processingLogs: {
     title: 'Processing 运行日志',

@@ -41,6 +41,8 @@ OTHER_ACTION_LABEL: str = "Other"
 """Classification label for the non-required other class. 非必需 other 分类标签。"""
 
 ACTION_LABEL_ALIASES: dict[str, str] = {
+    # Legacy placeholder labels are kept for backward compatibility with
+    # older classifiers/tests until every producer emits canonical labels.
     "action1": "HandOverKeys",
     "action2": "PlaceWheelChock",
     "action3": "InnerInspectionOfTruck",

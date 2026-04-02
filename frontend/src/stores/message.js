@@ -11,6 +11,7 @@ export const useMessageStore = defineStore('message', () => {
   const page = ref(1)
   const pageSize = ref(20)
   const total = ref(0)
+  const pendingCount = ref(0)
   let _ws = null
   let _reconnectTimer = null
 
@@ -28,6 +29,7 @@ export const useMessageStore = defineStore('message', () => {
       pageSize.value = Number(data.page_size || nextPageSize)
       total.value = Number(data.total || 0)
       messages.value = Array.isArray(data.items) ? data.items : []
+      pendingCount.value = 0
       return messages.value
     } finally {
       loading.value = false
@@ -65,6 +67,8 @@ export const useMessageStore = defineStore('message', () => {
           if (messages.value.length > pageSize.value) {
             messages.value = messages.value.slice(0, pageSize.value)
           }
+        } else {
+          pendingCount.value += 1
         }
       } catch (_) {
         // Ignore parse errors
@@ -96,6 +100,7 @@ export const useMessageStore = defineStore('message', () => {
   function clearMessages() {
     messages.value = []
     total.value = 0
+    pendingCount.value = 0
   }
 
   function setFilterSource(sourceId) {
@@ -108,6 +113,7 @@ export const useMessageStore = defineStore('message', () => {
     page,
     pageSize,
     total,
+    pendingCount,
     pageSizeOptions,
     wsConnected,
     filterSource,

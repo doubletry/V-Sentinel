@@ -79,11 +79,19 @@ def datetime_from_record(record: logging.LogRecord) -> str:
 _STDLIB_LOG_HANDLER = _StdlibProcessingLogHandler()
 _STDLIB_LOG_CAPTURE_CONFIGURED = False
 
-if not _STDLIB_LOG_CAPTURE_CONFIGURED:
-    for _logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        _logger = logging.getLogger(_logger_name)
-        if not any(handler is _STDLIB_LOG_HANDLER for handler in _logger.handlers):
-            _logger.addHandler(_STDLIB_LOG_HANDLER)
+
+def _configure_stdlib_log_capture() -> None:
+    """Register stdlib log forwarding exactly once per process.
+    为当前进程只注册一次标准库日志转发。"""
+    global _STDLIB_LOG_CAPTURE_CONFIGURED
+
+    if _STDLIB_LOG_CAPTURE_CONFIGURED:
+        return
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        std_logger = logging.getLogger(logger_name)
+        if not any(handler is _STDLIB_LOG_HANDLER for handler in std_logger.handlers):
+            std_logger.addHandler(_STDLIB_LOG_HANDLER)
     _STDLIB_LOG_CAPTURE_CONFIGURED = True
 
 # Module-level singletons (accessed by API routers) / 模块级单例（供 API 路由使用）
@@ -100,6 +108,7 @@ async def lifespan(app: FastAPI):
     global ws_manager, vengine_client, email_client, processor_manager
 
     logger.info("Starting {} ...", settings.app_name)
+    _configure_stdlib_log_capture()
 
     # Initialize WebSocket manager / 初始化 WebSocket 管理器
     async def _persist_message(message) -> None:

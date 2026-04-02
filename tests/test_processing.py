@@ -347,3 +347,22 @@ class TestBackendBaseProcessorPipeline:
 
         assert queued
         assert queued[0][2] == "zone/cam1_processed"
+
+    async def test_handle_result_enqueues_display_for_empty_result(self):
+        proc = DummyProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/client1/stream2",
+            rois=[],
+            vengine_client=MagicMock(),
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+        queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
+        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        frame = np.zeros((32, 32, 3), dtype=np.uint8)
+
+        await proc._handle_result(frame, AnalysisResult())
+
+        assert queued
+        assert queued[0][2] == "client1/stream2_processed"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from backend.db import database as db
-from backend.models.schemas import AppSettingsUpdate
+from backend.models.schemas import AppSettingsUpdate, EmailTestRequest
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -35,5 +35,23 @@ async def update_settings(data: AppSettingsUpdate, request: Request) -> dict[str
     # Reconnect V-Engine client with new addresses / 使用新地址重连 V-Engine 客户端
     vengine_client = request.app.state.vengine_client
     await vengine_client.reconnect_from_settings(result)
+    email_client = request.app.state.email_client
+    await email_client.reconnect_from_settings(result)
 
     return result
+
+
+@router.post("/email/test")
+async def test_email_settings(
+    data: EmailTestRequest,
+    request: Request,
+) -> dict[str, str]:
+    """Send a test email using current or provided settings.
+    使用当前或传入的设置发送测试邮件。"""
+    app_settings = await db.get_all_settings()
+    overrides = {k: v for k, v in data.model_dump().items() if v is not None}
+
+    merged_settings = {**app_settings, **overrides}
+    email_client = request.app.state.email_client
+    await email_client.reconnect_from_settings(merged_settings)
+    return await email_client.send_test_email(app_settings, overrides=overrides)

@@ -125,6 +125,19 @@ class AppSettingsUpdate(BaseModel):
     email_from_auth_code: str | None = None
     email_to_addresses: str | None = None
     email_cc_addresses: str | None = None
+    email_port: str | None = None
     max_pull_workers: str | None = None
     max_push_workers: str | None = None
     max_cpu_workers: str | None = None
+
+
+class EmailTestRequest(BaseModel):
+    """Payload for testing email configuration without saving first.
+    用于在不先保存的情况下测试邮件配置的载荷。"""
+
+    vengine_host: str | None = None
+    email_port: str | None = None
+    email_from_address: str | None = None
+    email_from_auth_code: str | None = None
+    email_to_addresses: str | None = None
+    email_cc_addresses: str | None = None

@@ -17,6 +17,7 @@ const DEFAULT_UI_SETTINGS = {
   email_from_auth_code: '',
   email_to_addresses: '',
   email_cc_addresses: '',
+  email_port: '50055',
 }
 
 function parseRoiTagOptions(raw) {
@@ -95,6 +96,10 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     return settings.value
   }
 
+  async function testEmail(payload) {
+    return settingsApi.testEmail(payload)
+  }
+
   function patchSettings(partial) {
     settings.value = withDefaults({
       ...settings.value,
@@ -121,6 +126,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     mediamtxWebrtcAddr,
     fetchSettings,
     updateSettings,
+    testEmail,
     patchSettings,
     applyLanguage,
   }

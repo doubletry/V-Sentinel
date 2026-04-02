@@ -194,6 +194,12 @@
               placeholder="sender@example.com"
             />
           </el-form-item>
+          <el-form-item :label="t('settings.emailGrpcPort')">
+            <el-input
+              v-model="form.email_port"
+              placeholder="50055"
+            />
+          </el-form-item>
           <el-form-item :label="t('settings.emailFromAuthCode')">
             <el-input
               v-model="form.email_from_auth_code"
@@ -238,6 +244,9 @@
 
         <div class="settings-actions">
           <el-button @click="reload">{{ t('common.reset') }}</el-button>
+          <el-button @click="testEmailConfig" :loading="testingEmail">
+            {{ t('settings.testEmail') }}
+          </el-button>
           <el-button type="primary" @click="save" :loading="saving">
             {{ t('settings.saveSettings') }}
           </el-button>
@@ -266,6 +275,7 @@ const processorPluginOptions = [
 
 const loading = ref(false)
 const saving = ref(false)
+const testingEmail = ref(false)
 const serviceAction = ref('')
 const roiTagInput = ref('')
 const roiTagList = ref([])
@@ -293,6 +303,7 @@ const form = ref({
   email_from_auth_code: '',
   email_to_addresses: '',
   email_cc_addresses: '',
+  email_port: '50055',
   max_pull_workers: '',
   max_push_workers: '',
   max_cpu_workers: '',
@@ -402,6 +413,30 @@ async function save() {
     ElMessage.error(t('settings.failedToSave', { message: err.message }))
   } finally {
     saving.value = false
+  }
+}
+
+async function testEmailConfig() {
+  testingEmail.value = true
+  try {
+    const payload = {
+      vengine_host: form.value.vengine_host,
+      email_port: form.value.email_port,
+      email_from_address: form.value.email_from_address,
+      email_from_auth_code: form.value.email_from_auth_code,
+      email_to_addresses: form.value.email_to_addresses,
+      email_cc_addresses: form.value.email_cc_addresses,
+    }
+    const result = await appSettingsStore.testEmail(payload)
+    ElMessage.success(
+      t('settings.testEmailSuccess', {
+        status: result.status || 'SUCCESS',
+      })
+    )
+  } catch (err) {
+    ElMessage.error(t('settings.testEmailFailed', { message: err.message }))
+  } finally {
+    testingEmail.value = false
   }
 }
 

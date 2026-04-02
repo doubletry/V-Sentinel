@@ -35,7 +35,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from core.constants import (
+from core.truck.constants import (
     MAX_MISSING_FRAMES,
     MIN_PRESENCE_FRAMES,
     OCR_INTERVAL,

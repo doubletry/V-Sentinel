@@ -53,7 +53,7 @@ import numpy as np
 from loguru import logger
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
-from core.constants import (
+from core.truck.constants import (
     CLASSIFICATION_MODEL,
     DETECTION_MODEL,
     LABEL_EN_TO_ZH,
@@ -310,6 +310,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         # 5. 仅组装关键消息：到达、OCR 识别、动作确认、离开。
         messages: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()
+        thumbnail = self._encode_thumbnail(frame)
 
         # 5a. Vehicle arrival — newly confirmed trucks this frame.
         # 5a. 车辆到达——本帧新确认的卡车。
@@ -340,6 +341,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                     "message": (
                         f"Plate recognized: {plate_after} (track #{tid})"
                     ),
+                    "image_base64": thumbnail,
                 })
 
         # 5c. New stable actions — detect actions confirmed for the first time.
@@ -361,6 +363,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                             f"Action confirmed: {action_zh} "
                             f"(plate={plate_info}, track #{first_tid})"
                         ),
+                        "image_base64": thumbnail,
                     })
 
         # 5d. Vehicle departure — trucks that left the scene.
@@ -376,6 +379,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                     f"Vehicle left: plate={visit.plate or 'unknown'}, "
                     f"missing actions: {missing}"
                 ),
+                "image_base64": thumbnail,
             })
 
         # Serialize visit data for agent persistence

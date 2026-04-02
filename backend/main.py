@@ -18,6 +18,7 @@ from backend.db.database import close_db, get_all_settings, init_db
 from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
+from core.email_client import AsyncEmailClient
 
 # Configure loguru / 配置 loguru 日志
 logger.remove()
@@ -45,6 +46,7 @@ logger.add(
 # Module-level singletons (accessed by API routers) / 模块级单例（供 API 路由使用）
 ws_manager: ws_module.WSManager
 vengine_client: AsyncVEngineClient
+email_client: AsyncEmailClient
 processor_manager: ProcessorManager
 
 
@@ -52,7 +54,7 @@ processor_manager: ProcessorManager
 async def lifespan(app: FastAPI):
     """Application lifespan: initialize and teardown resources.
     应用生命周期：初始化与销毁资源。"""
-    global ws_manager, vengine_client, processor_manager
+    global ws_manager, vengine_client, email_client, processor_manager
 
     logger.info("Starting {} ...", settings.app_name)
 
@@ -67,15 +69,19 @@ async def lifespan(app: FastAPI):
     app_settings = await get_all_settings()
     vengine_client = AsyncVEngineClient(settings)
     await vengine_client.connect(app_settings)
+    email_client = AsyncEmailClient()
+    await email_client.connect(app_settings)
 
     # Store on app.state for dependency-injection in API routes / 存储到 app.state 以便 API 路由依赖注入
     app.state.vengine_client = vengine_client
+    app.state.email_client = email_client
 
     # Initialize ProcessorManager (includes AnalysisAgent) / 初始化处理器管理器（含分析代理）
     processor_manager = ProcessorManager(
         vengine_client=vengine_client,
         ws_manager=ws_manager,
         app_settings=app_settings,
+        email_client=email_client,
     )
     await processor_manager.start_agent()
 
@@ -87,6 +93,7 @@ async def lifespan(app: FastAPI):
 
     await processor_manager.stop_all()
     await processor_manager.stop_agent()
+    await email_client.close()
     await vengine_client.close()
     await close_db()
 

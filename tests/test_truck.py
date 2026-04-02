@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
-from core.constants import REQUIRED_ACTIONS
+from core.truck.constants import REQUIRED_ACTIONS
 from core.truck.tracker import (
     FrameAnalysis,
     TrackedTruck,
@@ -1083,6 +1083,7 @@ class TestProcessorKeyMessages:
             m for m in result.messages if "Vehicle arrived" in m.get("message", "")
         ]
         assert len(arrival_msgs) == 1
+        assert arrival_msgs[0]["image_base64"]
 
     async def test_no_detection_message(self):
         """Per-frame detection messages are NOT produced anymore."""
@@ -1146,3 +1147,76 @@ class TestProcessorKeyMessages:
         ]
         assert len(plate_msgs) == 1
         assert "ABC123" in plate_msgs[0]["message"]
+        assert plate_msgs[0]["image_base64"]
+
+    async def test_action_confirmation_message_has_image(self):
+        """Action-confirmed message includes an image snapshot."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+            _person_det(20, 20, 80, 100, label="person"),
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = [
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1, stability_min_count=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        action_msgs = [
+            m for m in result.messages if "Action confirmed" in m.get("message", "")
+        ]
+        assert len(action_msgs) == 1
+        assert action_msgs[0]["image_base64"]
+
+    async def test_departure_message_has_image(self):
+        """Departure message is emitted with an image snapshot."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.side_effect = [
+            [_truck_det(10, 10, 200, 200, label="truck")],
+            [],
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        departure_msgs = [
+            m for m in result.messages if "Vehicle left" in m.get("message", "")
+        ]
+        assert len(departure_msgs) == 1
+        assert departure_msgs[0]["image_base64"]

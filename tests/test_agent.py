@@ -1,4 +1,4 @@
-"""Tests for the AnalysisAgent (aggregator)."""
+"""Tests for the truck AnalysisAgent."""
 from __future__ import annotations
 
 import asyncio
@@ -77,50 +77,14 @@ class TestAnalysisAgentBuildSummary:
         summary = AnalysisAgent._build_summary([])
         assert summary is None
 
-    def test_single_source(self):
-        result = AnalysisResult(
-            detections=[{"label": "person"}, {"label": "car"}],
-            ocr_texts=[{"text": "ABC123"}],
-        )
+    def test_generic_periodic_summary_disabled(self):
+        result = AnalysisResult(detections=[{"label": "person"}])
         summary = AnalysisAgent._build_summary([("s1", "Camera 1", result)])
-        assert summary is not None
-        assert summary.source_id == "__agent__"
-        assert summary.source_name == "[Agent]"
-        assert "Camera 1" in summary.message
-        assert "2 detections" in summary.message
-        assert "1 OCR texts" in summary.message
-        assert summary.level == "info"
-
-    def test_multiple_sources(self):
-        r1 = AnalysisResult(detections=[{"label": "person"}])
-        r2 = AnalysisResult(detections=[{"label": "car"}], ocr_texts=[{"text": "X"}])
-        items = [("s1", "Cam1", r1), ("s2", "Cam2", r2)]
-        summary = AnalysisAgent._build_summary(items)
-        assert summary is not None
-        assert "2 source(s)" in summary.message
-        assert "Cam1" in summary.message
-        assert "Cam2" in summary.message
-
-    def test_warning_level(self):
-        """Many detections should trigger warning level."""
-        dets = [{"label": f"obj{i}"} for i in range(25)]
-        result = AnalysisResult(detections=dets)
-        summary = AnalysisAgent._build_summary([("s1", "cam", result)])
-        assert summary is not None
-        assert summary.level == "warning"
-
-    def test_labels_collected(self):
-        result = AnalysisResult(
-            detections=[{"label": "dog"}, {"label": "cat"}, {"label": "dog"}]
-        )
-        summary = AnalysisAgent._build_summary([("s1", "cam", result)])
-        assert summary is not None
-        assert "cat" in summary.message
-        assert "dog" in summary.message
+        assert summary is None
 
 
 class TestAnalysisAgentAggregation:
-    async def test_aggregation_broadcasts_summary(self):
+    async def test_aggregation_does_not_broadcast_generic_summary(self):
         ws = WSManager()
         ws.broadcast = AsyncMock()
 
@@ -139,14 +103,49 @@ class TestAnalysisAgentAggregation:
 
         await agent.stop()
 
-        # Should have broadcast a summary (the individual submits had no messages)
-        calls = ws.broadcast.call_args_list
-        # Find the agent summary broadcast
-        summaries = [
-            c for c in calls
-            if isinstance(c[0][0], AnalysisMessage) and c[0][0].source_id == "__agent__"
-        ]
-        assert len(summaries) >= 1
-        summary_msg = summaries[0][0][0]
-        assert "Cam1" in summary_msg.message
-        assert "Cam2" in summary_msg.message
+        ws.broadcast.assert_not_awaited()
+
+    async def test_daily_summary_broadcasts_daily_message(self, monkeypatch):
+        ws = WSManager()
+        ws.broadcast = AsyncMock()
+        fake_email_client = AsyncMock()
+
+        async def fake_visits(_since: str) -> list[dict]:
+            return [{
+                "source_id": "s1",
+                "source_name": "Cam1",
+                "track_id": 1,
+                "plate": "ABC123",
+                "confirmed_actions": ["action1"],
+                "missing_actions": [],
+            }]
+
+        monkeypatch.setattr(
+            "backend.processing.truck.agent.get_vehicle_visits_since",
+            fake_visits,
+        )
+        async def fake_settings() -> dict[str, str]:
+            return {
+                "email_from_address": "sender@example.com",
+                "email_from_auth_code": "secret",
+                "email_to_addresses": "to@example.com",
+                "email_cc_addresses": "",
+                "vengine_host": "localhost",
+                "email_port": "50055",
+            }
+
+        monkeypatch.setattr("backend.db.database.get_all_settings", fake_settings)
+        agent = AnalysisAgent(
+            ws_manager=ws,
+            email_client=fake_email_client,
+            summary_interval=60.0,
+        )
+
+        await agent._generate_daily_summary()
+
+        ws.broadcast.assert_awaited_once()
+        sent = ws.broadcast.await_args.args[0]
+        assert isinstance(sent, AnalysisMessage)
+        assert sent.source_id == "__daily_summary__"
+        assert "ABC123" in sent.message
+        fake_email_client.send_daily_summary_email.assert_awaited_once()

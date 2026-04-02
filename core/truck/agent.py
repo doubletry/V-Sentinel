@@ -13,23 +13,41 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
 from core.analysis_agent import BaseAnalysisAgent
 from core.base_processor import AnalysisResult
-from core.constants import DAILY_SUMMARY_HOUR, DAILY_SUMMARY_MINUTE, LABEL_EN_TO_ZH
+from core.truck.constants import DAILY_SUMMARY_HOUR, DAILY_SUMMARY_MINUTE, LABEL_EN_TO_ZH
+
+MessageFactory = Callable[[Any], Any]
+PersistVisitHook = Callable[[str, str, dict[str, Any]], Awaitable[None]]
+LoadVisitsHook = Callable[[str], Awaitable[list[dict[str, Any]]]]
+SendDailySummaryEmailHook = Callable[[str, str], Awaitable[None]]
 
 
 class TruckAnalysisAgent(BaseAnalysisAgent):
     """Truck-scene analysis agent with daily-summary orchestration.
     truck 场景分析代理，包含每日总结调度。"""
 
-    def __init__(self, broadcaster: Any, summary_interval: float = 10.0) -> None:
+    def __init__(
+        self,
+        broadcaster: Any,
+        summary_interval: float = 10.0,
+        *,
+        message_factory: MessageFactory | None = None,
+        persist_visit: PersistVisitHook | None = None,
+        load_visits_since: LoadVisitsHook | None = None,
+        send_daily_summary_email: SendDailySummaryEmailHook | None = None,
+    ) -> None:
         super().__init__(broadcaster=broadcaster, summary_interval=summary_interval)
         self._daily_task: asyncio.Task | None = None
         self._last_summary_time: str = datetime.now(timezone.utc).isoformat()
+        self._message_factory = message_factory
+        self._persist_visit_hook = persist_visit
+        self._load_visits_since_hook = load_visits_since
+        self._send_daily_summary_email_hook = send_daily_summary_email
 
     async def start(self) -> None:
         """Start periodic aggregation and the daily summary scheduler.
@@ -66,6 +84,23 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             except Exception as exc:
                 logger.error("Failed to persist vehicle visit: {}", exc)
 
+    def normalize_message(self, message: Any) -> Any:
+        """Normalize message objects for the configured broadcaster.
+        为配置的 broadcaster 规范化消息对象。"""
+        if self._message_factory is None:
+            return message
+        return self._message_factory(message)
+
+    @classmethod
+    def _build_summary(
+        cls,
+        items: list[tuple[str, str, AnalysisResult]],
+    ) -> None:
+        """Suppress generic periodic summaries for truck scene.
+        禁用 truck 场景的通用周期汇总消息。"""
+        del items
+        return None
+
     async def persist_visit(
         self,
         source_id: str,
@@ -74,18 +109,23 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
     ) -> None:
         """Scenario hook for visit persistence.
         场景钩子：持久化到访记录。"""
-        del source_id, source_name, visit
+        if self._persist_visit_hook is None:
+            return
+        await self._persist_visit_hook(source_id, source_name, visit)
 
     async def load_vehicle_visits_since(self, since_iso: str) -> list[dict[str, Any]]:
         """Scenario hook for fetching persisted visit records.
         场景钩子：获取持久化的到访记录。"""
-        del since_iso
-        return []
+        if self._load_visits_since_hook is None:
+            return []
+        return await self._load_visits_since_hook(since_iso)
 
     async def send_daily_summary_email(self, summary_text: str, until_iso: str) -> None:
         """Scenario hook for sending the daily summary through email.
         场景钩子：通过邮件发送每日总结。"""
-        del summary_text, until_iso
+        if self._send_daily_summary_email_hook is None:
+            return
+        await self._send_daily_summary_email_hook(summary_text, until_iso)
 
     async def _daily_summary_loop(self) -> None:
         """Generate a daily Chinese summary at the configured local time.

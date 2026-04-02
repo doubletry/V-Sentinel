@@ -1,6 +1,8 @@
 """Tests for app_settings DB operations and Settings API."""
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from httpx import AsyncClient
 
@@ -22,6 +24,7 @@ class TestSettingsDB:
         assert all_settings["ocr_port"] == "50054"
         assert all_settings["email_from_address"] == ""
         assert all_settings["email_to_addresses"] == ""
+        assert all_settings["email_port"] == "50055"
 
     async def test_get_setting(self, init_db):
         val = await get_setting("vengine_host")
@@ -72,6 +75,7 @@ class TestSettingsAPI:
                 "email_from_auth_code": "secret",
                 "email_to_addresses": "to1@example.com,to2@example.com",
                 "email_cc_addresses": "cc@example.com",
+                "email_port": "50060",
             },
         )
         assert resp.status_code == 200
@@ -85,6 +89,7 @@ class TestSettingsAPI:
         assert data["email_from_auth_code"] == "secret"
         assert data["email_to_addresses"] == "to1@example.com,to2@example.com"
         assert data["email_cc_addresses"] == "cc@example.com"
+        assert data["email_port"] == "50060"
 
     async def test_update_empty(self, async_client: AsyncClient):
         """Empty update should return current settings."""
@@ -92,6 +97,32 @@ class TestSettingsAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert "vengine_host" in data
+
+    async def test_email_test_endpoint(self, async_client: AsyncClient):
+        from backend.main import app
+
+        app.state.email_client.send_test_email = AsyncMock(
+            return_value={"status": "SUCCESS", "message": "ok", "email_id": "1"}
+        )
+        app.state.email_client.reconnect_from_settings = AsyncMock()
+
+        resp = await async_client.post(
+            "/api/settings/email/test",
+            json={
+                "vengine_host": "127.0.0.1",
+                "email_port": "50055",
+                "email_from_address": "sender@example.com",
+                "email_from_auth_code": "secret",
+                "email_to_addresses": "to@example.com",
+                "email_cc_addresses": "cc@example.com",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SUCCESS"
+        app.state.email_client.reconnect_from_settings.assert_awaited_once()
+        app.state.email_client.send_test_email.assert_awaited_once()
 
 
 class TestVEngineClientAddresses:

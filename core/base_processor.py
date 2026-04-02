@@ -658,13 +658,8 @@ class BaseVideoProcessor(ABC):
 
     def _should_display_result(self, result: AnalysisResult) -> bool:
         """Return whether a result should be drawn/pushed to the output stream."""
-        return bool(
-            result.annotated_frame is not None
-            or result.detections
-            or result.classifications
-            or result.ocr_texts
-            or result.actions
-        )
+        del result
+        return True
 
     def _start_display_worker(self) -> None:
         """Start the dedicated display worker thread if it is not running."""

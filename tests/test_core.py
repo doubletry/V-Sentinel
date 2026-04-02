@@ -585,8 +585,7 @@ class TestCoreBaseVideoProcessorPipeline:
         )
         pushed: list[np.ndarray] = []
 
-        def _record_push(frame, path):
-            del path
+        def _record_push(frame, _path):
             pushed.append(frame.copy())
 
         proc._push_frame = _record_push

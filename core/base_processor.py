@@ -852,7 +852,7 @@ class BaseVideoProcessor(ABC):
         消费推流队列，并以稳定节奏重复最新帧以保持 RTSP 输出持续可解码。"""
         latest_frame: np.ndarray | None = None
         latest_path: str | None = None
-        next_deadline = 0.0
+        next_deadline = time.monotonic()
         while not self._publish_stop.is_set():
             if latest_frame is None or latest_path is None:
                 try:

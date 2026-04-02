@@ -1302,6 +1302,8 @@ class TestProcessorKeyMessages:
         assert len(action_msgs) == 1
         assert action_msgs[0]["image_base64"]
         assert "动作1" in action_msgs[0]["message"]
+        assert "车牌=未知" in action_msgs[0]["message"]
+        assert "轨迹 #" in action_msgs[0]["message"]
 
     async def test_departure_message_has_image(self):
         """Departure message is emitted with an image snapshot."""

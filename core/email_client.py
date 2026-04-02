@@ -95,11 +95,11 @@ class AsyncEmailClient:
         cc_addresses = self._split_addresses(merged.get("email_cc_addresses"))
 
         if not from_address:
-            raise ValueError("Sender email is required")
+            raise ValueError("email_from_address is required")
         if not from_auth_code:
-            raise ValueError("Sender password/auth code is required")
+            raise ValueError("email_from_auth_code is required")
         if not (to_addresses or cc_addresses):
-            raise ValueError("At least one recipient or CC address is required")
+            raise ValueError("email_to_addresses or email_cc_addresses is required")
 
         return email_pb2.SendEmailRequest(
             from_address=from_address,

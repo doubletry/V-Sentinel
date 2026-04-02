@@ -94,11 +94,10 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
     @classmethod
     def _build_summary(
         cls,
-        items: list[tuple[str, str, AnalysisResult]],
+        _items: list[tuple[str, str, AnalysisResult]],
     ) -> None:
         """Suppress generic periodic summaries for truck scene.
         禁用 truck 场景的通用周期汇总消息。"""
-        del items
         return None
 
     async def persist_visit(

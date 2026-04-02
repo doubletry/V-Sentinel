@@ -77,7 +77,7 @@ class TestAnalysisAgentBuildSummary:
         summary = AnalysisAgent._build_summary([])
         assert summary is None
 
-    def test_generic_periodic_summary_disabled(self):
+    def test_truck_agent_suppresses_generic_summary(self):
         result = AnalysisResult(detections=[{"label": "person"}])
         summary = AnalysisAgent._build_summary([("s1", "Camera 1", result)])
         assert summary is None

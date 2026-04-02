@@ -19,8 +19,9 @@ _PROVINCE_PREFIX = (
 _PREFIXED_PLATE_RE = re.compile(
     rf"^[{_PROVINCE_PREFIX}][A-Z][A-Z0-9]{{5,6}}$"
 )
+_FALLBACK_BODY_RE = r"[A-Z0-9]{5,6}"
 _FALLBACK_PLATE_RE = re.compile(
-    r"^(?=[A-Z0-9]{5,6}$)(?=.*[A-Z])[A-Z0-9]{5,6}$"
+    rf"^(?={_FALLBACK_BODY_RE}$)(?=.*[A-Z]).+$"
 )
 _SEPARATOR_RE = re.compile(r"[\s\-·.]+")
 

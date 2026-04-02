@@ -53,6 +53,10 @@ def _decode_thumbnail(image_base64: str) -> np.ndarray:
     return image
 
 
+GREEN_CHANNEL_MIN = 150
+OTHER_CHANNEL_MAX = 120
+
+
 # ── Tests for helper functions ────────────────────────────────────────────────
 
 
@@ -1110,9 +1114,9 @@ class TestProcessorKeyMessages:
         assert arrival_msgs[0]["image_base64"]
         decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
         green_pixels = (
-            (decoded[:, :, 1] > 150)
-            & (decoded[:, :, 0] < 120)
-            & (decoded[:, :, 2] < 120)
+            (decoded[:, :, 1] > GREEN_CHANNEL_MIN)
+            & (decoded[:, :, 0] < OTHER_CHANNEL_MAX)
+            & (decoded[:, :, 2] < OTHER_CHANNEL_MAX)
         )
         assert int(green_pixels.sum()) > 0
         assert decoded.sum() > 0

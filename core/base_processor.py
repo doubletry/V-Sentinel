@@ -144,11 +144,12 @@ class BaseVideoProcessor(ABC):
         ] = queue.Queue(maxsize=2)
         self._display_stop = threading.Event()
         self._display_thread: threading.Thread | None = None
+        self._publish_queue: queue.Queue[tuple[np.ndarray, str] | None] = (
+            queue.Queue(maxsize=2)
+        )
         self._publish_stop = threading.Event()
         self._publish_thread: threading.Thread | None = None
         self._publish_state_lock = threading.Lock()
-        self._publish_frame: np.ndarray | None = None
-        self._publish_path: str | None = None
         self._source_fps: float | None = None
         self._publish_fps: float = self._default_publish_fps()
 
@@ -708,12 +709,25 @@ class BaseVideoProcessor(ABC):
     def _stop_publish_worker(self) -> None:
         """Stop the steady RTSP publisher thread."""
         self._publish_stop.set()
+        try:
+            self._publish_queue.put_nowait(None)
+        except queue.Full:
+            try:
+                self._publish_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._publish_queue.put_nowait(None)
+            except queue.Full:
+                pass
         if self._publish_thread is not None:
             self._publish_thread.join(timeout=2.0)
             self._publish_thread = None
-        with self._publish_state_lock:
-            self._publish_frame = None
-            self._publish_path = None
+        while True:
+            try:
+                self._publish_queue.get_nowait()
+            except queue.Empty:
+                break
 
     def _enqueue_display(
         self, frame: np.ndarray, result: AnalysisResult, output_rtsp_path: str
@@ -749,7 +763,7 @@ class BaseVideoProcessor(ABC):
                 except Exception as exc:
                     logger.debug("Display draw error for {}: {}", output_rtsp_path, exc)
                     continue
-            self._set_publish_frame(display_frame, output_rtsp_path)
+            self._enqueue_publish(display_frame, output_rtsp_path)
 
     def _display_output_path(self) -> str:
         """Return the RTSP output path used for processed frames.
@@ -814,45 +828,66 @@ class BaseVideoProcessor(ABC):
             return float(FALLBACK_PUBLISH_FPS)
         return target_fps
 
-    def _set_publish_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
-        """Update the latest frame that the steady publisher should stream.
-        更新恒定节奏发布线程应持续输出的最新帧。"""
+    def _enqueue_publish(self, frame: np.ndarray, output_rtsp_path: str) -> None:
+        """Queue the latest processed frame for the dedicated publish worker.
+        将最新处理结果帧排入独立推流线程的队列。"""
         frame = self._ensure_even_dims(frame)
         if frame.shape[0] == 0 or frame.shape[1] == 0:
             return
-        with self._publish_state_lock:
-            self._publish_frame = frame.copy()
-            self._publish_path = output_rtsp_path
+        item = (frame.copy(), output_rtsp_path)
+        try:
+            self._publish_queue.put_nowait(item)
+        except queue.Full:
+            try:
+                self._publish_queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._publish_queue.put_nowait(item)
+            except queue.Full:
+                pass
 
     def _publish_worker(self) -> None:
-        """Publish the latest frame at a steady cadence to keep RTSP healthy.
-        以稳定节奏重复推送最新帧，保持 RTSP 输出持续可解码。"""
-        next_deadline = time.monotonic()
+        """Publish queued frames and repeat the latest one at a steady cadence.
+        消费推流队列，并以稳定节奏重复最新帧以保持 RTSP 输出持续可解码。"""
+        latest_frame: np.ndarray | None = None
+        latest_path: str | None = None
+        next_deadline = 0.0
         while not self._publish_stop.is_set():
-            frame_interval = 1.0 / self._current_publish_fps()
-            with self._publish_state_lock:
-                frame = None if self._publish_frame is None else self._publish_frame.copy()
-                path = self._publish_path
-            if frame is not None and path:
-                self._push_frame(frame, path)
+            if latest_frame is None or latest_path is None:
+                try:
+                    item = self._publish_queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if item is None:
+                    break
+                latest_frame, latest_path = item
+                self._push_frame(latest_frame.copy(), latest_path)
+                next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
+                continue
+
             now = time.monotonic()
-            next_deadline += frame_interval
-            # Resync when we overrun the target cadence so the publisher does
-            # not try to "catch up" by publishing frames back-to-back in a
-            # tight loop. Resetting the deadline keeps CPU usage bounded and
-            # returns the stream to a stable cadence on the next cycle.
-            # 当一次发布明显超期时重置节奏，避免线程为“追赶”节奏而连续忙等推帧，
-            # 从而浪费 CPU 并扰乱流稳定性。
-            if next_deadline < now:
-                logger.debug(
-                    "Publisher fell behind by {:.3f}s for {}",
-                    now - next_deadline,
-                    self.source_id,
-                )
-                next_deadline = now + frame_interval
-            sleep_for = max(0.0, next_deadline - now)
-            if self._publish_stop.wait(sleep_for):
+            wait_for = max(0.0, next_deadline - now)
+            try:
+                item = self._publish_queue.get(timeout=wait_for)
+            except queue.Empty:
+                self._push_frame(latest_frame.copy(), latest_path)
+                frame_interval = 1.0 / self._current_publish_fps()
+                next_deadline += frame_interval
+                now = time.monotonic()
+                if next_deadline < now:
+                    logger.debug(
+                        "Publisher fell behind by {:.3f}s for {}",
+                        now - next_deadline,
+                        self.source_id,
+                    )
+                    next_deadline = now + frame_interval
+                continue
+            if item is None:
                 break
+            latest_frame, latest_path = item
+            self._push_frame(latest_frame.copy(), latest_path)
+            next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
 
     @staticmethod
     def _ensure_even_dims(frame: np.ndarray) -> np.ndarray:

@@ -558,7 +558,7 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._push_frame = _record_push
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
 
-        proc._set_publish_frame(frame, "cam1_processed")
+        proc._enqueue_publish(frame, "cam1_processed")
         proc._start_publish_worker()
         await asyncio.sleep(TEST_PUBLISH_WAIT)
         proc._stop_publish_worker()
@@ -571,6 +571,33 @@ class TestCoreBaseVideoProcessorPipeline:
         assert intervals
         assert min(intervals) >= (1 / TEST_SAMPLED_PUBLISH_FPS) / TIMING_TOLERANCE_FACTOR
         assert max(intervals) <= (1 / TEST_SAMPLED_PUBLISH_FPS) * TIMING_TOLERANCE_FACTOR
+
+    async def test_publish_worker_uses_latest_frame_from_queue(self):
+        class PublishProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = PublishProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        pushed: list[np.ndarray] = []
+
+        def _record_push(frame, path):
+            del path
+            pushed.append(frame.copy())
+
+        proc._push_frame = _record_push
+        proc._start_publish_worker()
+        proc._enqueue_publish(np.zeros((64, 64, 3), dtype=np.uint8), "cam1_processed")
+        proc._enqueue_publish(np.full((64, 64, 3), 255, dtype=np.uint8), "cam1_processed")
+        await asyncio.sleep(TEST_PUBLISH_WAIT)
+        proc._stop_publish_worker()
+
+        assert pushed
+        assert any(frame.sum() > 0 for frame in pushed)
 
     def test_update_publish_fps_tracks_sampled_input_rate(self):
         proc = DummyCoreProcessor(

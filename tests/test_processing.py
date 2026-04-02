@@ -155,6 +155,19 @@ class TestBaseVideoProcessor:
         await proc.start()
         await proc.stop()
 
+    async def test_start_delegates_to_core_worker_startup(self):
+        proc = self._make_processor()
+        proc._run_loop = AsyncMock()
+        proc._start_display_worker = MagicMock()
+        proc._start_publish_worker = MagicMock()
+
+        await proc.start()
+
+        proc._start_display_worker.assert_called_once()
+        proc._start_publish_worker.assert_called_once()
+        assert proc.started_at is not None
+        await proc.stop()
+
 
 class TestProcessorManager:
     def _make_manager(self) -> ProcessorManager:

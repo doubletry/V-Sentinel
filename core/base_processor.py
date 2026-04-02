@@ -906,12 +906,6 @@ class BaseVideoProcessor(ABC):
                             "muxdelay": "0",
                             "muxpreload": "0",
                         },
-                        container_options={
-                            "rtsp_transport": "udp",
-                            "flush_packets": "1",
-                            "muxdelay": "0",
-                            "muxpreload": "0",
-                        },
                     )
                     stream = container.add_stream(
                         "libx264", rate=self._av_rate(target_fps)

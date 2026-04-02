@@ -195,7 +195,7 @@ def _message_retention_cutoff_iso(retention_days_raw: str | int) -> str:
     将保留天数输入转换为 UTC 截止时间戳。"""
     try:
         safe_days = min(30, max(1, int(retention_days_raw)))
-    except Exception:
+    except (TypeError, ValueError):
         safe_days = 7
     return (datetime.now(timezone.utc) - timedelta(days=safe_days)).isoformat()
 

@@ -13,11 +13,11 @@ router = APIRouter(prefix="/api/vehicle-events", tags=["vehicle-events"])
 def _safe_summary_time(app_settings: dict[str, str]) -> tuple[int, int]:
     try:
         hour = min(23, max(0, int(app_settings.get("daily_summary_hour", "23"))))
-    except Exception:
+    except (TypeError, ValueError):
         hour = 23
     try:
         minute = min(59, max(0, int(app_settings.get("daily_summary_minute", "59"))))
-    except Exception:
+    except (TypeError, ValueError):
         minute = 59
     return hour, minute
 

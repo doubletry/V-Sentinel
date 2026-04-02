@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from loguru import logger
 
 from backend.db import database as db
 from backend.models.schemas import AppSettingsUpdate, EmailTestRequest
@@ -35,8 +36,8 @@ async def update_settings(data: AppSettingsUpdate, request: Request) -> dict[str
     if "message_retention_days" in updates:
         try:
             await db.prune_analysis_messages(int(result.get("message_retention_days", "7")))
-        except Exception:
-            pass
+        except (TypeError, ValueError) as exc:
+            logger.warning("Invalid message retention days while pruning: {}", exc)
 
     # Reconnect V-Engine client with new addresses / 使用新地址重连 V-Engine 客户端
     vengine_client = request.app.state.vengine_client

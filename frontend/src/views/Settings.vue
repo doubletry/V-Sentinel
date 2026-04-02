@@ -314,7 +314,7 @@ const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
 const processorPluginOptions = ref([])
-const retentionDayOptions = Array.from({ length: 30 }, (_, index) => index + 1)
+const retentionDayOptions = Array.from({ length: 30 }, (_, dayIndex) => dayIndex + 1)
 
 const loading = ref(false)
 const saving = ref(false)

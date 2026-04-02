@@ -854,6 +854,11 @@ class BaseVideoProcessor(ABC):
             # not spin in a busy loop while still returning to a steady rate.
             # 当一次发布明显超期时重置节奏，避免发布线程进入忙等循环。
             if next_deadline < now:
+                logger.debug(
+                    "Publisher fell behind by {:.3f}s for {}",
+                    now - next_deadline,
+                    self.source_id,
+                )
                 next_deadline = now + frame_interval
             sleep_for = max(0.0, next_deadline - now)
             if self._publish_stop.wait(sleep_for):

@@ -552,3 +552,4 @@ class TestCoreBaseVideoProcessorPipeline:
         ]
         assert intervals
         assert min(intervals) >= (1 / PUSH_FPS) / TIMING_TOLERANCE_FACTOR
+        assert max(intervals) <= (1 / PUSH_FPS) * TIMING_TOLERANCE_FACTOR

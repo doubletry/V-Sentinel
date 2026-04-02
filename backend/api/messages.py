@@ -21,7 +21,4 @@ async def get_messages(
         page_size=page_size,
         source_id=source_id,
     )
-    return {
-        **result,
-        "items": [AnalysisMessage(**row).model_dump() for row in result["items"]],
-    }
+    return result

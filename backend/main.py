@@ -77,10 +77,14 @@ def datetime_from_record(record: logging.LogRecord) -> str:
 
 
 _STDLIB_LOG_HANDLER = _StdlibProcessingLogHandler()
-for _logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-    _logger = logging.getLogger(_logger_name)
-    if not any(isinstance(handler, _StdlibProcessingLogHandler) for handler in _logger.handlers):
-        _logger.addHandler(_STDLIB_LOG_HANDLER)
+_STDLIB_LOG_CAPTURE_CONFIGURED = False
+
+if not _STDLIB_LOG_CAPTURE_CONFIGURED:
+    for _logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        _logger = logging.getLogger(_logger_name)
+        if not any(handler is _STDLIB_LOG_HANDLER for handler in _logger.handlers):
+            _logger.addHandler(_STDLIB_LOG_HANDLER)
+    _STDLIB_LOG_CAPTURE_CONFIGURED = True
 
 # Module-level singletons (accessed by API routers) / 模块级单例（供 API 路由使用）
 ws_manager: ws_module.WSManager

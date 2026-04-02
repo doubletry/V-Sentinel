@@ -60,7 +60,6 @@ export const useMessageStore = defineStore('message', () => {
         if (msg === 'pong') return
         const matchesFilter = !filterSource.value || msg.source_id === filterSource.value
         if (!matchesFilter) return
-        total.value += 1
         if (page.value === 1) {
           messages.value.unshift(msg)
           if (messages.value.length > pageSize.value) {

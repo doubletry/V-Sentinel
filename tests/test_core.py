@@ -14,6 +14,9 @@ from core.base_processor import (
     ROI,
     ROIPoint,
 )
+from core.constants import PUSH_FPS
+
+TEST_PUBLISH_WAIT = 3 / PUSH_FPS
 
 
 class DummyCoreProcessor(BaseVideoProcessor):
@@ -468,7 +471,7 @@ class TestCoreBaseVideoProcessorPipeline:
             ]
         )
         proc._enqueue_display(frame, result, "cam1_processed")
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(TEST_PUBLISH_WAIT)
         proc._stop_publish_worker()
         proc._stop_display_worker()
 
@@ -503,7 +506,7 @@ class TestCoreBaseVideoProcessorPipeline:
         task = asyncio.create_task(proc._process_frame_item(frame, b"jpeg"))
         await asyncio.wait_for(proc.started.wait(), timeout=1.0)
 
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(TEST_PUBLISH_WAIT)
         assert len(pushed) >= 1
         pushed_frame, path = pushed[0]
         assert path == "cam1_processed"
@@ -530,7 +533,7 @@ class TestCoreBaseVideoProcessorPipeline:
 
         proc._set_publish_frame(frame, "cam1_processed")
         proc._start_publish_worker()
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(TEST_PUBLISH_WAIT)
         proc._stop_publish_worker()
 
         assert len(pushed) >= 2

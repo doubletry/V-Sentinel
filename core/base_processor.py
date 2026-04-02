@@ -35,10 +35,15 @@ from core.constants import (
     PUSH_PRESET,
     RTSP_MAX_RECONNECT_ATTEMPTS,
     RTSP_RECONNECT_DELAY,
-    RTSP_TRANSPORT,
 )
 
 FALLBACK_PUBLISH_FPS = 1
+INPUT_RTSP_TRANSPORT = "tcp"
+LOW_LATENCY_PROBESIZE = "32"
+LOW_LATENCY_ANALYZEDURATION = "0"
+STREAM_TIMEOUT_MICROSECONDS = "5000000"
+MAX_REASONABLE_SOURCE_FPS = 120.0
+FPS_CHANGE_THRESHOLD = 0.01
 
 try:
     from turbojpeg import TurboJPEG, TJPF_RGB
@@ -248,15 +253,15 @@ class BaseVideoProcessor(ABC):
                     self.rtsp_url,
                     mode="r",
                     options={
-                        "rtsp_transport": RTSP_TRANSPORT,
+                        "rtsp_transport": INPUT_RTSP_TRANSPORT,
                         "fflags": "nobuffer",
                         "flags": "low_delay",
-                        "probesize": "32",
-                        "analyzeduration": "0",
+                        "probesize": LOW_LATENCY_PROBESIZE,
+                        "analyzeduration": LOW_LATENCY_ANALYZEDURATION,
                         "avioflags": "direct",
                         "flush_packets": "1",
                         "max_delay": "0",
-                        "stimeout": "5000000",
+                        "stimeout": STREAM_TIMEOUT_MICROSECONDS,
                     },
                     timeout=(5.0, 5.0),
                 )
@@ -348,7 +353,7 @@ class BaseVideoProcessor(ABC):
                 value = float(rate)
             except (TypeError, ValueError, ZeroDivisionError):
                 continue
-            if math.isfinite(value) and value > 0:
+            if math.isfinite(value) and 0 < value <= MAX_REASONABLE_SOURCE_FPS:
                 return value
         return None
 
@@ -740,6 +745,9 @@ class BaseVideoProcessor(ABC):
     def _default_publish_fps(self) -> float:
         """Fallback publish FPS before the input stream reports a frame rate.
         输入流未报告帧率前使用的默认推流 FPS。"""
+        # Non-positive PUSH_FPS values are treated as invalid and fall back to
+        # a safe single-frame cadence until real source FPS is known.
+        # 非正数 PUSH_FPS 视为无效，在拿到真实源流 FPS 前回退到安全单帧节奏。
         if PUSH_FPS > 0:
             return max(PUSH_FPS / max(FRAME_SAMPLE_INTERVAL, 1), 1.0)
         return float(FALLBACK_PUBLISH_FPS)
@@ -844,7 +852,7 @@ class BaseVideoProcessor(ABC):
         with self._push_lock:
             try:
                 target_fps = self._current_publish_fps()
-                gop = max(1, int(round(target_fps)))
+                gop = max(1, int(round(target_fps / 2)))
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (
@@ -853,7 +861,7 @@ class BaseVideoProcessor(ABC):
                     or self._push_path != output_rtsp_path
                     or self._push_width != w
                     or self._push_height != h
-                    or abs(self._push_fps - target_fps) > 0.01
+                    or abs(self._push_fps - target_fps) > FPS_CHANGE_THRESHOLD
                 ):
                     self._close_push_container()
                     rtsp_url = (

@@ -18,7 +18,7 @@ from core.base_processor import (
 from core.constants import FRAME_SAMPLE_INTERVAL, PUSH_FPS
 
 TEST_WAIT_FRAME_COUNT = 3
-TEST_DEFAULT_PUBLISH_FPS = max(PUSH_FPS / FRAME_SAMPLE_INTERVAL, 1)
+TEST_DEFAULT_PUBLISH_FPS = max(max(PUSH_FPS, 1) / FRAME_SAMPLE_INTERVAL, 1)
 TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_DEFAULT_PUBLISH_FPS
 # Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
 # 为线程调度和 CI 抖动预留适度容差。

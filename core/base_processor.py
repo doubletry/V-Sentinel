@@ -36,6 +36,8 @@ from core.constants import (
     RTSP_TRANSPORT,
 )
 
+FALLBACK_PUBLISH_FPS = 1
+
 try:
     from turbojpeg import TurboJPEG, TJPF_RGB
     _jpeg = TurboJPEG()
@@ -836,10 +838,11 @@ class BaseVideoProcessor(ABC):
         target_fps = PUSH_FPS
         if target_fps <= 0:
             logger.warning(
-                "Invalid PUSH_FPS={} (must be > 0), falling back to 1",
+                "Invalid PUSH_FPS={} (must be > 0), falling back to {}",
                 target_fps,
+                FALLBACK_PUBLISH_FPS,
             )
-            target_fps = 1
+            target_fps = FALLBACK_PUBLISH_FPS
         frame_interval = 1.0 / target_fps
         next_deadline = time.monotonic()
         while not self._publish_stop.is_set():
@@ -851,8 +854,11 @@ class BaseVideoProcessor(ABC):
             now = time.monotonic()
             next_deadline += frame_interval
             # Resync when we overrun the target cadence so the publisher does
-            # not spin in a busy loop while still returning to a steady rate.
-            # 当一次发布明显超期时重置节奏，避免发布线程进入忙等循环。
+            # not try to "catch up" by publishing frames back-to-back in a
+            # tight loop. Resetting the deadline keeps CPU usage bounded and
+            # returns the stream to a stable cadence on the next cycle.
+            # 当一次发布明显超期时重置节奏，避免线程为“追赶”节奏而连续忙等推帧，
+            # 从而浪费 CPU 并扰乱流稳定性。
             if next_deadline < now:
                 logger.debug(
                     "Publisher fell behind by {:.3f}s for {}",

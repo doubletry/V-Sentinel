@@ -19,6 +19,8 @@ from core.constants import PUSH_FPS
 
 TEST_WAIT_FRAME_COUNT = 3
 TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / PUSH_FPS
+# Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
+# 为线程调度和 CI 抖动预留适度容差。
 TIMING_TOLERANCE_FACTOR = 1.8
 
 

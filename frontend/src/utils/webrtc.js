@@ -59,7 +59,10 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl) {
 
   if (!response.ok) {
     pc.close()
-    throw new Error(`WHEP error: ${response.status} ${response.statusText}`)
+    const error = new Error(`WHEP error: ${response.status} ${response.statusText}`)
+    error.name = 'WHEPError'
+    error.status = response.status
+    throw error
   }
 
   const answerSdp = await response.text()

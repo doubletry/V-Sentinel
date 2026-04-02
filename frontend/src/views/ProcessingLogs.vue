@@ -6,6 +6,19 @@
         <p>{{ t('processingLogs.subtitle') }}</p>
       </div>
       <div class="header-right">
+        <el-select
+          v-model="logPageSize"
+          size="small"
+          style="width: 132px"
+          @change="handlePageSizeChange"
+        >
+          <el-option
+            v-for="size in logPageSizeOptions"
+            :key="size"
+            :label="t('processingLogs.pageSizeOption', { size })"
+            :value="size"
+          />
+        </el-select>
         <el-button size="small" @click="loadLogs(logPage)">
           {{ t('processingLogs.refresh') }}
         </el-button>
@@ -21,11 +34,11 @@
         class="logs-table"
         :empty-text="t('processingLogs.noLogs')"
       >
-        <el-table-column :label="t('processingLogs.logTime')" width="172">
-          <template #default="scope">
-            {{ formatLogTime(scope.row.timestamp) }}
-          </template>
-        </el-table-column>
+          <el-table-column :label="t('processingLogs.logTime')" width="172">
+            <template #default="scope">
+             {{ formatDateTimeWithTimezone(scope.row.timestamp, appSettingsStore.timeZone) }}
+            </template>
+          </el-table-column>
         <el-table-column :label="t('processingLogs.logLevel')" width="100">
           <template #default="scope">
             <el-tag
@@ -45,11 +58,13 @@
     <div class="logs-pagination">
       <el-pagination
         background
-        layout="prev, pager, next, total"
+        layout="sizes, prev, pager, next, total"
         :total="logTotal"
+        :page-sizes="logPageSizeOptions"
         :page-size="logPageSize"
         :current-page="logPage"
         @current-change="loadLogs"
+        @size-change="handlePageSizeChange"
       />
     </div>
   </div>
@@ -60,21 +75,20 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { processorApi } from '../api/index.js'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../constants/pagination.js'
+import { useAppSettingsStore } from '../stores/appSettings.js'
+import { formatDateTimeWithTimezone } from '../utils/time.js'
 
 const { t } = useI18n()
+const appSettingsStore = useAppSettingsStore()
 const logsLoading = ref(false)
 const logItems = ref([])
 const logTotal = ref(0)
 const logPage = ref(1)
-const logPageSize = ref(12)
+const logPageSize = ref(DEFAULT_PAGE_SIZE)
+const logPageSizeOptions = PAGE_SIZE_OPTIONS
 const logErrorNotified = ref(false)
 let logTimer = null
-
-function formatLogTime(timestamp) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  return Number.isNaN(date.getTime()) ? String(timestamp) : date.toLocaleString()
-}
 
 async function loadLogs(page = 1) {
   logPage.value = page
@@ -92,6 +106,11 @@ async function loadLogs(page = 1) {
   } finally {
     logsLoading.value = false
   }
+}
+
+async function handlePageSizeChange(size) {
+  logPageSize.value = Number(size)
+  await loadLogs(1)
 }
 
 onMounted(() => {

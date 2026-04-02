@@ -55,12 +55,12 @@ from backend.processing.base import BaseVideoProcessor
 
 # Import the core processor's process_frame logic via its tracker and constants.
 # All AI logic stays in core — this file only provides the constructor glue.
-from core.truck_processor import TruckMonitorProcessor as _CoreTruckProcessor
+from core.truck.processor import TruckMonitorProcessor as _CoreTruckProcessor
 
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
-    from backend.processing.agent import AnalysisAgent
+    from backend.processing.truck.agent import AnalysisAgent
 
 
 class TruckMonitorProcessor(BaseVideoProcessor, _CoreTruckProcessor):

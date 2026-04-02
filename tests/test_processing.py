@@ -72,6 +72,11 @@ class TestBaseVideoProcessor:
         proc.rtsp_url = "rtsp://host:8554/stream/"
         assert proc._stream_key() == "stream"
 
+    def test_stream_path_preserves_nested_route(self):
+        proc = self._make_processor()
+        proc.rtsp_url = "rtsp://host:8554/zone/stream/"
+        assert proc._stream_path() == "zone/stream"
+
     async def test_do_detect_maps_and_filters_results(self):
         proc = self._make_processor()
         proc.vengine.detect = AsyncMock(
@@ -149,6 +154,28 @@ class TestBaseVideoProcessor:
         # Starting again should not raise
         await proc.start()
         await proc.stop()
+
+    async def test_start_delegates_to_core_worker_startup(self):
+        proc = self._make_processor()
+        proc._run_loop = AsyncMock()
+        proc._start_output_worker = MagicMock()
+
+        await proc.start()
+
+        proc._start_output_worker.assert_called_once()
+        assert proc.started_at is not None
+        await proc.stop()
+
+    async def test_stop_delegates_to_core_worker_shutdown(self):
+        proc = self._make_processor()
+        proc._run_loop = AsyncMock()
+        proc._start_output_worker = MagicMock()
+        proc._stop_output_worker = MagicMock()
+
+        await proc.start()
+        await proc.stop()
+
+        proc._stop_output_worker.assert_called_once()
 
 
 class TestProcessorManager:
@@ -303,7 +330,7 @@ class TestBackendBaseProcessorPipeline:
         )
         proc.ws_manager.broadcast = AsyncMock()
         queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
-        proc._enqueue_display = lambda frame, result, path: queued.append((frame, result, path))
+        proc._enqueue_output = lambda frame, result, path: queued.append((frame, result, path))
         frame = np.zeros((32, 32, 3), dtype=np.uint8)
         result = AnalysisResult(
             detections=[{"x_min": 1, "y_min": 2, "x_max": 3, "y_max": 4, "label": "person"}],
@@ -320,3 +347,44 @@ class TestBackendBaseProcessorPipeline:
         assert sent.source_id == "s1"
         assert queued
         assert queued[0][2] == "cam1_processed"
+
+    async def test_handle_result_preserves_nested_processed_route(self):
+        proc = DummyProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/zone/cam1",
+            rois=[],
+            vengine_client=MagicMock(),
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+        queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
+        proc._enqueue_output = lambda frame, result, path: queued.append((frame, result, path))
+        frame = np.zeros((32, 32, 3), dtype=np.uint8)
+        result = AnalysisResult(
+            detections=[{"x_min": 1, "y_min": 2, "x_max": 3, "y_max": 4, "label": "person"}],
+        )
+
+        await proc._handle_result(frame, result)
+
+        assert queued
+        assert queued[0][2] == "zone/cam1_processed"
+
+    async def test_handle_result_enqueues_display_for_empty_result(self):
+        proc = DummyProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/client1/stream2",
+            rois=[],
+            vengine_client=MagicMock(),
+            ws_manager=WSManager(),
+            app_settings=dict(DEFAULT_APP_SETTINGS),
+        )
+        queued: list[tuple[np.ndarray, AnalysisResult, str]] = []
+        proc._enqueue_output = lambda frame, result, path: queued.append((frame, result, path))
+        frame = np.zeros((32, 32, 3), dtype=np.uint8)
+
+        await proc._handle_result(frame, AnalysisResult())
+
+        assert queued
+        assert queued[0][2] == "client1/stream2_processed"

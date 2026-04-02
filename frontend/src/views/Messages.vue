@@ -14,7 +14,7 @@
           clearable
           size="small"
           style="width: 200px"
-          @change="store.setFilterSource($event || '')"
+          @change="handleFilterChange"
         >
           <el-option
             v-for="src in sourceStore.sources"
@@ -23,13 +23,33 @@
             :value="src.id"
           />
         </el-select>
+        <el-button
+          v-if="store.pendingCount > 0"
+          size="small"
+          type="warning"
+          @click="jumpToLatest"
+        >
+          {{ t('messages.newMessages', { count: store.pendingCount }) }}
+        </el-button>
         <el-button size="small" @click="store.clearMessages">{{ t('messages.clear') }}</el-button>
       </div>
     </div>
 
     <el-scrollbar ref="scrollbar" class="messages-scroll">
-      <MessageList :messages="store.filteredMessages" />
+      <MessageList :messages="store.messages" />
     </el-scrollbar>
+    <div class="messages-pagination">
+      <el-pagination
+        background
+        layout="sizes, prev, pager, next, total"
+        :page-sizes="store.pageSizeOptions"
+        :page-size="store.pageSize"
+        :current-page="store.page"
+        :total="store.total"
+        @current-change="handlePageChange"
+        @size-change="handleSizeChange"
+      />
+    </div>
   </div>
 </template>
 
@@ -48,14 +68,32 @@ const scrollbar = ref(null)
 
 // Auto-scroll to top (newest first)
 watch(
-  () => store.filteredMessages.length,
+  () => store.messages.length,
   async () => {
     await nextTick()
     scrollbar.value?.setScrollTop(0)
   }
 )
 
+async function handlePageChange(nextPage) {
+  await store.fetchMessages(nextPage, store.pageSize)
+}
+
+async function handleSizeChange(nextSize) {
+  await store.fetchMessages(1, nextSize)
+}
+
+async function handleFilterChange(value) {
+  store.setFilterSource(value || '')
+  await store.fetchMessages(1, store.pageSize)
+}
+
+async function jumpToLatest() {
+  await store.fetchMessages(1, store.pageSize)
+}
+
 onMounted(() => {
+  store.fetchMessages(1, store.pageSize)
   store.connectWS()
   if (!sourceStore.sources.length) {
     sourceStore.fetchSources()
@@ -119,5 +157,14 @@ onBeforeUnmount(() => {
 .messages-scroll {
   flex: 1;
   min-height: 0;
+}
+
+.messages-pagination {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px 12px;
+  border-top: 1px solid #26314d;
+  background: #131a2e;
+  flex-shrink: 0;
 }
 </style>

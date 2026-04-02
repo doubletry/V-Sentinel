@@ -37,22 +37,24 @@
             :label="assignments[cellIdx].name"
           />
           <div class="cell-controls">
-            <el-button
-              size="small"
-              :type="roiPreviewCellIndex === cellIdx ? 'info' : 'default'"
-              @click="toggleRoiPreview(cellIdx)"
-            >
-              <el-icon><View /></el-icon>
-              {{ roiPreviewCellIndex === cellIdx ? t('videoGrid.hideRoi') : t('videoGrid.showRoi') }}
-            </el-button>
-            <el-button
-              size="small"
-              :type="roiCellIndex === cellIdx ? 'warning' : 'default'"
-              @click="toggleRoiEditor(cellIdx)"
-            >
-              <el-icon><Edit /></el-icon>
-              {{ t('videoGrid.editRoi') }}
-            </el-button>
+            <template v-if="!assignments[cellIdx].isResult">
+              <el-button
+                size="small"
+                :type="roiPreviewCellIndex === cellIdx ? 'info' : 'default'"
+                @click="toggleRoiPreview(cellIdx)"
+              >
+                <el-icon><View /></el-icon>
+                {{ roiPreviewCellIndex === cellIdx ? t('videoGrid.hideRoi') : t('videoGrid.showRoi') }}
+              </el-button>
+              <el-button
+                size="small"
+                :type="roiCellIndex === cellIdx ? 'warning' : 'default'"
+                @click="toggleRoiEditor(cellIdx)"
+              >
+                <el-icon><Edit /></el-icon>
+                {{ t('videoGrid.editRoi') }}
+              </el-button>
+            </template>
             <el-button
               size="small"
               type="danger"
@@ -64,14 +66,14 @@
           </div>
 
           <RoiDrawer
-            v-if="roiCellIndex === cellIdx"
+            v-if="roiCellIndex === cellIdx && !assignments[cellIdx].isResult"
             :source="assignments[cellIdx]"
             :read-only="false"
             @close="roiCellIndex = null"
           />
 
           <RoiDrawer
-            v-else-if="roiPreviewCellIndex === cellIdx"
+            v-else-if="roiPreviewCellIndex === cellIdx && !assignments[cellIdx].isResult"
             :source="assignments[cellIdx]"
             :read-only="true"
             @close="roiPreviewCellIndex = null"
@@ -175,6 +177,20 @@ function removeCell(cellIdx) {
 
 function onDrop(event, cellIdx) {
   dragOverCell.value = null
+
+  // Handle result stream drops (virtual streams from the result list)
+  const resultData = event.dataTransfer.getData('result-stream')
+  if (resultData) {
+    try {
+      const resultStream = JSON.parse(resultData)
+      store.assignToCell(cellIdx, resultStream)
+    } catch (e) {
+      console.warn('Failed to parse result-stream drag data:', e)
+    }
+    return
+  }
+
+  // Handle regular source drops
   const sourceId = event.dataTransfer.getData('source-id')
   if (!sourceId) return
   const source = store.sources.find((s) => s.id === sourceId)

@@ -35,7 +35,8 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from core.constants import (
+
+from core.truck.constants import (
     MAX_MISSING_FRAMES,
     MIN_PRESENCE_FRAMES,
     OCR_INTERVAL,
@@ -44,6 +45,7 @@ from core.constants import (
     STABILITY_MIN_COUNT,
     STABILITY_WINDOW,
 )
+from core.truck.plate import should_replace_plate
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
@@ -113,6 +115,10 @@ class TrackingDecision:
     visits: list[VehicleVisit] = field(default_factory=list)
     """Vehicles that left the scene this frame.
     本帧离开场景的车辆。"""
+
+    arrivals: list[int] = field(default_factory=list)
+    """Track IDs of trucks that were newly confirmed this frame.
+    本帧新确认到达的卡车 track_id 列表。"""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -304,6 +310,7 @@ class TruckTracker:
                     self._track.presence_frames += 1
                     if self._track.presence_frames >= self.min_presence_frames:
                         self._track.confirmed = True
+                        decision.arrivals.append(self._track.track_id)
             else:
                 # No truck detected this frame.
                 # 本帧未检测到卡车。
@@ -331,14 +338,17 @@ class TruckTracker:
             if best_det is not None:
                 tid = self._next_id
                 self._next_id += 1
+                immediately_confirmed = self.min_presence_frames <= 1
                 self._track = TrackedTruck(
                     track_id=tid,
                     bbox=_det_to_bbox(best_det),
                     first_seen=now,
                     last_seen=now,
                     presence_frames=1,
-                    confirmed=(self.min_presence_frames <= 1),
+                    confirmed=immediately_confirmed,
                 )
+                if immediately_confirmed:
+                    decision.arrivals.append(tid)
 
         # 4. Build decisions for the confirmed active truck.
         # 4. 为已确认的活跃卡车构建决策。
@@ -378,13 +388,19 @@ class TruckTracker:
         """Feed an OCR result for the tracked truck.
         为被跟踪的卡车提供 OCR 结果。
 
-        Only updates if *confidence* exceeds the current best.
-        仅当 *confidence* 超过当前最佳值时更新。
+        Prefer the most complete plate text across the full visit; if
+        completeness is tied, keep the higher-confidence result.
+        在整次到访期间优先保留最完整的车牌；若完整度相同，则保留更高置信度结果。
         """
         if self._track is None or self._track.track_id != track_id:
             return
         self._track.frames_since_ocr = 0
-        if confidence > self._track.best_plate_conf:
+        if should_replace_plate(
+            self._track.best_plate,
+            self._track.best_plate_conf,
+            text,
+            confidence,
+        ):
             self._track.best_plate = text
             self._track.best_plate_conf = confidence
 
@@ -404,7 +420,8 @@ class TruckTracker:
         """
         if self._track is None or self._track.track_id != track_id:
             return ""
-        self._track.action_history.append(label)
+        normalized_label = label
+        self._track.action_history.append(normalized_label)
         stable = _majority_vote(
             self._track.action_history,
             min_count=self.stability_min_count,

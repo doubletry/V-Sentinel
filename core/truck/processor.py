@@ -53,16 +53,18 @@ import numpy as np
 from loguru import logger
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
-from core.constants import (
+from core.truck.constants import (
     CLASSIFICATION_MODEL,
     DETECTION_MODEL,
+    LABEL_EN_TO_ZH,
     OCR_INTERVAL,
     OCR_MODEL,
     PERSON_LABEL,
     TRUCK_LABELS,
 )
 from core.runner import run_processor
-from core.truck_tracker import (
+from core.truck.plate import extract_valid_plate_text
+from core.truck.tracker import (
     FrameAnalysis,
     TrackingDecision,
     TruckTracker,
@@ -189,6 +191,21 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         #    无冗余的本地过滤。
         decision: TrackingDecision = self.tracker.update(analysis)
 
+        # Capture pre-OCR/classify state to detect meaningful changes.
+        # 捕获 OCR/分类前的状态，用于检测有意义的变化。
+        active_track = (
+            self.tracker.get_track(decision.ocr_truck_ids[0])
+            if decision.ocr_truck_ids
+            else None
+        )
+        plate_before = active_track.best_plate if active_track else ""
+        actions_before: set[str] = set()
+        if decision.classify_rois:
+            first_tid = decision.classify_rois[0]["track_id"]
+            t = self.tracker.get_track(first_tid)
+            if t is not None:
+                actions_before = set(t.confirmed_actions)
+
         # 4. Concurrent OCR + classification.
         # 4. 并发 OCR + 分类。
         ocr_texts: list[dict] = []
@@ -216,9 +233,11 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 image_id = item.get("image_id", 0)
                 if isinstance(image_id, int) and 0 <= image_id < len(ocr_track_ids):
                     tid = ocr_track_ids[image_id]
-                    self.tracker.feed_ocr(
-                        tid, item.get("text", ""), item.get("confidence", 0.0)
-                    )
+                    valid_plate = extract_valid_plate_text(item.get("text", ""))
+                    if valid_plate:
+                        self.tracker.feed_ocr(
+                            tid, valid_plate, item.get("confidence", 0.0)
+                        )
 
             coros.append(
                 self._do_ocr(
@@ -290,33 +309,83 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             elif isinstance(r, BaseException):
                 logger.error("Truck processing sub-task error: {}", r)
 
-        # 5. Assemble messages — particularly for vehicle departures.
-        # 5. 组装消息——特别是车辆离开事件。
+        annotated_frame = self.draw_on_frame(
+            frame,
+            AnalysisResult(
+                detections=detections,
+                classifications=classifications,
+                ocr_texts=ocr_texts,
+            ),
+        )
+
+        # 5. Assemble key messages only: arrival, OCR, actions, departure.
+        # 5. 仅组装关键消息：到达、OCR 识别、动作确认、离开。
         messages: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()
+        thumbnail = self._encode_thumbnail(annotated_frame)
 
-        for visit in decision.visits:
-            missing = ", ".join(sorted(visit.missing_actions)) or "none"
-            messages.append({
-                "timestamp": now,
-                "source_name": self.source_name,
-                "source_id": self.source_id,
-                "level": "warning" if visit.missing_actions else "info",
-                "message": (
-                    f"Vehicle left: plate={visit.plate or 'unknown'}, "
-                    f"missing actions: {missing}"
-                ),
-            })
-
-        if detections:
-            labels = ", ".join(d["label"] for d in detections[:5])
-            thumbnail = self._encode_thumbnail(frame)
+        # 5a. Vehicle arrival — newly confirmed trucks this frame.
+        # 5a. 车辆到达——本帧新确认的卡车。
+        for tid in decision.arrivals:
+            track = self.tracker.get_track(tid)
             messages.append({
                 "timestamp": now,
                 "source_name": self.source_name,
                 "source_id": self.source_id,
                 "level": "info",
-                "message": f"Detected {len(detections)} object(s): {labels}",
+                "message": f"车辆到达（轨迹 #{track.track_id if track else tid}）",
+                "image_base64": thumbnail,
+            })
+
+        # 5b. OCR plate recognition — detect new or improved plate.
+        # 5b. OCR 车牌识别——检测新识别或改进的车牌。
+        if decision.ocr_truck_ids:
+            tid = decision.ocr_truck_ids[0]
+            track_after = self.tracker.get_track(tid)
+            plate_after = track_after.best_plate if track_after else ""
+            if plate_after and plate_after != plate_before:
+                messages.append({
+                    "timestamp": now,
+                    "source_name": self.source_name,
+                    "source_id": self.source_id,
+                    "level": "info",
+                    "message": f"识别到车牌：{plate_after}（轨迹 #{tid}）",
+                    "image_base64": thumbnail,
+                })
+
+        # 5c. New stable actions — detect actions confirmed for the first time.
+        # 5c. 新稳定动作——检测首次确认的动作。
+        if decision.classify_rois:
+            first_tid = decision.classify_rois[0]["track_id"]
+            track_after = self.tracker.get_track(first_tid)
+            if track_after is not None:
+                new_actions = track_after.confirmed_actions - actions_before
+                for action in sorted(new_actions):
+                    action_zh = LABEL_EN_TO_ZH.get(action, action)
+                    plate_info = track_after.best_plate or LABEL_EN_TO_ZH["unknown"]
+                    messages.append({
+                        "timestamp": now,
+                        "source_name": self.source_name,
+                        "source_id": self.source_id,
+                        "level": "info",
+                        "message": f"动作已确认：{action_zh}（车牌={plate_info}，轨迹 #{first_tid}）",
+                        "image_base64": thumbnail,
+                    })
+
+        # 5d. Vehicle departure — trucks that left the scene.
+        # 5d. 车辆离开——离开场景的卡车。
+        for visit in decision.visits:
+            missing = ", ".join(
+                LABEL_EN_TO_ZH.get(action, action)
+                for action in sorted(visit.missing_actions)
+            ) or LABEL_EN_TO_ZH["None"]
+            plate_info = visit.plate or LABEL_EN_TO_ZH["unknown"]
+            messages.append({
+                "timestamp": now,
+                "source_name": self.source_name,
+                "source_id": self.source_id,
+                "level": "warning" if visit.missing_actions else "info",
+                "message": f"车辆离场：车牌={plate_info}，缺失动作：{missing}",
                 "image_base64": thumbnail,
             })
 
@@ -342,6 +411,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             classifications=classifications,
             ocr_texts=ocr_texts,
             messages=messages,
+            annotated_frame=annotated_frame,
             extra={"visits": visit_records} if visit_records else {},
         )
 

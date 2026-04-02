@@ -49,5 +49,11 @@ class ProcessingLogBuffer:
             "total_pages": total_pages,
         }
 
+    def clear(self) -> None:
+        """Remove all buffered log entries.
+        清空所有缓冲日志条目。"""
+        with self._lock:
+            self._items.clear()
+
 
 processing_log_buffer = ProcessingLogBuffer()

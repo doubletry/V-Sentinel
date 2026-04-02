@@ -33,7 +33,7 @@ from backend.models.schemas import AnalysisMessage, ROI
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
-    from backend.processing.agent import AnalysisAgent
+    from backend.processing.truck.agent import AnalysisAgent
 
 
 class BaseVideoProcessor(_CoreBaseVideoProcessor):
@@ -87,26 +87,14 @@ class BaseVideoProcessor(_CoreBaseVideoProcessor):
         self.agent = agent
         self.started_at: str | None = None
 
-    # ── Lifecycle overrides / 生命周期重写 ──────────────────────────────────
-
     async def start(self) -> None:
         """Start the processing task with timestamp tracking.
         启动处理任务并记录时间戳。"""
         if self._task is not None and not self._task.done():
             logger.warning("Processor for {} is already running", self.source_id)
             return
-        self._stop_event.clear()
         self.started_at = datetime.now(timezone.utc).isoformat()
-        self.status = "running"
-        self._task = asyncio.create_task(
-            self._run_loop(), name=f"processor-{self.source_id}"
-        )
-        logger.info("Started processor for source {}", self.source_id)
-
-    async def stop(self) -> None:
-        """Stop the processing task gracefully.
-        优雅停止处理任务。"""
-        await super().stop()
+        await super().start()
 
     # ── Result dispatch / 结果分发 ────────────────────────────────────────────
 

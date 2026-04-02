@@ -29,6 +29,16 @@
               />
             </el-select>
           </el-form-item>
+          <el-form-item :label="t('settings.timezone')">
+            <el-select v-model="form.timezone" style="width: 100%" filterable allow-create default-first-option>
+              <el-option
+                v-for="option in timezoneOptions"
+                :key="option"
+                :label="option"
+                :value="option"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item :label="t('settings.siteTitle')">
             <el-input v-model="form.site_title" :placeholder="t('settings.siteTitle')" />
           </el-form-item>
@@ -101,9 +111,9 @@
                 default-first-option
               >
                 <el-option
-                  v-for="option in processorPluginOptions"
+                  v-for="option in localizedProcessorPluginOptions"
                   :key="option.value"
-                  :label="t(option.labelKey)"
+                  :label="option.label"
                   :value="option.value"
                 />
               </el-select>
@@ -187,6 +197,65 @@
         </section>
 
         <section class="settings-section">
+          <h2>{{ t('settings.emailSummary') }}</h2>
+          <el-form-item :label="t('settings.emailFromAddress')">
+            <el-input
+              v-model="form.email_from_address"
+              placeholder="sender@example.com"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.emailGrpcPort')">
+            <el-input
+              v-model="form.email_port"
+              placeholder="50055"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.emailFromAuthCode')">
+            <el-input
+              v-model="form.email_from_auth_code"
+              type="password"
+              show-password
+              placeholder="授权码 / 密码"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.emailToAddresses')">
+            <div class="field-stack">
+              <el-input
+                v-model="form.email_to_addresses"
+                type="textarea"
+                :rows="2"
+                placeholder="a@example.com,b@example.com"
+              />
+              <p class="form-hint">{{ t('settings.emailAddressesHint') }}</p>
+            </div>
+          </el-form-item>
+          <el-form-item :label="t('settings.emailCcAddresses')">
+            <el-input
+              v-model="form.email_cc_addresses"
+              type="textarea"
+              :rows="2"
+              placeholder="cc1@example.com,cc2@example.com"
+            />
+          </el-form-item>
+          <el-form-item :label="t('settings.dailySummaryHour')">
+            <el-input v-model="form.daily_summary_hour" placeholder="23" />
+          </el-form-item>
+          <el-form-item :label="t('settings.dailySummaryMinute')">
+            <el-input v-model="form.daily_summary_minute" placeholder="59" />
+          </el-form-item>
+          <el-form-item :label="t('settings.messageRetentionDays')">
+            <el-select v-model="form.message_retention_days" style="width: 100%">
+              <el-option
+                v-for="day in retentionDayOptions"
+                :key="day"
+                :label="t('settings.messageRetentionDaysOption', { days: day })"
+                :value="String(day)"
+              />
+            </el-select>
+          </el-form-item>
+        </section>
+
+        <section class="settings-section">
           <h2>{{ t('settings.threadPools') }}</h2>
           <el-form-item :label="t('settings.maxPullWorkers')">
             <el-input v-model="form.max_pull_workers" placeholder="20" />
@@ -201,39 +270,45 @@
 
         <div class="settings-actions">
           <el-button @click="reload">{{ t('common.reset') }}</el-button>
+          <el-button @click="testEmailConfig" :loading="testingEmail">
+            {{ t('settings.testEmail') }}
+          </el-button>
           <el-button type="primary" @click="save" :loading="saving">
             {{ t('settings.saveSettings') }}
           </el-button>
         </div>
       </el-form>
+
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { localeOptions } from '../i18n/index.js'
+import { processorApi } from '../api/index.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { useSourceStore } from '../stores/source.js'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
-const processorPluginOptions = [
-  { value: 'truck', labelKey: 'settings.processorPluginTruck' },
-  { value: 'example', labelKey: 'settings.processorPluginExample' },
-]
+const processorPluginOptions = ref([])
+const retentionDayOptions = [7, 15, 21, 30]
+const timezoneOptions = ['Asia/Shanghai', 'UTC', 'Asia/Tokyo', 'Europe/London', 'America/New_York']
 
 const loading = ref(false)
 const saving = ref(false)
+const testingEmail = ref(false)
 const serviceAction = ref('')
 const roiTagInput = ref('')
 const roiTagList = ref([])
 const form = ref({
   ui_language: 'zh-CN',
+  timezone: 'Asia/Shanghai',
   processor_plugin: 'truck',
   site_title: '',
   site_description: '',
@@ -252,10 +327,25 @@ const form = ref({
   upload_enabled: 'true',
   mediamtx_rtsp_addr: '',
   mediamtx_webrtc_addr: '',
+  email_from_address: '',
+  email_from_auth_code: '',
+  email_to_addresses: '',
+  email_cc_addresses: '',
+  email_port: '50055',
+  daily_summary_hour: '23',
+  daily_summary_minute: '59',
+  message_retention_days: '7',
   max_pull_workers: '',
   max_push_workers: '',
   max_cpu_workers: '',
 })
+
+const localizedProcessorPluginOptions = computed(() =>
+  processorPluginOptions.value.map((option) => ({
+    ...option,
+    label: locale.value === 'en-US' ? option.label_en : option.label_zh,
+  }))
+)
 
 function parseRoiTagOptions(raw) {
   if (Array.isArray(raw)) {
@@ -305,8 +395,12 @@ function removeRoiTag(tag) {
 async function reload() {
   loading.value = true
   try {
-    const data = await appSettingsStore.fetchSettings(true)
+    const [data, plugins] = await Promise.all([
+      appSettingsStore.fetchSettings(true),
+      processorApi.plugins(),
+    ])
     Object.assign(form.value, data)
+    processorPluginOptions.value = Array.isArray(plugins) ? plugins : []
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     syncRoiTagOptionsToForm()
   } catch (err) {
@@ -361,6 +455,30 @@ async function save() {
     ElMessage.error(t('settings.failedToSave', { message: err.message }))
   } finally {
     saving.value = false
+  }
+}
+
+async function testEmailConfig() {
+  testingEmail.value = true
+  try {
+    const payload = {
+      vengine_host: form.value.vengine_host,
+      email_port: form.value.email_port,
+      email_from_address: form.value.email_from_address,
+      email_from_auth_code: form.value.email_from_auth_code,
+      email_to_addresses: form.value.email_to_addresses,
+      email_cc_addresses: form.value.email_cc_addresses,
+    }
+    const result = await appSettingsStore.testEmail(payload)
+    ElMessage.success(
+      t('settings.testEmailSuccess', {
+        status: result.status || 'SUCCESS',
+      })
+    )
+  } catch (err) {
+    ElMessage.error(t('settings.testEmailFailed', { message: err.message }))
+  } finally {
+    testingEmail.value = false
   }
 }
 
@@ -530,6 +648,7 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.45;
 }
+
 
 .field-stack {
   width: 100%;

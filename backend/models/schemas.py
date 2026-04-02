@@ -94,11 +94,32 @@ class AnalysisMessage(BaseModel):
     image_base64: str | None = None
 
 
+class ProcessorPluginInfo(BaseModel):
+    """Processor plugin display metadata.
+    处理器插件展示元数据。"""
+
+    value: str
+    label_zh: str
+    label_en: str
+
+
+class PaginatedMessagesResponse(BaseModel):
+    """Paginated persisted analysis messages.
+    持久化分析消息的分页响应。"""
+
+    items: list[AnalysisMessage]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
 class AppSettingsUpdate(BaseModel):
     """Partial update for app settings (all fields optional).
     部分更新应用设置（所有字段可选）。"""
 
     ui_language: str | None = None
+    timezone: str | None = None
     site_title: str | None = None
     site_description: str | None = None
     favicon_url: str | None = None
@@ -121,6 +142,26 @@ class AppSettingsUpdate(BaseModel):
 
     mediamtx_rtsp_addr: str | None = None
     mediamtx_webrtc_addr: str | None = None
+    email_from_address: str | None = None
+    email_from_auth_code: str | None = None
+    email_to_addresses: str | None = None
+    email_cc_addresses: str | None = None
+    email_port: str | None = None
+    daily_summary_hour: str | None = None
+    daily_summary_minute: str | None = None
+    message_retention_days: str | None = None
     max_pull_workers: str | None = None
     max_push_workers: str | None = None
     max_cpu_workers: str | None = None
+
+
+class EmailTestRequest(BaseModel):
+    """Payload for testing email configuration without saving first.
+    用于在不先保存的情况下测试邮件配置的载荷。"""
+
+    vengine_host: str | None = None
+    email_port: str | None = None
+    email_from_address: str | None = None
+    email_from_auth_code: str | None = None
+    email_to_addresses: str | None = None
+    email_cc_addresses: str | None = None

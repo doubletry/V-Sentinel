@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 from unittest.mock import AsyncMock
 
+import cv2
 import numpy as np
 import pytest
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
-from core.constants import REQUIRED_ACTIONS
-from core.truck_tracker import (
+from core.truck.plate import (
+    extract_valid_plate_text,
+    is_valid_plate_text,
+    should_replace_plate,
+)
+from core.truck.constants import REQUIRED_ACTIONS
+from core.truck.tracker import (
     FrameAnalysis,
     TrackedTruck,
     TrackingDecision,
@@ -40,6 +47,18 @@ def _person_det(x1=20, y1=20, x2=60, y2=80, conf=0.8, label="person"):
         "x_min": x1, "y_min": y1, "x_max": x2, "y_max": y2,
         "confidence": conf, "label": label,
     }
+
+
+def _decode_thumbnail(image_base64: str) -> np.ndarray:
+    raw = base64.b64decode(image_base64)
+    arr = np.frombuffer(raw, dtype=np.uint8)
+    image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    assert image is not None
+    return image
+
+
+GREEN_CHANNEL_MIN = 150
+OTHER_CHANNEL_MAX = 120
 
 
 # ── Tests for helper functions ────────────────────────────────────────────────
@@ -84,6 +103,25 @@ class TestMajorityVote:
         from collections import deque
         history = deque(["a", "b", "a", "a", "b"])
         assert _majority_vote(history, min_count=2) == "a"
+
+
+class TestPlateFiltering:
+    def test_accepts_prefixed_plate(self):
+        assert extract_valid_plate_text("粤B12345") == "粤B12345"
+
+    def test_accepts_plain_alnum_plate(self):
+        assert extract_valid_plate_text("BLX785") == "BLX785"
+
+    def test_rejects_invalid_plate(self):
+        assert extract_valid_plate_text("粤B12") == ""
+        assert extract_valid_plate_text("12345") == ""
+        assert not is_valid_plate_text("###")
+
+    def test_replacement_prefers_more_complete_plate(self):
+        assert should_replace_plate("BLX785", 0.99, "粤B12345", 0.50)
+
+    def test_replacement_prefers_higher_confidence_when_completeness_matches(self):
+        assert should_replace_plate("粤B12345", 0.60, "粤B12345", 0.95)
 
 
 class TestMergeBoxes:
@@ -164,11 +202,20 @@ class TestTruckTracker:
         tracker = TruckTracker(min_presence_frames=1)
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
-        tracker.feed_ocr(tid, "LOW", 0.5)
-        tracker.feed_ocr(tid, "HIGH", 0.95)
-        tracker.feed_ocr(tid, "LOWER", 0.3)
-        assert tracker.get_track(tid).best_plate == "HIGH"
+        tracker.feed_ocr(tid, "BLX785", 0.5)
+        tracker.feed_ocr(tid, "BLX786", 0.95)
+        tracker.feed_ocr(tid, "BLX787", 0.3)
+        assert tracker.get_track(tid).best_plate == "BLX786"
         assert tracker.get_track(tid).best_plate_conf == 0.95
+
+    def test_best_plate_prefers_prefixed_plate_over_plain_noise(self):
+        tracker = TruckTracker(min_presence_frames=1)
+        tracker.update(FrameAnalysis(trucks=[_truck_det()]))
+        tid = list(tracker.get_all_tracks().keys())[0]
+        tracker.feed_ocr(tid, "BLX785", 0.99)
+        tracker.feed_ocr(tid, "粤B12345", 0.60)
+        assert tracker.get_track(tid).best_plate == "粤B12345"
+        assert tracker.get_track(tid).best_plate_conf == 0.60
 
     def test_ocr_interval_triggers_correctly(self):
         """OCR should trigger on first frame and after ocr_interval frames.
@@ -254,7 +301,7 @@ class TestTruckTracker:
         assert tracker.feed_action(tid, "action1") == ""
         assert tracker.feed_action(tid, "action1") == ""
         # Third: now stable
-        assert tracker.feed_action(tid, "action1") == "action1"
+        assert tracker.feed_action(tid, "action1") == "HandOverKeys"
 
     def test_action_flicker_filtered(self):
         """Flickering labels are filtered by majority vote.
@@ -268,7 +315,7 @@ class TestTruckTracker:
         tracker.feed_action(tid, "action1")
         tracker.feed_action(tid, "action1")
         # action1 appeared 3 times, action2 only once
-        assert tracker.get_track(tid).stable_action == "action1"
+        assert tracker.get_track(tid).stable_action == "HandOverKeys"
 
     def test_confirmed_actions_accumulate(self):
         """Multiple stable actions accumulate in confirmed_actions set.
@@ -280,7 +327,7 @@ class TestTruckTracker:
         # Confirm action1 (2 consecutive → stable)
         tracker.feed_action(tid, "action1")
         tracker.feed_action(tid, "action1")
-        assert "action1" in tracker.get_track(tid).confirmed_actions
+        assert "HandOverKeys" in tracker.get_track(tid).confirmed_actions
 
         # Confirm action2 (feed enough to become the majority)
         tracker.feed_action(tid, "action2")
@@ -288,8 +335,8 @@ class TestTruckTracker:
         tracker.feed_action(tid, "action2")
 
         track = tracker.get_track(tid)
-        assert "action1" in track.confirmed_actions
-        assert "action2" in track.confirmed_actions
+        assert "HandOverKeys" in track.confirmed_actions
+        assert "PlaceWheelChock" in track.confirmed_actions
 
     def test_other_label_not_added_to_confirmed(self):
         """The 'other' label should not be added to confirmed_actions.
@@ -304,12 +351,12 @@ class TestTruckTracker:
 
         track = tracker.get_track(tid)
         assert "other" not in track.confirmed_actions
-        assert track.stable_action == "other"
+        assert track.stable_action == "Other"
 
     def test_missing_actions_in_visit(self):
         """Visit should report actions that were never confirmed.
         到访记录应报告未确认的动作。"""
-        required = {"action1", "action2", "action3"}
+        required = {"HandOverKeys", "PlaceWheelChock", "InnerInspectionOfTruck"}
         tracker = TruckTracker(
             stability_min_count=2,
             required_actions=required,
@@ -326,8 +373,8 @@ class TestTruckTracker:
         # Truck leaves
         decision = tracker.update(FrameAnalysis())
         visit = decision.visits[0]
-        assert visit.confirmed_actions == {"action1"}
-        assert visit.missing_actions == {"action2", "action3"}
+        assert visit.confirmed_actions == {"HandOverKeys"}
+        assert visit.missing_actions == {"PlaceWheelChock", "InnerInspectionOfTruck"}
 
     def test_feed_ocr_unknown_track_noop(self):
         """feed_ocr on unknown track_id should not raise.
@@ -340,6 +387,14 @@ class TestTruckTracker:
         对未知 track_id 调用 feed_action 返回空字符串。"""
         tracker = TruckTracker()
         assert tracker.feed_action(999, "action1") == ""
+
+    def test_feed_action_normalizes_aliases(self):
+        tracker = TruckTracker(stability_min_count=1, min_presence_frames=1)
+        tracker.update(FrameAnalysis(trucks=[_truck_det()]))
+        tid = list(tracker.get_all_tracks().keys())[0]
+
+        assert tracker.feed_action(tid, "TakePhotosOfSeal") == "TakePhotoOfSeal"
+        assert "TakePhotoOfSeal" in tracker.get_track(tid).confirmed_actions
 
     def test_single_truck_replaces_when_old_leaves(self):
         """Only one truck tracked at a time; new one starts after old leaves.
@@ -472,7 +527,7 @@ class TestTruckMonitorProcessor:
     async def test_no_vengine_echo_mode(self):
         """Without V-Engine, processor runs in echo mode (draws frame number).
         无 V-Engine 时，处理器运行在回显模式（绘制帧号）。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
         proc = TruckMonitorProcessor(
             source_id="s1",
             source_name="cam",
@@ -489,7 +544,7 @@ class TestTruckMonitorProcessor:
     async def test_full_pipeline_with_truck_and_person(self):
         """Full pipeline: detect truck+person → OCR → classify → track.
         完整流水线：检测卡车+行人 → OCR → 分类 → 跟踪。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -530,7 +585,7 @@ class TestTruckMonitorProcessor:
     async def test_truck_leaves_produces_visit_message(self):
         """When truck leaves, a visit message is produced with the plate.
         卡车离开时应产生带车牌的到访消息。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -565,14 +620,14 @@ class TestTruckMonitorProcessor:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
 
-        visit_msgs = [m for m in result2.messages if "Vehicle left" in m.get("message", "")]
+        visit_msgs = [m for m in result2.messages if "车辆离场" in m.get("message", "")]
         assert len(visit_msgs) == 1
         assert "XY789" in visit_msgs[0]["message"]
 
     async def test_classification_includes_person_bbox(self):
         """Classification results include person_bbox for per-person labelling.
         分类结果包含 person_bbox 用于每个人的标注。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -613,7 +668,7 @@ class TestTruckProcessorRoiFlow:
     async def test_detect_receives_model_roi_from_roi_pixel_points(self):
         """When roi_pixel_points is provided, detect() receives model_roi.
         当提供 roi_pixel_points 时，detect() 接收到 model_roi。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -645,7 +700,7 @@ class TestTruckProcessorRoiFlow:
     async def test_detect_receives_none_model_roi_when_no_roi_pixel_points(self):
         """When roi_pixel_points is empty, detect() receives model_roi=None.
         当 roi_pixel_points 为空时，detect() 接收 model_roi=None。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -673,7 +728,7 @@ class TestTruckProcessorRoiFlow:
         """detect() is called with single-image args (not images list), so
         model_roi at top level is used correctly.
         detect() 使用单图参数调用（非 images 列表），因此顶层 model_roi 正确使用。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -699,7 +754,7 @@ class TestTruckProcessorRoiFlow:
     async def test_ocr_images_include_truck_bbox_as_roi(self):
         """OCR batch items contain the truck bounding box as their ROI.
         OCR 批量项包含卡车检测框作为其 ROI。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -738,7 +793,7 @@ class TestTruckProcessorRoiFlow:
     async def test_classify_images_include_merged_roi(self):
         """Classify batch items contain the merged person + truck ROI.
         分类批量项包含合并的人+卡车 ROI。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -785,7 +840,7 @@ class TestTruckProcessorRoiFlow:
         """OCR and classify batch items use image_key (via 'key' alias) when
         upload succeeds.
         当上传成功时，OCR 和分类批量项使用 image_key（通过 'key' 别名）。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "my-cache-key"
@@ -827,7 +882,7 @@ class TestTruckProcessorRoiFlow:
     async def test_ocr_and_classify_fallback_to_bytes_when_no_key(self):
         """OCR and classify fall back to image_bytes when upload returns None.
         当上传返回 None 时，OCR 和分类回退到 image_bytes。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = None  # upload failed
@@ -869,7 +924,7 @@ class TestTruckProcessorRoiFlow:
     async def test_detect_with_roi_and_key_passes_both(self):
         """When both ROI and key are available, detect() receives both.
         当 ROI 和 key 都可用时，detect() 同时接收两者。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -904,7 +959,7 @@ class TestTruckProcessorRoiFlow:
         """Full pipeline with ROI: detect passes roi, OCR and classify use
         item-level ROIs.
         带 ROI 的完整流水线：检测传递 roi，OCR 和分类使用项级 ROI。"""
-        from core.truck_processor import TruckMonitorProcessor
+        from core.truck.processor import TruckMonitorProcessor
 
         vengine = AsyncMock()
         vengine.upload_and_get_key.return_value = "frame-key"
@@ -1002,3 +1057,334 @@ class TestDrawOnFrameWithClassifications:
         )
         drawn = proc.draw_on_frame(frame, result)
         assert drawn.sum() > 0
+
+
+# ── Tracker arrival detection tests / 跟踪器到达检测测试 ────────────────────
+
+
+class TestTruckArrival:
+    """Tests for the arrival detection feature in TrackingDecision."""
+
+    def test_arrival_on_immediate_confirmation(self):
+        """With min_presence_frames=1, truck arrival reported immediately."""
+        tracker = TruckTracker(min_presence_frames=1)
+        analysis = FrameAnalysis(trucks=[_truck_det()])
+        decision = tracker.update(analysis)
+        assert len(decision.arrivals) == 1
+
+    def test_arrival_after_min_presence_frames(self):
+        """With min_presence_frames=3, arrival is reported after 3 frames."""
+        tracker = TruckTracker(min_presence_frames=3)
+        analysis = FrameAnalysis(trucks=[_truck_det()])
+
+        # Frame 1 and 2: not yet confirmed
+        d1 = tracker.update(analysis)
+        assert d1.arrivals == []
+        d2 = tracker.update(analysis)
+        assert d2.arrivals == []
+
+        # Frame 3: confirmed — arrival reported
+        d3 = tracker.update(analysis)
+        assert len(d3.arrivals) == 1
+
+    def test_no_arrival_on_subsequent_frames(self):
+        """Once confirmed, no further arrival events for same truck."""
+        tracker = TruckTracker(min_presence_frames=1)
+        analysis = FrameAnalysis(trucks=[_truck_det()])
+
+        d1 = tracker.update(analysis)
+        assert len(d1.arrivals) == 1
+
+        d2 = tracker.update(analysis)
+        assert d2.arrivals == []
+
+    def test_no_arrival_without_truck(self):
+        """No arrival when no truck is detected."""
+        tracker = TruckTracker(min_presence_frames=1)
+        decision = tracker.update(FrameAnalysis())
+        assert decision.arrivals == []
+
+
+@pytest.mark.asyncio
+class TestProcessorKeyMessages:
+    """Tests for key-only messages in TruckMonitorProcessor."""
+
+    async def test_arrival_message_produced(self):
+        """Arrival message is produced when truck is first confirmed."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        arrival_msgs = [
+            m for m in result.messages if "车辆到达" in m.get("message", "")
+        ]
+        assert len(arrival_msgs) == 1
+        assert arrival_msgs[0]["image_base64"]
+        decoded = _decode_thumbnail(arrival_msgs[0]["image_base64"])
+        green_pixels = (
+            (decoded[:, :, 1] > GREEN_CHANNEL_MIN)
+            & (decoded[:, :, 0] < OTHER_CHANNEL_MAX)
+            & (decoded[:, :, 2] < OTHER_CHANNEL_MAX)
+        )
+        assert int(green_pixels.sum()) > 0
+        assert decoded.sum() > 0
+
+    async def test_no_detection_message(self):
+        """Per-frame detection messages are NOT produced anymore."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        detect_msgs = [
+            m for m in result.messages if "Detected" in m.get("message", "")
+        ]
+        assert detect_msgs == []
+
+    async def test_plate_recognition_message(self):
+        """OCR plate recognition message is produced when plate is new."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "ABC123", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        plate_msgs = [
+            m for m in result.messages if "识别到车牌" in m.get("message", "")
+        ]
+        assert len(plate_msgs) == 1
+        assert "ABC123" in plate_msgs[0]["message"]
+        assert plate_msgs[0]["image_base64"]
+
+    async def test_invalid_ocr_text_does_not_emit_plate_message(self):
+        """Invalid OCR plate text should be filtered out before messaging."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "???", "confidence": 0.99, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        assert [m for m in result.messages if "识别到车牌" in m.get("message", "")] == []
+
+    async def test_plain_plate_text_can_emit_plate_message(self):
+        """Plain alnum plates like BLX785 should pass the filter."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+        ]
+        vengine.ocr.return_value = [
+            {"text": "BLX785", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        plate_msgs = [
+            m for m in result.messages if "识别到车牌" in m.get("message", "")
+        ]
+        assert len(plate_msgs) == 1
+        assert "BLX785" in plate_msgs[0]["message"]
+
+    async def test_action_confirmation_message_has_image(self):
+        """Action-confirmed message includes an image snapshot."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [
+            _truck_det(10, 10, 200, 200, label="truck"),
+            _person_det(20, 20, 80, 100, label="person"),
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = [
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+        ]
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1, stability_min_count=1)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        action_msgs = [
+            m for m in result.messages if "动作已确认" in m.get("message", "")
+        ]
+        assert len(action_msgs) == 1
+        assert action_msgs[0]["image_base64"]
+        assert "上交钥匙" in action_msgs[0]["message"]
+        assert "车牌=未知" in action_msgs[0]["message"]
+        assert "轨迹 #" in action_msgs[0]["message"]
+
+    async def test_departure_message_has_image(self):
+        """Departure message is emitted with an image snapshot."""
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.side_effect = [
+            [_truck_det(10, 10, 200, 200, label="truck")],
+            [],
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1, max_missing_frames=0)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        departure_msgs = [
+            m for m in result.messages if "车辆离场" in m.get("message", "")
+        ]
+        assert len(departure_msgs) == 1
+        assert departure_msgs[0]["image_base64"]
+
+    async def test_departure_message_translates_missing_actions(self):
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.side_effect = [
+            [_truck_det(10, 10, 200, 200, label="truck")],
+            [],
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(
+            min_presence_frames=1,
+            max_missing_frames=0,
+            required_actions={"ExteriorInspectionOfTruck", "TakePhotoOfSeal"},
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        departure_msgs = [
+            m for m in result.messages if "车辆离场" in m.get("message", "")
+        ]
+        assert len(departure_msgs) == 1
+        assert "车外检查" in departure_msgs[0]["message"]
+        assert "封条拍照" in departure_msgs[0]["message"]

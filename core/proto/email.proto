@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package emailservice;
+
+// 定义附件消息结构
+message Attachment {
+  string filename = 1; // 附件的文件名，例如 "document.pdf"
+  bytes data = 2;      // 附件的二进制数据
+  string content_type = 3; // 附件的MIME类型，例如 "application/pdf", "image/png"
+}
+
+// 定义发送邮件请求消息结构
+message SendEmailRequest {
+  // 邮件基本信息
+  string from_address = 1; // 发件人邮箱地址，例如 "sender@example.com"
+  string from_auth_code = 2; // 发件人邮箱的授权码或密码 (用于SMTP认证)
+  repeated string to_addresses = 3; // 收件人邮箱地址列表
+  repeated string cc_addresses = 4; // 抄送人邮箱地址列表
+  repeated string bcc_addresses = 5; // 密送人邮箱地址列表
+  string subject = 6; // 邮件主题
+
+  // 邮件内容
+  string html_body = 7; // HTML格式的邮件正文
+  string plain_text_body = 8; // 纯文本格式的邮件正文 (建议提供，作为HTML的备用)
+
+  // 附件列表
+  repeated Attachment attachments = 9;
+
+  // 其他自定义邮件头 (可选，例如 "X-Priority", "Reply-To")
+  map<string, string> custom_headers = 10;
+}
+
+// 定义发送邮件响应消息结构
+message SendEmailResponse {
+  string status = 1; // 邮件发送状态，例如："SUCCESS", "FAILURE"
+  string message = 2; // 响应消息，例如错误信息或成功提示
+  string email_id = 3; // 如果邮件发送成功，可以返回邮件服务商提供的ID (可选)
+}
+
+// 定义gRPC邮件服务
+service EmailService {
+  // 定义一个RPC方法，用于发送邮件
+  rpc SendEmail (SendEmailRequest) returns (SendEmailResponse);
+}

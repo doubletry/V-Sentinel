@@ -15,11 +15,15 @@
           {{ msg.source_id === '__agent__' ? t('messageList.summary') : msg.level.toUpperCase() }}
         </el-tag>
         <span class="msg-source">{{ msg.source_name }}</span>
-        <span class="msg-time">{{ formatTime(msg.timestamp) }}</span>
+        <span class="msg-time">{{ formatTimeWithTimezone(msg.timestamp, appSettingsStore.timeZone) }}</span>
       </div>
       <div class="msg-body">{{ msg.message }}</div>
       <div v-if="msg.image_base64" class="msg-image">
-        <img :src="`data:image/jpeg;base64,${msg.image_base64}`" alt="snapshot" />
+        <img
+          :src="`data:image/jpeg;base64,${msg.image_base64}`"
+          alt="snapshot"
+          @dblclick="openPreview(msg.image_base64)"
+        />
       </div>
     </div>
 
@@ -27,11 +31,18 @@
       <el-icon :size="32" color="#555"><ChatRound /></el-icon>
       <span>{{ t('messageList.noMessages') }}</span>
     </div>
+
+    <el-dialog v-model="previewVisible" width="70%" top="5vh" append-to-body>
+      <img v-if="previewImage" :src="previewImage" alt="preview" class="preview-image" />
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAppSettingsStore } from '../stores/appSettings.js'
+import { formatTimeWithTimezone } from '../utils/time.js'
 
 const props = defineProps({
   messages: {
@@ -41,16 +52,18 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
+const appSettingsStore = useAppSettingsStore()
+const previewVisible = ref(false)
+const previewImage = ref('')
 
 function levelType(level) {
   const map = { info: '', warning: 'warning', alert: 'danger' }
   return map[level] ?? ''
 }
 
-function formatTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return d.toLocaleTimeString()
+function openPreview(imageBase64) {
+  previewImage.value = `data:image/jpeg;base64,${imageBase64}`
+  previewVisible.value = true
 }
 </script>
 
@@ -107,8 +120,9 @@ function formatTime(ts) {
 
 .msg-time {
   margin-left: auto;
-  font-size: 11px;
-  color: #666;
+  font-size: 13px;
+  color: #9aa6c0;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -123,9 +137,18 @@ function formatTime(ts) {
 }
 
 .msg-image img {
-  max-width: 100%;
-  max-height: 160px;
+  width: auto;
+  max-width: min(100%, 360px);
+  max-height: 220px;
   border-radius: 4px;
+  object-fit: contain;
+  cursor: zoom-in;
+  image-rendering: auto;
+}
+
+.preview-image {
+  width: 100%;
+  max-height: 75vh;
   object-fit: contain;
 }
 

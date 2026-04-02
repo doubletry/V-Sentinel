@@ -46,16 +46,27 @@ export const processorApi = {
   stop: (sourceId) => api.post('/api/processor/stop', { source_id: sourceId }),
   startAll: () => api.post('/api/processor/start-all'),
   stopAll: () => api.post('/api/processor/stop-all'),
+  plugins: () => api.get('/api/processor/plugins'),
   logs: (page = 1, pageSize = 20) => api.get('/api/processor/logs', {
     params: { page, page_size: pageSize },
   }),
   status: () => api.get('/api/processor/status'),
 }
 
+export const messagesApi = {
+  list: (params = {}) => api.get('/api/messages', { params }),
+}
+
+export const vehicleEventsApi = {
+  today: () => api.get('/api/vehicle-events/today'),
+  sendSummaryNow: () => api.post('/api/vehicle-events/send-summary-now'),
+}
+
 // Settings API
 export const settingsApi = {
   get: () => api.get('/api/settings'),
   update: (data) => api.put('/api/settings', data),
+  testEmail: (data) => api.post('/api/settings/email/test', data),
 }
 
 export default api

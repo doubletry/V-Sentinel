@@ -1,18 +1,41 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import config from '../config.js'
+import { messagesApi } from '../api/index.js'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '../constants/pagination.js'
 
 export const useMessageStore = defineStore('message', () => {
   const messages = ref([])
   const wsConnected = ref(false)
   const filterSource = ref('')
+  const loading = ref(false)
+  const page = ref(1)
+  const pageSize = ref(DEFAULT_PAGE_SIZE)
+  const total = ref(0)
+  const pendingCount = ref(0)
   let _ws = null
   let _reconnectTimer = null
 
-  const filteredMessages = computed(() => {
-    if (!filterSource.value) return messages.value
-    return messages.value.filter((m) => m.source_id === filterSource.value)
-  })
+  const pageSizeOptions = PAGE_SIZE_OPTIONS
+
+  async function fetchMessages(nextPage = page.value, nextPageSize = pageSize.value) {
+    loading.value = true
+    try {
+      const data = await messagesApi.list({
+        page: nextPage,
+        page_size: nextPageSize,
+        source_id: filterSource.value || undefined,
+      })
+      page.value = Number(data.page || nextPage)
+      pageSize.value = Number(data.page_size || nextPageSize)
+      total.value = Number(data.total || 0)
+      messages.value = Array.isArray(data.items) ? data.items : []
+      pendingCount.value = 0
+      return messages.value
+    } finally {
+      loading.value = false
+    }
+  }
 
   function connectWS() {
     if (_ws && _ws.readyState === WebSocket.OPEN) return
@@ -38,10 +61,15 @@ export const useMessageStore = defineStore('message', () => {
       try {
         const msg = JSON.parse(event.data)
         if (msg === 'pong') return
-        // Keep newest at front, limit to 500
-        messages.value.unshift(msg)
-        if (messages.value.length > 500) {
-          messages.value = messages.value.slice(0, 500)
+        const matchesFilter = !filterSource.value || msg.source_id === filterSource.value
+        if (!matchesFilter) return
+        if (page.value === 1) {
+          messages.value.unshift(msg)
+          if (messages.value.length > pageSize.value) {
+            messages.value = messages.value.slice(0, pageSize.value)
+          }
+        } else {
+          pendingCount.value += 1
         }
       } catch (_) {
         // Ignore parse errors
@@ -72,6 +100,8 @@ export const useMessageStore = defineStore('message', () => {
 
   function clearMessages() {
     messages.value = []
+    total.value = 0
+    pendingCount.value = 0
   }
 
   function setFilterSource(sourceId) {
@@ -80,9 +110,15 @@ export const useMessageStore = defineStore('message', () => {
 
   return {
     messages,
+    loading,
+    page,
+    pageSize,
+    total,
+    pendingCount,
+    pageSizeOptions,
     wsConnected,
     filterSource,
-    filteredMessages,
+    fetchMessages,
     connectWS,
     disconnectWS,
     clearMessages,

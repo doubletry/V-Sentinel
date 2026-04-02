@@ -7,13 +7,14 @@ from loguru import logger
 
 from backend.db.database import get_source, list_sources
 from backend.models.schemas import ProcessorStatus
-from backend.processing.agent import AnalysisAgent
+from backend.processing.truck.agent import AnalysisAgent
 from backend.processing.base import BaseVideoProcessor
 from backend.processing.registry import resolve_processor_class
 
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
     from backend.api.ws import WSManager
+    from core.email_client import AsyncEmailClient
 
 
 class ProcessorManager:
@@ -31,13 +32,14 @@ class ProcessorManager:
         vengine_client: "AsyncVEngineClient",
         ws_manager: "WSManager",
         app_settings: dict[str, str],
+        email_client: "AsyncEmailClient | None" = None,
     ) -> None:
         self._vengine = vengine_client
         self._ws_manager = ws_manager
         self._app_settings = app_settings
         self._processors: dict[str, BaseVideoProcessor] = {}
         self._lock = asyncio.Lock()
-        self._agent = AnalysisAgent(ws_manager=ws_manager)
+        self._agent = AnalysisAgent(ws_manager=ws_manager, email_client=email_client)
 
     async def start_agent(self) -> None:
         """Start the analysis agent (called once during app startup).

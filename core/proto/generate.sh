@@ -22,7 +22,8 @@ python -m grpc_tools.protoc \
     "$PROTO_SRC/classification_service.proto" \
     "$PROTO_SRC/action_service.proto" \
     "$PROTO_SRC/ocr_service.proto" \
-    "$PROTO_SRC/upload_service.proto"
+    "$PROTO_SRC/upload_service.proto" \
+    "$PROTO_SRC/email.proto"
 
 echo "Fixing imports in generated files to use core.proto package..."
 cd "$PROTO_OUT"
@@ -34,6 +35,7 @@ done
 for f in *_pb2_grpc.py; do
     sed -i 's/^import base_pb2 as/from core.proto import base_pb2 as/' "$f"
     sed -i 's/^import \(.*_service_pb2\) as/from core.proto import \1 as/' "$f"
+    sed -i 's/^import email_pb2 as/from core.proto import email_pb2 as/' "$f"
 done
 
 echo "Done! Protobuf files generated in core/proto/."

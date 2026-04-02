@@ -12,11 +12,11 @@ import asyncio
 import base64
 import math
 import queue
-import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from fractions import Fraction
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -131,9 +131,10 @@ class BaseVideoProcessor(ABC):
         self.status: str = "stopped"
 
         # Persistent RTSP push state (ffmpeg subprocess)
-        # 持久化 RTSP 推流状态（ffmpeg 子进程）
+        # 持久化 RTSP 推流状态（PyAV 输出容器）
         self._push_lock = threading.Lock()
-        self._push_proc: subprocess.Popen | None = None
+        self._push_container: av.container.OutputContainer | None = None
+        self._push_stream: Any = None
         self._push_path: str | None = None
         self._push_width: int = 0
         self._push_height: int = 0
@@ -772,6 +773,12 @@ class BaseVideoProcessor(ABC):
         将输入 FPS 转成采样后的有效推流 FPS。"""
         return max(source_fps / max(sample_interval, 1), 1.0)
 
+    @staticmethod
+    def _av_rate(fps: float) -> Fraction:
+        """Convert float FPS to a PyAV-friendly rational rate.
+        将浮点 FPS 转成 PyAV 可接受的有理数帧率。"""
+        return Fraction(fps).limit_denominator(1000)
+
     def _update_publish_fps(self, source_fps: float | None) -> None:
         """Refresh effective publish FPS from source FPS and sample interval.
         根据源流 FPS 和采样间隔刷新有效推流 FPS。"""
@@ -859,16 +866,8 @@ class BaseVideoProcessor(ABC):
         return frame
 
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
-        """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.
-        通过持久化 ffmpeg 子进程将标注帧推送到 MediaMTX。
-
-        Uses ``ffmpeg -f rawvideo`` to accept raw RGB24 frames on stdin and
-        encode them as H.264 over RTSP.  The subprocess is kept alive across
-        frames; it is re-created only when the output path or frame dimensions
-        change.
-        使用 ``ffmpeg -f rawvideo`` 在 stdin 上接收原始 RGB24 帧，编码为 H.264
-        通过 RTSP 推流。子进程跨帧保持活跃；仅在输出路径或帧尺寸变化时重建。
-        """
+        """Push annotated frame to MediaMTX via a persistent PyAV RTSP stream.
+        通过持久化 PyAV RTSP 输出流将标注帧推送到 MediaMTX。"""
         frame = self._ensure_even_dims(frame)
         h, w = frame.shape[:2]
         if h == 0 or w == 0:
@@ -885,8 +884,8 @@ class BaseVideoProcessor(ABC):
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (
-                    self._push_proc is None
-                    or self._push_proc.poll() is not None
+                    self._push_container is None
+                    or self._push_stream is None
                     or self._push_path != output_rtsp_path
                     or self._push_width != w
                     or self._push_height != h
@@ -897,46 +896,46 @@ class BaseVideoProcessor(ABC):
                         f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
                         f"/{output_rtsp_path}"
                     )
-                    cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-fflags", "nobuffer",
-                        "-flags", "low_delay",
-                        "-flush_packets", "1",
-                        "-f", "rawvideo",
-                        "-pix_fmt", "rgb24",
-                        "-s", f"{w}x{h}",
-                        "-r", f"{target_fps:.3f}",
-                        "-i", "pipe:0",
-                        "-c:v", "libx264",
-                        "-pix_fmt", "yuv420p",
-                        "-preset", PUSH_PRESET,
-                        "-tune", "zerolatency",
-                        "-g", str(gop),
-                        "-bf", "0",
-                        "-muxdelay", "0",
-                        "-muxpreload", "0",
-                        "-f", "rtsp",
-                        "-rtsp_transport", "udp",
+                    container = av.open(
                         rtsp_url,
-                    ]
-                    self._push_proc = subprocess.Popen(
-                        cmd,
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        mode="w",
+                        format="rtsp",
+                        options={
+                            "rtsp_transport": "udp",
+                            "flush_packets": "1",
+                            "muxdelay": "0",
+                            "muxpreload": "0",
+                        },
+                        container_options={
+                            "rtsp_transport": "udp",
+                            "flush_packets": "1",
+                            "muxdelay": "0",
+                            "muxpreload": "0",
+                        },
                     )
+                    stream = container.add_stream(
+                        "libx264", rate=self._av_rate(target_fps)
+                    )
+                    stream.width = w
+                    stream.height = h
+                    stream.pix_fmt = "yuv420p"
+                    stream.options = {
+                        "preset": PUSH_PRESET,
+                        "tune": "zerolatency",
+                        "bf": "0",
+                        "g": str(gop),
+                    }
+                    self._push_container = container
+                    self._push_stream = stream
                     self._push_path = output_rtsp_path
                     self._push_width = w
                     self._push_height = h
                     self._push_fps = target_fps
 
-                # Write raw RGB frame bytes to ffmpeg stdin.
-                # 将原始 RGB 帧字节写入 ffmpeg 的 stdin。
-                if self._push_proc.stdin is not None:
-                    self._push_proc.stdin.write(frame.tobytes())
-                    self._push_proc.stdin.flush()
-            except (BrokenPipeError, OSError) as exc:
+                video_frame = av.VideoFrame.from_ndarray(frame, format="rgb24")
+                for packet in self._push_stream.encode(video_frame):
+                    self._push_container.mux(packet)
+            except (BrokenPipeError, OSError, av.FFmpegError) as exc:
                 logger.warning("Push error for {}: {}", output_rtsp_path, exc)
                 self._close_push_container()
             except Exception as exc:
@@ -944,20 +943,21 @@ class BaseVideoProcessor(ABC):
                 self._close_push_container()
 
     def _close_push_container(self) -> None:
-        """Terminate the persistent ffmpeg push subprocess.
-        终止持久化的 ffmpeg 推流子进程。"""
-        if self._push_proc is not None:
+        """Close the persistent PyAV RTSP push container.
+        关闭持久化 PyAV RTSP 推流容器。"""
+        if self._push_container is not None and self._push_stream is not None:
             try:
-                if self._push_proc.stdin is not None:
-                    self._push_proc.stdin.close()
-                self._push_proc.terminate()
-                self._push_proc.wait(timeout=3)
+                for packet in self._push_stream.encode(None):
+                    self._push_container.mux(packet)
             except Exception:
-                try:
-                    self._push_proc.kill()
-                except Exception:
-                    pass
-            self._push_proc = None
+                pass
+        if self._push_container is not None:
+            try:
+                self._push_container.close()
+            except Exception:
+                pass
+            self._push_container = None
+            self._push_stream = None
             self._push_path = None
             self._push_width = 0
             self._push_height = 0

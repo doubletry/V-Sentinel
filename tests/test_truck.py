@@ -612,7 +612,7 @@ class TestTruckMonitorProcessor:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
 
-        visit_msgs = [m for m in result2.messages if "Vehicle left" in m.get("message", "")]
+        visit_msgs = [m for m in result2.messages if "车辆离场" in m.get("message", "")]
         assert len(visit_msgs) == 1
         assert "XY789" in visit_msgs[0]["message"]
 
@@ -1127,7 +1127,7 @@ class TestProcessorKeyMessages:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
         arrival_msgs = [
-            m for m in result.messages if "Vehicle arrived" in m.get("message", "")
+            m for m in result.messages if "车辆到达" in m.get("message", "")
         ]
         assert len(arrival_msgs) == 1
         assert arrival_msgs[0]["image_base64"]
@@ -1198,7 +1198,7 @@ class TestProcessorKeyMessages:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
         plate_msgs = [
-            m for m in result.messages if "Plate recognized" in m.get("message", "")
+            m for m in result.messages if "识别到车牌" in m.get("message", "")
         ]
         assert len(plate_msgs) == 1
         assert "ABC123" in plate_msgs[0]["message"]
@@ -1231,9 +1231,7 @@ class TestProcessorKeyMessages:
             frame=frame, encoded=b"jpeg",
             shape=(480, 640, 3), roi_pixel_points=[],
         )
-        assert [
-            m for m in result.messages if "Plate recognized" in m.get("message", "")
-        ] == []
+        assert [m for m in result.messages if "识别到车牌" in m.get("message", "")] == []
 
     async def test_plain_plate_text_can_emit_plate_message(self):
         """Plain alnum plates like BLX785 should pass the filter."""
@@ -1263,7 +1261,7 @@ class TestProcessorKeyMessages:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
         plate_msgs = [
-            m for m in result.messages if "Plate recognized" in m.get("message", "")
+            m for m in result.messages if "识别到车牌" in m.get("message", "")
         ]
         assert len(plate_msgs) == 1
         assert "BLX785" in plate_msgs[0]["message"]
@@ -1299,10 +1297,11 @@ class TestProcessorKeyMessages:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
         action_msgs = [
-            m for m in result.messages if "Action confirmed" in m.get("message", "")
+            m for m in result.messages if "动作已确认" in m.get("message", "")
         ]
         assert len(action_msgs) == 1
         assert action_msgs[0]["image_base64"]
+        assert "动作1" in action_msgs[0]["message"]
 
     async def test_departure_message_has_image(self):
         """Departure message is emitted with an image snapshot."""
@@ -1335,7 +1334,47 @@ class TestProcessorKeyMessages:
             shape=(480, 640, 3), roi_pixel_points=[],
         )
         departure_msgs = [
-            m for m in result.messages if "Vehicle left" in m.get("message", "")
+            m for m in result.messages if "车辆离场" in m.get("message", "")
         ]
         assert len(departure_msgs) == 1
         assert departure_msgs[0]["image_base64"]
+
+    async def test_departure_message_translates_missing_actions(self):
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.side_effect = [
+            [_truck_det(10, 10, 200, 200, label="truck")],
+            [],
+        ]
+        vengine.ocr.return_value = []
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(
+            min_presence_frames=1,
+            max_missing_frames=0,
+            required_actions={"ExteriorInspectionOfTruck", "TakePhotoOfSeal"},
+        )
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        result = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        departure_msgs = [
+            m for m in result.messages if "车辆离场" in m.get("message", "")
+        ]
+        assert len(departure_msgs) == 1
+        assert "车身外检" in departure_msgs[0]["message"]
+        assert "铅封拍照" in departure_msgs[0]["message"]

@@ -594,44 +594,57 @@ class TestCoreBaseVideoProcessorPipeline:
         )
         proc._update_publish_fps(30.0)
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
-        captured: list[list[str]] = []
+        captured: dict[str, object] = {}
 
-        class _FakeProc:
+        class _FakeStream:
             def __init__(self):
-                self.stdin = self
+                self.width = None
+                self.height = None
+                self.pix_fmt = None
+                self.options = None
 
-            def poll(self):
-                return None
+            def encode(self, frame):
+                return [("packet", frame)]
 
-            def write(self, data):
-                return len(data)
+        class _FakeContainer:
+            def __init__(self):
+                self.stream = _FakeStream()
+                self.muxed = []
 
-            def flush(self):
-                return None
+            def add_stream(self, codec, rate):
+                captured["codec"] = codec
+                captured["rate"] = rate
+                return self.stream
 
-            def terminate(self):
-                return None
+            def mux(self, packet):
+                self.muxed.append(packet)
 
-            def wait(self, timeout=None):
-                return 0
+            def close(self):
+                captured["closed"] = True
 
-            def kill(self):
-                return None
+        def _fake_av_open(url, **kwargs):
+            captured["url"] = url
+            captured["kwargs"] = kwargs
+            container = _FakeContainer()
+            captured["container"] = container
+            return container
 
-        def _fake_popen(cmd, **kwargs):
-            captured.append(cmd)
-            return _FakeProc()
-
-        monkeypatch.setattr("core.base_processor.subprocess.Popen", _fake_popen)
+        monkeypatch.setattr("core.base_processor.av.open", _fake_av_open)
 
         proc._push_frame(frame, "cam1_processed")
 
-        assert captured
-        cmd = captured[0]
-        assert "-rtsp_transport" in cmd
-        assert cmd[cmd.index("-rtsp_transport") + 1] == "udp"
-        assert "-r" in cmd
-        assert cmd[cmd.index("-r") + 1] == "10.000"
+        assert captured["url"] == "rtsp://localhost:8554/cam1_processed"
+        assert captured["kwargs"]["mode"] == "w"
+        assert captured["kwargs"]["format"] == "rtsp"
+        assert captured["kwargs"]["options"]["rtsp_transport"] == "udp"
+        assert captured["codec"] == "libx264"
+        assert float(captured["rate"]) == 10.0
+        stream = captured["container"].stream
+        assert stream.width == 64
+        assert stream.height == 64
+        assert stream.pix_fmt == "yuv420p"
+        assert stream.options["tune"] == "zerolatency"
+        assert stream.options["preset"]
 
     def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):
         class _CodecContext:

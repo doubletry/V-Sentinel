@@ -63,7 +63,12 @@ LABEL_EN_TO_ZH: dict[str, str] = {
     "action4": "动作4",
     "action5": "动作5",
     "action6": "动作6",
+    "ExteriorInspectionOfTruck": "车身外检",
+    "InnerInspectionOfTruck": "车内检查",
+    "TakePhotoOfGoods": "货物拍照",
+    "TakePhotoOfSeal": "铅封拍照",
     "other": "其他",
     "unknown": "未知",
+    "none": "无",
 }
 """English-to-Chinese labels for truck-scene messages. truck 场景中英文标签映射。"""

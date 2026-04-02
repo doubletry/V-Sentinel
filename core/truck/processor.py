@@ -333,7 +333,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 "source_name": self.source_name,
                 "source_id": self.source_id,
                 "level": "info",
-                "message": f"Vehicle arrived (track #{track.track_id if track else tid})",
+                "message": f"车辆到达（轨迹 #{track.track_id if track else tid}）",
                 "image_base64": thumbnail,
             })
 
@@ -349,9 +349,7 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                     "source_name": self.source_name,
                     "source_id": self.source_id,
                     "level": "info",
-                    "message": (
-                        f"Plate recognized: {plate_after} (track #{tid})"
-                    ),
+                    "message": f"识别到车牌：{plate_after}（轨迹 #{tid}）",
                     "image_base64": thumbnail,
                 })
 
@@ -364,32 +362,30 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 new_actions = track_after.confirmed_actions - actions_before
                 for action in sorted(new_actions):
                     action_zh = LABEL_EN_TO_ZH.get(action, action)
-                    plate_info = track_after.best_plate or "unknown"
+                    plate_info = track_after.best_plate or LABEL_EN_TO_ZH["unknown"]
                     messages.append({
                         "timestamp": now,
                         "source_name": self.source_name,
                         "source_id": self.source_id,
                         "level": "info",
-                        "message": (
-                            f"Action confirmed: {action_zh} "
-                            f"(plate={plate_info}, track #{first_tid})"
-                        ),
+                        "message": f"动作已确认：{action_zh}（车牌={plate_info}，轨迹 #{first_tid}）",
                         "image_base64": thumbnail,
                     })
 
         # 5d. Vehicle departure — trucks that left the scene.
         # 5d. 车辆离开——离开场景的卡车。
         for visit in decision.visits:
-            missing = ", ".join(sorted(visit.missing_actions)) or "none"
+            missing = ", ".join(
+                LABEL_EN_TO_ZH.get(action, action)
+                for action in sorted(visit.missing_actions)
+            ) or LABEL_EN_TO_ZH["none"]
+            plate_info = visit.plate or LABEL_EN_TO_ZH["unknown"]
             messages.append({
                 "timestamp": now,
                 "source_name": self.source_name,
                 "source_id": self.source_id,
                 "level": "warning" if visit.missing_actions else "info",
-                "message": (
-                    f"Vehicle left: plate={visit.plate or 'unknown'}, "
-                    f"missing actions: {missing}"
-                ),
+                "message": f"车辆离场：车牌={plate_info}，缺失动作：{missing}",
                 "image_base64": thumbnail,
             })
 

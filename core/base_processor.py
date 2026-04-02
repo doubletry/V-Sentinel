@@ -44,6 +44,7 @@ LOW_LATENCY_ANALYZEDURATION = "0"
 STREAM_TIMEOUT_MICROSECONDS = "5000000"
 MAX_REASONABLE_SOURCE_FPS = 120.0
 FPS_CHANGE_THRESHOLD = 0.01
+GOP_DIVISOR = 2
 
 try:
     from turbojpeg import TurboJPEG, TJPF_RGB
@@ -340,7 +341,11 @@ class BaseVideoProcessor(ABC):
     @staticmethod
     def _stream_fps(video_stream: av.video.stream.VideoStream) -> float | None:
         """Best-effort FPS extraction from a PyAV video stream.
-        尽力从 PyAV 视频流中提取 FPS。"""
+        尽力从 PyAV 视频流中提取 FPS。
+
+        Returns:
+            A positive FPS value if one can be extracted, else ``None``.
+            若能提取到有效正数 FPS 则返回该值，否则返回 ``None``。"""
         codec_context = getattr(video_stream, "codec_context", None)
         # In low-delay mode PyAV can leave average_rate empty and expose an
         # inflated guessed/base rate, while codec_context.framerate keeps the
@@ -871,7 +876,7 @@ class BaseVideoProcessor(ABC):
                 # Keep keyframes about twice per second so new RTSP readers can
                 # lock onto the stream faster under low-latency UDP delivery.
                 # 约每 0.5 秒一个关键帧，帮助低延迟 UDP 读者更快起播。
-                gop = max(1, int(round(target_fps / 2)))
+                gop = max(1, int(round(target_fps / GOP_DIVISOR)))
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 if (

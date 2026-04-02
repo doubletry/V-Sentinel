@@ -632,13 +632,15 @@ class TestCoreBaseVideoProcessorPipeline:
         assert cmd[cmd.index("-rtsp_transport") + 1] == "udp"
         assert cmd[cmd.index("-r") + 1] == "10.000"
 
-    def test_stream_fps_prefers_codec_framerate_over_low_delay_guess(self):
+    def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):
         class _CodecContext:
             framerate = 25
 
         class _Stream:
             average_rate = None
             codec_context = _CodecContext()
+            # base_rate / guessed_rate simulate inflated values sometimes seen
+            # under low-delay PyAV input options.
             base_rate = 50
             guessed_rate = 50
 

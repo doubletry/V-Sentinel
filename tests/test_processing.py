@@ -168,6 +168,20 @@ class TestBaseVideoProcessor:
         assert proc.started_at is not None
         await proc.stop()
 
+    async def test_stop_delegates_to_core_worker_shutdown(self):
+        proc = self._make_processor()
+        proc._run_loop = AsyncMock()
+        proc._start_display_worker = MagicMock()
+        proc._start_publish_worker = MagicMock()
+        proc._stop_display_worker = MagicMock()
+        proc._stop_publish_worker = MagicMock()
+
+        await proc.start()
+        await proc.stop()
+
+        proc._stop_display_worker.assert_called_once()
+        proc._stop_publish_worker.assert_called_once()
+
 
 class TestProcessorManager:
     def _make_manager(self) -> ProcessorManager:

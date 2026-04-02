@@ -714,11 +714,7 @@ class BaseVideoProcessor(ABC):
         if self._publish_thread is not None:
             self._publish_thread.join(timeout=2.0)
             self._publish_thread = None
-        while True:
-            try:
-                self._publish_queue.get_nowait()
-            except queue.Empty:
-                break
+        self._drain_queue(self._publish_queue)
 
     def _enqueue_display(
         self, frame: np.ndarray, result: AnalysisResult, output_rtsp_path: str
@@ -844,7 +840,17 @@ class BaseVideoProcessor(ABC):
             try:
                 target_queue.put_nowait(item)
             except queue.Full:
-                pass
+                logger.debug("Dropping stale queued item because {} queue stayed full", target_queue)
+
+    @staticmethod
+    def _drain_queue(target_queue: "queue.Queue[Any]") -> None:
+        """Drain any remaining items from a queue after its worker stops.
+        在线程停止后清空残留队列项。"""
+        while not target_queue.empty():
+            try:
+                target_queue.get_nowait()
+            except queue.Empty:
+                break
 
     def _publish_worker(self) -> None:
         """Publish queued frames and repeat the latest one at a steady cadence.

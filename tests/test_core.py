@@ -596,7 +596,7 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._stop_publish_worker()
 
         assert pushed
-        assert any(frame.sum() > 0 for frame in pushed)
+        assert any(frame.sum() == frame.size * 255 for frame in pushed)
 
     def test_update_publish_fps_tracks_sampled_input_rate(self):
         proc = DummyCoreProcessor(

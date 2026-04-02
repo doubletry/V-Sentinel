@@ -46,19 +46,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import base64
 from datetime import datetime, timezone
 
 import cv2
 import numpy as np
 from loguru import logger
-
-try:
-    from turbojpeg import TurboJPEG, TJPF_RGB
-    _jpeg = TurboJPEG()
-except (ImportError, RuntimeError) as _exc:
-    _jpeg = None
-    TJPF_RGB = None  # type: ignore[assignment]
 
 from core.base_processor import AnalysisResult, BaseVideoProcessor
 from core.constants import (
@@ -74,7 +66,6 @@ from core.truck_tracker import (
     FrameAnalysis,
     TrackingDecision,
     TruckTracker,
-    VehicleVisit,
 )
 
 
@@ -171,13 +162,14 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         #    Returned detections are already filtered to those inside the ROI.
         # 1. 检测——ROI 作为 model_roi 传递（后处理过滤）。
         #    返回的检测结果已被过滤为 ROI 内的检测框。
-        detections = await self.vengine.detect(
+        detect_result = await self._do_detect(
             shape=shape,
             model_name=DETECTION_MODEL,
             conf=0.5,
             model_roi=primary_roi,
             **img_kwargs,
         )
+        detections = detect_result["detections"]
 
         # 2. Classify detections into trucks / persons / others.
         # 2. 将检测结果分为卡车/行人/其他。
@@ -213,20 +205,29 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             track = self.tracker.get_track(tid)
             if track is None:
                 continue
-            x1, y1, x2, y2 = track.bbox
             ocr_rois.append({
                 "shape": shape,
-                "roi": [
-                    {"x": max(x1, 0), "y": max(y1, 0)},
-                    {"x": min(x2, w), "y": max(y1, 0)},
-                    {"x": min(x2, w), "y": min(y2, h)},
-                    {"x": max(x1, 0), "y": min(y2, h)},
-                ],
+                "roi": self._bbox_to_roi_points(track.bbox, w, h),
                 **({"key": image_key} if image_key else {"image_bytes": encoded}),
             })
 
         if ocr_rois:
-            coros.append(self._do_ocr(ocr_rois, ocr_track_ids))
+            def _handle_ocr_item(item: dict) -> None:
+                image_id = item.get("image_id", 0)
+                if isinstance(image_id, int) and 0 <= image_id < len(ocr_track_ids):
+                    tid = ocr_track_ids[image_id]
+                    self.tracker.feed_ocr(
+                        tid, item.get("text", ""), item.get("confidence", 0.0)
+                    )
+
+            coros.append(
+                self._do_ocr(
+                    ocr_rois,
+                    model_name=OCR_MODEL,
+                    conf=0.3,
+                    on_item=_handle_ocr_item,
+                )
+            )
 
         # 4b. Per-person classification using the combined person + truck ROI.
         #     Classification uses image_roi — the merged bounding box is
@@ -242,24 +243,40 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         cls_track_ids: list[int] = []
         cls_person_bboxes: list[list[int]] = []
         for item in cls_items:
-            x1, y1, x2, y2 = item["roi"]
             cls_rois.append({
                 "shape": shape,
-                "roi": [
-                    {"x": max(x1, 0), "y": max(y1, 0)},
-                    {"x": min(x2, w), "y": max(y1, 0)},
-                    {"x": min(x2, w), "y": min(y2, h)},
-                    {"x": max(x1, 0), "y": min(y2, h)},
-                ],
+                "roi": self._bbox_to_roi_points(item["roi"], w, h),
                 **({"key": image_key} if image_key else {"image_bytes": encoded}),
             })
             cls_track_ids.append(item["track_id"])
             cls_person_bboxes.append(item["person_bbox"])
 
         if cls_rois:
-            coros.append(self._do_classify(
-                cls_rois, cls_track_ids, cls_person_bboxes
-            ))
+            def _handle_classification_item(item: dict) -> dict | None:
+                image_id = item.get("image_id", 0)
+                if not isinstance(image_id, int) or not (0 <= image_id < len(cls_track_ids)):
+                    return None
+
+                tid = cls_track_ids[image_id]
+                raw_label = item.get("label", "other")
+                stable_label = self.tracker.feed_action(tid, raw_label)
+                track = self.tracker.get_track(tid)
+                return {
+                    "track_id": tid,
+                    "raw_label": raw_label,
+                    "stable_label": stable_label,
+                    "confidence": item.get("confidence", 0.0),
+                    "plate": track.best_plate if track else "",
+                    "person_bbox": cls_person_bboxes[image_id],
+                }
+
+            coros.append(
+                self._do_classify(
+                    cls_rois,
+                    model_name=CLASSIFICATION_MODEL,
+                    on_item=_handle_classification_item,
+                )
+            )
 
         # Gather OCR + classify concurrently for real-time performance.
         # 并发收集 OCR + 分类以保证实时性能。
@@ -303,113 +320,30 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                 "image_base64": thumbnail,
             })
 
+        # Serialize visit data for agent persistence
+        # 序列化到访数据供代理持久化
+        visit_records: list[dict] = []
+        for visit in decision.visits:
+            visit_records.append({
+                "track_id": visit.track_id,
+                "enter_time": datetime.fromtimestamp(
+                    visit.enter_time, tz=timezone.utc
+                ).isoformat(),
+                "exit_time": datetime.fromtimestamp(
+                    visit.exit_time, tz=timezone.utc
+                ).isoformat(),
+                "plate": visit.plate,
+                "confirmed_actions": sorted(visit.confirmed_actions),
+                "missing_actions": sorted(visit.missing_actions),
+            })
+
         return AnalysisResult(
             detections=detections,
             classifications=classifications,
             ocr_texts=ocr_texts,
             messages=messages,
+            extra={"visits": visit_records} if visit_records else {},
         )
-
-    # ── Sub-tasks / 子任务 ────────────────────────────────────────────────
-
-    async def _do_ocr(
-        self,
-        ocr_rois: list[dict],
-        track_ids: list[int],
-    ) -> dict:
-        """Run batched OCR and feed results back to tracker.
-        运行批量 OCR 并将结果反馈给跟踪器。
-
-        The OCR ROI is the truck bounding box — the server crops the image
-        to this region before OCR (image_roi pre-processing).
-        OCR 的 ROI 是卡车检测框——服务端在 OCR 前裁剪图像到该区域
-        （image_roi 前处理）。
-        """
-        raw = await self.vengine.ocr(
-            shape=None,
-            model_name=OCR_MODEL,
-            conf=0.3,
-            images=ocr_rois,
-        )
-        ocr_texts: list[dict] = []
-        for item in raw:
-            image_id = item.get("image_id", 0)
-            if isinstance(image_id, int) and 0 <= image_id < len(track_ids):
-                tid = track_ids[image_id]
-                self.tracker.feed_ocr(
-                    tid, item.get("text", ""), item.get("confidence", 0.0)
-                )
-            ocr_texts.append(item)
-        return {"ocr_texts": ocr_texts}
-
-    async def _do_classify(
-        self,
-        cls_rois: list[dict],
-        track_ids: list[int],
-        person_bboxes: list[list[int]],
-    ) -> dict:
-        """Run batched classification and feed results back to tracker.
-        运行批量分类并将结果反馈给跟踪器。
-
-        Classification uses image_roi — the combined person + truck bounding
-        box is sent as a crop region, so the server crops the input image
-        before running the classifier (pre-processing).
-
-        Each classification result carries the ``person_bbox`` so the drawing
-        layer can place the label on the correct person's bounding box.
-        分类使用 image_roi——合并的人+卡车检测框作为裁剪区域发送，
-        服务端在运行分类器前裁剪输入图像（前处理）。
-
-        每个分类结果携带 ``person_bbox``，以便绘制层将标签放置在
-        正确的人体检测框上。
-        """
-        raw = await self.vengine.classify(
-            shape=None,
-            model_name=CLASSIFICATION_MODEL,
-            images=cls_rois,
-        )
-        classifications: list[dict] = []
-        for item in raw:
-            image_id = item.get("image_id", 0)
-            if isinstance(image_id, int) and 0 <= image_id < len(track_ids):
-                tid = track_ids[image_id]
-                raw_label = item.get("label", "other")
-                stable_label = self.tracker.feed_action(tid, raw_label)
-                track = self.tracker.get_track(tid)
-                classifications.append({
-                    "track_id": tid,
-                    "raw_label": raw_label,
-                    "stable_label": stable_label,
-                    "confidence": item.get("confidence", 0.0),
-                    "plate": track.best_plate if track else "",
-                    "person_bbox": person_bboxes[image_id],
-                })
-        return {"classifications": classifications}
-
-    # ── Thumbnail / 缩略图 ───────────────────────────────────────────────
-
-    def _encode_thumbnail(
-        self, frame: np.ndarray | None, max_width: int = 320
-    ) -> str | None:
-        """Encode a frame as a base64 JPEG thumbnail using TurboJPEG (RGB).
-        使用 TurboJPEG 将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
-        if frame is None:
-            return None
-        h, w = frame.shape[:2]
-        if w > max_width:
-            scale = max_width / w
-            frame = cv2.resize(
-                frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
-            )
-        if _jpeg is not None:
-            encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
-        else:
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
-            if not ok:
-                return None
-            encoded = buf.tobytes()
-        return base64.b64encode(encoded).decode()
 
 
 # ── CLI entry point / 命令行入口 ─────────────────────────────────────────────

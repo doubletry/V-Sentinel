@@ -6,9 +6,9 @@ The `core` package provides a self-contained `BaseVideoProcessor` and a
 simple runner so you can develop, test, and iterate on a video processor
 without importing or running the full V-Sentinel backend.
 
-Once your processor works in standalone mode, drop it into
-`backend/processing/` and register it in `ProcessorManager` — no code
-changes needed.
+Once your processor works in standalone mode, add a thin backend adapter in
+`backend/processing/`, register it in `backend/processing/registry.py`, and
+switch the `processor_plugin` setting to activate it.
 
 ## Quick Start
 
@@ -58,12 +58,11 @@ run_processor(
 
 ## gRPC Proto Notes
 
-- The source `.proto` files live in `backend/proto/`.
-- Generated Python protobuf / gRPC files live in the canonical `core/proto/`
-  package and should be regenerated with:
+- The source `.proto` files and generated Python protobuf / gRPC files both
+  live in the canonical `core/proto/` package and should be regenerated with:
 
 ```bash
-bash backend/proto/generate.sh
+bash core/proto/generate.sh
 ```
 
 - ROI polygons sent to V-Engine now use integer pixel coordinates.

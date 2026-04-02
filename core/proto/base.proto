@@ -148,5 +148,3 @@ message ImageCacheInfo {
   int32 id = 3;                    // Corresponding Image/Video id
   int32 size = 4;                  // Size in bytes of the cached data
 }
-
-

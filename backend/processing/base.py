@@ -28,7 +28,7 @@ from loguru import logger
 from core.base_processor import AnalysisResult  # noqa: F401
 from core.base_processor import BaseVideoProcessor as _CoreBaseVideoProcessor
 
-from backend.models.schemas import ROI
+from backend.models.schemas import AnalysisMessage, ROI
 
 if TYPE_CHECKING:
     from backend.vengine.client import AsyncVEngineClient
@@ -118,5 +118,16 @@ class BaseVideoProcessor(_CoreBaseVideoProcessor):
             )
         else:
             for msg in result.messages:
+                if not isinstance(msg, AnalysisMessage):
+                    msg = AnalysisMessage(
+                        timestamp=msg.get(
+                            "timestamp", datetime.now(timezone.utc).isoformat()
+                        ),
+                        source_name=msg.get("source_name", self.source_name),
+                        source_id=msg.get("source_id", self.source_id),
+                        level=msg.get("level", "info"),
+                        message=msg.get("message", ""),
+                        image_base64=msg.get("image_base64"),
+                    )
                 await self.ws_manager.broadcast(msg)
         await super()._handle_result(frame, result)

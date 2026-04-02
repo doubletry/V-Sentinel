@@ -9,12 +9,13 @@ into the full V-Sentinel backend without any changes.
 from __future__ import annotations
 
 import asyncio
+import base64
 import queue
 import subprocess
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 import cv2
 import numpy as np
@@ -25,16 +26,20 @@ from core.constants import (
     DRAW_DETECTION_COLOR,
     DRAW_FONT_SCALE,
     DRAW_FONT_THICKNESS,
+    FRAME_SAMPLE_INTERVAL,
     PUSH_FPS,
     PUSH_PRESET,
+    RTSP_MAX_RECONNECT_ATTEMPTS,
+    RTSP_RECONNECT_DELAY,
     RTSP_TRANSPORT,
 )
 
 try:
-    from turbojpeg import TurboJPEG
+    from turbojpeg import TurboJPEG, TJPF_RGB
     _jpeg = TurboJPEG()
 except (ImportError, RuntimeError) as _exc:
     _jpeg = None
+    TJPF_RGB = None  # type: ignore[assignment]
     import warnings
     warnings.warn(
         f"TurboJPEG unavailable ({_exc}), falling back to cv2.imencode",
@@ -209,8 +214,9 @@ class BaseVideoProcessor(ABC):
 
     def _frame_reader(self, loop: asyncio.AbstractEventLoop) -> None:
         """Read frames from RTSP stream using ffmpeg subprocess (blocking I/O,
-        runs in thread).
+        runs in thread).  Automatically reconnects on stream failure.
         使用 ffmpeg 子进程从 RTSP 流读取帧（阻塞 I/O，在线程中运行）。
+        流失败时自动重连。
 
         ffmpeg decodes the RTSP stream and outputs raw RGB24 pixels to stdout.
         Using TCP transport avoids the green-frame / mosaic artifacts caused by
@@ -220,117 +226,145 @@ class BaseVideoProcessor(ABC):
         使用 TCP 传输避免 UDP 丢包导致的绿帧/马赛克。图像仅编码一次为 RGB JPEG；
         下游代码复用编码字节，无需重新编码。
         """
-        logger.info("Frame reader started for {}", self.rtsp_url)
+        import time as _time
 
-        # Step 1 — probe stream dimensions with ffprobe so we know how many
-        # bytes to read per frame.  Fallback to a default if probing fails.
-        # 第 1 步——用 ffprobe 探测流尺寸以确定每帧读取的字节数。探测失败则使用默认值。
-        probe_w, probe_h = 1920, 1080
-        try:
-            probe_cmd = [
-                "ffprobe",
-                "-v", "error",
-                "-rtsp_transport", RTSP_TRANSPORT,
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=p=0:s=x",
-                self.rtsp_url,
-            ]
-            probe_out = subprocess.check_output(
-                probe_cmd, timeout=10, stderr=subprocess.DEVNULL
-            ).decode().strip()
-            if "x" in probe_out:
-                parts = probe_out.split("x")
-                probe_w, probe_h = int(parts[0]), int(parts[1])
-        except Exception as exc:
-            logger.warning(
-                "ffprobe failed for {} (using {}x{}): {}",
-                self.rtsp_url, probe_w, probe_h, exc,
+        logger.info("Frame reader started for {}", self.rtsp_url)
+        reconnect_attempts = 0
+        max_attempts = RTSP_MAX_RECONNECT_ATTEMPTS  # 0 = unlimited
+        frame_counter = 0  # for FRAME_SAMPLE_INTERVAL skipping
+
+        while not self._stop_event.is_set():
+            # Step 1 — probe stream dimensions
+            probe_w, probe_h = 1920, 1080
+            try:
+                probe_cmd = [
+                    "ffprobe",
+                    "-v", "error",
+                    "-rtsp_transport", RTSP_TRANSPORT,
+                    "-select_streams", "v:0",
+                    "-show_entries", "stream=width,height",
+                    "-of", "csv=p=0:s=x",
+                    self.rtsp_url,
+                ]
+                probe_out = subprocess.check_output(
+                    probe_cmd, timeout=10, stderr=subprocess.DEVNULL
+                ).decode().strip()
+                if "x" in probe_out:
+                    parts = probe_out.split("x")
+                    probe_w, probe_h = int(parts[0]), int(parts[1])
+            except Exception as exc:
+                logger.warning(
+                    "ffprobe failed for {} (using {}x{}): {}",
+                    self.rtsp_url, probe_w, probe_h, exc,
+                )
+
+            probe_w -= probe_w % 2
+            probe_h -= probe_h % 2
+            frame_bytes = probe_w * probe_h * 3
+
+            logger.info(
+                "Frame reader: {}x{} ({} bytes/frame) for {}",
+                probe_w, probe_h, frame_bytes, self.rtsp_url,
             )
 
-        # Ensure even dims for downstream yuv420p encoding.
-        # 确保偶数尺寸以适配下游 yuv420p 编码。
-        probe_w -= probe_w % 2
-        probe_h -= probe_h % 2
+            # Step 2 — launch ffmpeg reader
+            cmd = [
+                "ffmpeg",
+                "-rtsp_transport", RTSP_TRANSPORT,
+                "-i", self.rtsp_url,
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "-s", f"{probe_w}x{probe_h}",
+                "-an",
+                "-sn",
+                "-vf", f"scale={probe_w}:{probe_h}",
+                "pipe:1",
+            ]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                bufsize=frame_bytes * 2,
+            )
 
-        frame_bytes = probe_w * probe_h * 3  # RGB24
-        logger.info(
-            "Frame reader: {}x{} ({} bytes/frame) for {}",
-            probe_w, probe_h, frame_bytes, self.rtsp_url,
-        )
+            stream_ok = False
+            try:
+                while not self._stop_event.is_set():
+                    raw = proc.stdout.read(frame_bytes)  # type: ignore[union-attr]
+                    if len(raw) != frame_bytes:
+                        if not self._stop_event.is_set():
+                            logger.warning(
+                                "Frame reader got {} bytes (expected {}), stream may have ended",
+                                len(raw), frame_bytes,
+                            )
+                        break
 
-        # Step 2 — launch ffmpeg reader.
-        # 第 2 步——启动 ffmpeg 读取进程。
-        cmd = [
-            "ffmpeg",
-            "-rtsp_transport", RTSP_TRANSPORT,
-            "-i", self.rtsp_url,
-            "-f", "rawvideo",
-            "-pix_fmt", "rgb24",
-            "-s", f"{probe_w}x{probe_h}",
-            "-an",                        # no audio / 无音频
-            "-sn",                        # no subtitles / 无字幕
-            "-vf", f"scale={probe_w}:{probe_h}",
-            "pipe:1",
-        ]
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=frame_bytes * 2,
-        )
+                    stream_ok = True
+                    reconnect_attempts = 0  # reset on successful read
 
-        try:
-            while not self._stop_event.is_set():
-                raw = proc.stdout.read(frame_bytes)  # type: ignore[union-attr]
-                if len(raw) != frame_bytes:
-                    # Stream ended or read error.
-                    # 流结束或读取错误。
-                    if not self._stop_event.is_set():
-                        logger.warning(
-                            "Frame reader got {} bytes (expected {}), stream may have ended",
-                            len(raw), frame_bytes,
-                        )
-                    break
+                    # Frame sampling: skip frames according to interval
+                    # 帧采样：按间隔跳过帧
+                    frame_counter += 1
+                    if FRAME_SAMPLE_INTERVAL > 1 and (frame_counter % FRAME_SAMPLE_INTERVAL) != 0:
+                        continue
 
-                rgb = np.frombuffer(raw, dtype=np.uint8).reshape(
-                    (probe_h, probe_w, 3)
-                )
-
-                # Encode RGB directly — single encode, reused downstream
-                # 直接编码 RGB — 仅编码一次，下游复用
-                if _jpeg is not None:
-                    from turbojpeg import TJPF_RGB
-                    encoded = _jpeg.encode(rgb, quality=85, pixel_format=TJPF_RGB)
-                else:
-                    # Fallback: cv2.imencode expects BGR, so convert
-                    # 回退：cv2.imencode 需要 BGR，因此转换
-                    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-                    ok, buf = cv2.imencode(
-                        ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85]
+                    rgb = np.frombuffer(raw, dtype=np.uint8).reshape(
+                        (probe_h, probe_w, 3)
                     )
-                    encoded = buf.tobytes() if ok else b""
 
-                loop.call_soon_threadsafe(
-                    self._enqueue_frame_from_reader, rgb, encoded
-                )
-        except Exception as exc:
-            if not self._stop_event.is_set():
-                logger.exception("Frame reader error for {}: {}", self.rtsp_url, exc)
-        finally:
-            try:
-                proc.terminate()
-                proc.wait(timeout=3)
-            except Exception:
+                    if _jpeg is not None:
+                        from turbojpeg import TJPF_RGB
+                        encoded = _jpeg.encode(rgb, quality=85, pixel_format=TJPF_RGB)
+                    else:
+                        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+                        ok, buf = cv2.imencode(
+                            ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85]
+                        )
+                        encoded = buf.tobytes() if ok else b""
+
+                    loop.call_soon_threadsafe(
+                        self._enqueue_frame_from_reader, rgb, encoded
+                    )
+            except Exception as exc:
+                if not self._stop_event.is_set():
+                    logger.exception("Frame reader error for {}: {}", self.rtsp_url, exc)
+            finally:
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    proc.wait(timeout=3)
                 except Exception:
-                    pass
-            try:
-                loop.call_soon_threadsafe(self._enqueue_reader_sentinel)
-            except Exception:
-                pass
-            logger.info("Frame reader exited for {}", self.rtsp_url)
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+
+            # Reconnect logic
+            if self._stop_event.is_set():
+                break
+
+            reconnect_attempts += 1
+            if max_attempts > 0 and reconnect_attempts > max_attempts:
+                logger.error(
+                    "RTSP reconnect limit ({}) reached for {}",
+                    max_attempts, self.rtsp_url,
+                )
+                break
+
+            logger.warning(
+                "RTSP stream lost for {}, reconnecting in {:.1f}s (attempt {}{})",
+                self.rtsp_url,
+                RTSP_RECONNECT_DELAY,
+                reconnect_attempts,
+                f"/{max_attempts}" if max_attempts > 0 else "",
+            )
+            _time.sleep(RTSP_RECONNECT_DELAY)
+
+        # Send sentinel when reader fully exits
+        try:
+            loop.call_soon_threadsafe(self._enqueue_reader_sentinel)
+        except Exception:
+            pass
+        logger.info("Frame reader exited for {}", self.rtsp_url)
 
     # ── Abstract method ───────────────────────────────────────────────────
 
@@ -368,6 +402,142 @@ class BaseVideoProcessor(ABC):
     ) -> AnalysisResult:
         """Process a single frame. Implement your AI logic here."""
         ...
+
+    # ── Reusable inference helpers / 可复用推理辅助方法 ───────────────────
+
+    @staticmethod
+    def _bbox_to_roi_points(
+        bbox: list[int] | tuple[int, int, int, int],
+        width: int,
+        height: int,
+    ) -> list[dict[str, int]]:
+        """Convert an [x1, y1, x2, y2] bbox to ROI polygon points.
+        将 [x1, y1, x2, y2] 检测框转换为 ROI 多边形点。"""
+        x1, y1, x2, y2 = bbox
+        x1 = max(int(x1), 0)
+        y1 = max(int(y1), 0)
+        x2 = min(int(x2), width)
+        y2 = min(int(y2), height)
+        return [
+            {"x": x1, "y": y1},
+            {"x": x2, "y": y1},
+            {"x": x2, "y": y2},
+            {"x": x1, "y": y2},
+        ]
+
+    async def _do_detect(
+        self,
+        *,
+        shape: tuple[int, ...],
+        model_name: str,
+        conf: float = 0.5,
+        model_roi: list[dict] | None = None,
+        image_bytes: bytes | None = None,
+        image_key: str | None = None,
+        images: list[dict] | None = None,
+        on_item: Callable[[dict], dict | None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Run reusable detection and optionally map each detection result.
+        执行可复用检测，并可选地映射每个检测结果。"""
+        if self.vengine is None:
+            return {"detections": []}
+
+        detect_kwargs: dict[str, object] = {
+            "shape": shape,
+            "model_name": model_name,
+            "conf": conf,
+        }
+        if model_roi is not None:
+            detect_kwargs["model_roi"] = model_roi
+        if image_bytes is not None:
+            detect_kwargs["image_bytes"] = image_bytes
+        if image_key is not None:
+            detect_kwargs["image_key"] = image_key
+        if images is not None:
+            detect_kwargs["images"] = images
+
+        raw = await self.vengine.detect(**detect_kwargs)
+        detections: list[dict] = []
+        for item in raw:
+            mapped = on_item(item) if on_item is not None else item
+            if mapped is not None:
+                detections.append(mapped)
+        return {"detections": detections}
+
+    async def _do_ocr(
+        self,
+        ocr_rois: list[dict],
+        *,
+        model_name: str,
+        conf: float = 0.3,
+        on_item: Callable[[dict], None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Run reusable batched OCR and optionally post-process each result.
+        执行可复用的批量 OCR，并可选地对每个结果做后处理。"""
+        if self.vengine is None or not ocr_rois:
+            return {"ocr_texts": []}
+
+        raw = await self.vengine.ocr(
+            shape=None,
+            model_name=model_name,
+            conf=conf,
+            images=ocr_rois,
+        )
+        ocr_texts: list[dict] = []
+        for item in raw:
+            if on_item is not None:
+                on_item(item)
+            ocr_texts.append(item)
+        return {"ocr_texts": ocr_texts}
+
+    async def _do_classify(
+        self,
+        cls_rois: list[dict],
+        *,
+        model_name: str,
+        on_item: Callable[[dict], dict | None] | None = None,
+    ) -> dict[str, list[dict]]:
+        """Run reusable batched classification and map results if needed.
+        执行可复用的批量分类，并在需要时映射结果。"""
+        if self.vengine is None or not cls_rois:
+            return {"classifications": []}
+
+        raw = await self.vengine.classify(
+            shape=None,
+            model_name=model_name,
+            images=cls_rois,
+        )
+        classifications: list[dict] = []
+        for item in raw:
+            mapped = on_item(item) if on_item is not None else item
+            if mapped is not None:
+                classifications.append(mapped)
+        return {"classifications": classifications}
+
+    def _encode_thumbnail(
+        self, frame: np.ndarray | None, max_width: int = 320
+    ) -> str | None:
+        """Encode a frame as a base64 JPEG thumbnail (RGB channel order).
+        将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
+        if frame is None:
+            return None
+
+        h, w = frame.shape[:2]
+        if w > max_width:
+            scale = max_width / w
+            frame = cv2.resize(
+                frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
+            )
+
+        if _jpeg is not None:
+            encoded = _jpeg.encode(frame, quality=60, pixel_format=TJPF_RGB)
+        else:
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
+            if not ok:
+                return None
+            encoded = buf.tobytes()
+        return base64.b64encode(encoded).decode()
 
     # ── Drawing helpers ───────────────────────────────────────────────────
 

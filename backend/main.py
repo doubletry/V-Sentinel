@@ -14,7 +14,7 @@ from backend.api import settings as settings_router
 from backend.api import sources as sources_router
 from backend.api import ws as ws_module
 from backend.config import settings
-from backend.db.database import get_all_settings, init_db
+from backend.db.database import close_db, get_all_settings, init_db
 from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
@@ -88,6 +88,7 @@ async def lifespan(app: FastAPI):
     await processor_manager.stop_all()
     await processor_manager.stop_agent()
     await vengine_client.close()
+    await close_db()
 
     logger.info("{} shutdown complete", settings.app_name)
 

@@ -289,26 +289,6 @@ class TestCoreBackendVEngineInheritance:
         assert not hasattr(client, "_config")
 
 
-class TestCoreProtoReexport:
-    """Verify backend.proto re-exports from core.proto.
-    验证 backend.proto 从 core.proto 重新导出。"""
-
-    def test_base_pb2_same_module(self):
-        from backend.proto import base_pb2 as backend_base
-        from core.proto import base_pb2 as core_base
-        assert backend_base is core_base
-
-    def test_detection_pb2_same_module(self):
-        from backend.proto import detection_service_pb2 as backend_det
-        from core.proto import detection_service_pb2 as core_det
-        assert backend_det is core_det
-
-    def test_classification_pb2_same_module(self):
-        from backend.proto import classification_service_pb2 as backend_cls
-        from core.proto import classification_service_pb2 as core_cls
-        assert backend_cls is core_cls
-
-
 class TestCoreExampleProcessorBatchClassification:
     async def test_process_frame_reuses_image_key_for_person_rois(self):
         from core.example_processor import ExampleProcessor
@@ -395,14 +375,20 @@ class TestCoreExampleProcessorBatchClassification:
             {
                 "detection_label": "person",
                 "classification_label": "adult",
+                "stable_label": "adult",
+                "raw_label": "adult",
                 "confidence": 0.91,
                 "bbox": [10, 20, 50, 80],
+                "person_bbox": [10, 20, 50, 80],
             },
             {
                 "detection_label": "person",
                 "classification_label": "child",
+                "stable_label": "child",
+                "raw_label": "child",
                 "confidence": 0.83,
                 "bbox": [200, 220, 260, 320],
+                "person_bbox": [200, 220, 260, 320],
             },
         ]
 

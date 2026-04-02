@@ -92,6 +92,7 @@ export default {
   videoPlayer: {
     connecting: '连接中...',
     connectionFailed: '连接失败',
+    connectionLost: '连接断开，正在重连...',
   },
   messages: {
     title: '实时消息',
@@ -129,6 +130,10 @@ export default {
     title: '平台设置',
     subtitle: '本页面为独立设置页面，可直接滚动查看并修改所有系统参数。',
     interface: '界面设置',
+    processorPlugin: '处理器插件',
+    processorPluginHint: '默认提供 truck 和 example 两个内置插件，也可以直接输入已在 backend 注册的自定义插件名。修改后需停止并重新启动分析服务才会生效。',
+    processorPluginTruck: 'truck（车辆到访场景）',
+    processorPluginExample: 'example（通用示例场景）',
     systemLanguage: '系统语言',
     siteTitle: '网站标题',
     siteDescription: '网站描述',
@@ -172,6 +177,9 @@ export default {
     maxCpuWorkers: 'CPU 线程上限',
     saveSettings: '保存设置',
     settingsSaved: '设置保存成功',
+    settingsSavedRestartRequired: '设置已保存，处理器插件切换将在重启分析服务后生效',
+    settingsSavedRestarted: '设置已保存，并已自动重启 {count} 路分析服务',
+    settingsSavedRestartPartial: '设置已保存，但自动重启仅成功 {restarted} 路，另有 {failed} 路失败，请检查服务日志',
     backendService: '后台服务控制',
     backendServiceTip: '修改配置前可先一键停止全部分析服务，保存后再重新开启。',
     runningStatus: '运行中：{count} 路',

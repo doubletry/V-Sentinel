@@ -56,8 +56,8 @@ class TrackedTruck:
 
     track_id: int
     bbox: list[int]  # [x1, y1, x2, y2] — latest detection box / 最新检测框
-    first_seen: float  # monotonic time when first detected / 首次检测的单调时间
-    last_seen: float  # monotonic time of last detection / 最后检测的单调时间
+    first_seen: float  # wall-clock UNIX time when first detected / 首次检测的 UNIX 时间
+    last_seen: float  # wall-clock UNIX time of last detection / 最后检测的 UNIX 时间
     presence_frames: int = 1  # consecutive frames detected / 连续检测帧数
     confirmed: bool = False  # True once min_presence_frames reached / 达到最小帧数后为 True
     frames_since_ocr: int = 0  # frames since last OCR attempt / 距上次 OCR 的帧数
@@ -277,7 +277,7 @@ class TruckTracker:
            如果没有被跟踪的卡车，选择最佳候选并开始累计 ``presence_frames``。
         """
         self._frame_idx += 1
-        now = time.monotonic()
+        now = time.time()
         decision = TrackingDecision()
 
         # Pick the single best truck detection (highest confidence).

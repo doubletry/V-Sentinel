@@ -203,20 +203,22 @@ run_processor(
 )
 ```
 
-开发完成后，将处理器放入 `backend/processing/` 并在 `ProcessorManager` 中注册即可——
-无需修改代码。
+开发完成后，在 `backend/processing/` 中增加一个薄适配层，
+并在 `backend/processing/registry.py` 中注册，再通过 `processor_plugin`
+设置切换即可。
 
 详见 [`core/README.md`](core/README.md)。
+插件化接入方式详见 [`docs/processor-plugin-usage.md`](docs/processor-plugin-usage.md)。
 
 ---
 
 ## Proto 生成
 
-仓库已包含预生成的桩文件，位于 `backend/proto/`。如需从 `.proto` 源文件重新生成：
+`.proto` 源文件与预生成的 Python 桩文件现统一位于 `core/proto/`。
+如需重新生成：
 
 ```bash
-cd backend/proto
-./generate.sh
+bash core/proto/generate.sh
 ```
 
 ---
@@ -251,7 +253,15 @@ class MyProcessor(BaseVideoProcessor):
         return result
 ```
 
-在 `ProcessorManager.start_processor()` 中注册即可。
+在 `backend/processing/registry.py` 中注册，然后设置：
+
+```json
+{
+    "processor_plugin": "my_scene"
+}
+```
+
+详见 [`docs/processor-plugin-usage.md`](docs/processor-plugin-usage.md)。
 
 ---
 

@@ -6,6 +6,7 @@ import { setI18nLocale } from '../i18n/index.js'
 
 const DEFAULT_UI_SETTINGS = {
   ui_language: 'zh-CN',
+  processor_plugin: 'truck',
   site_title: config.siteName,
   site_description: config.siteDescription,
   favicon_url: '/favicon.ico',

@@ -75,7 +75,7 @@ if [[ -n "$HTTPS_PROXY_VALUE" ]]; then
   fi
 fi
 
-if [[ "$needs_host_gateway" == true ]]; then
+if [[ "$needs_host_gateway" = true ]]; then
   extra_args+=(--add-host=host.docker.internal:host-gateway)
 fi
 

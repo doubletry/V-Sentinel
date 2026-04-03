@@ -516,8 +516,8 @@ class BaseVideoProcessor(ABC):
         max_width: int = 1920,
         max_height: int = 1080,
     ) -> str | None:
-        """Encode a message image as a base64 JPEG preview/original.
-        将消息图像编码为 base64 JPEG 预览/原图。"""
+        """Encode a message image as a base64 JPEG, capped at Full HD by default.
+        将消息图像编码为 base64 JPEG，默认限制在 Full HD 尺寸内。"""
         if frame is None:
             return None
 

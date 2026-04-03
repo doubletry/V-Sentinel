@@ -8,6 +8,7 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 build_args=()
 extra_args=()
 
+# Return the first non-empty proxy-related value from a list of candidates.
 first_non_empty() {
   local value
   for value in "$@"; do
@@ -19,6 +20,7 @@ first_non_empty() {
   return 0
 }
 
+# Rewrite localhost/127.0.0.1 proxy URLs to host.docker.internal for Docker builds.
 rewrite_proxy_host() {
   PROXY_VALUE="$1" python - <<'PY'
 import os

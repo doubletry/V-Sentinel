@@ -58,15 +58,12 @@ PY
 # Return the first readable CA certificate path from common shell/env settings.
 first_existing_file() {
   local value
+  if ! command -v openssl >/dev/null 2>&1; then
+    return 0
+  fi
   for value in "$@"; do
     if [[ -n "${value:-}" && -f "$value" ]]; then
-      if command -v openssl >/dev/null 2>&1; then
-        if openssl x509 -in "$value" -noout >/dev/null 2>&1; then
-          printf '%s' "$value"
-          return 0
-        fi
-      elif head -n 20 "$value" | grep -q '^-----BEGIN CERTIFICATE-----' \
-        && tail -n 20 "$value" | grep -q '^-----END CERTIFICATE-----'; then
+      if openssl x509 -in "$value" -noout >/dev/null 2>&1; then
         printf '%s' "$value"
         return 0
       fi

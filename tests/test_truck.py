@@ -298,10 +298,10 @@ class TestTruckTracker:
         tid = list(tracker.get_all_tracks().keys())[0]
 
         # First two: not yet stable
-        assert tracker.feed_action(tid, "action1") == ""
-        assert tracker.feed_action(tid, "action1") == ""
+        assert tracker.feed_action(tid, "HandOverKeys") == ""
+        assert tracker.feed_action(tid, "HandOverKeys") == ""
         # Third: now stable
-        assert tracker.feed_action(tid, "action1") == "HandOverKeys"
+        assert tracker.feed_action(tid, "HandOverKeys") == "HandOverKeys"
 
     def test_action_flicker_filtered(self):
         """Flickering labels are filtered by majority vote.
@@ -310,11 +310,11 @@ class TestTruckTracker:
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
-        tracker.feed_action(tid, "action1")
-        tracker.feed_action(tid, "action2")  # flicker
-        tracker.feed_action(tid, "action1")
-        tracker.feed_action(tid, "action1")
-        # action1 appeared 3 times, action2 only once
+        tracker.feed_action(tid, "HandOverKeys")
+        tracker.feed_action(tid, "PlaceWheelChock")  # flicker
+        tracker.feed_action(tid, "HandOverKeys")
+        tracker.feed_action(tid, "HandOverKeys")
+        # HandOverKeys appeared 3 times, PlaceWheelChock only once
         assert tracker.get_track(tid).stable_action == "HandOverKeys"
 
     def test_confirmed_actions_accumulate(self):
@@ -324,15 +324,15 @@ class TestTruckTracker:
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
-        # Confirm action1 (2 consecutive → stable)
-        tracker.feed_action(tid, "action1")
-        tracker.feed_action(tid, "action1")
+        # Confirm HandOverKeys (2 consecutive → stable)
+        tracker.feed_action(tid, "HandOverKeys")
+        tracker.feed_action(tid, "HandOverKeys")
         assert "HandOverKeys" in tracker.get_track(tid).confirmed_actions
 
-        # Confirm action2 (feed enough to become the majority)
-        tracker.feed_action(tid, "action2")
-        tracker.feed_action(tid, "action2")
-        tracker.feed_action(tid, "action2")
+        # Confirm PlaceWheelChock (feed enough to become the majority)
+        tracker.feed_action(tid, "PlaceWheelChock")
+        tracker.feed_action(tid, "PlaceWheelChock")
+        tracker.feed_action(tid, "PlaceWheelChock")
 
         track = tracker.get_track(tid)
         assert "HandOverKeys" in track.confirmed_actions
@@ -345,12 +345,12 @@ class TestTruckTracker:
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
-        tracker.feed_action(tid, "other")
-        tracker.feed_action(tid, "other")
-        tracker.feed_action(tid, "other")
+        tracker.feed_action(tid, "Other")
+        tracker.feed_action(tid, "Other")
+        tracker.feed_action(tid, "Other")
 
         track = tracker.get_track(tid)
-        assert "other" not in track.confirmed_actions
+        assert "Other" not in track.confirmed_actions
         assert track.stable_action == "Other"
 
     def test_missing_actions_in_visit(self):
@@ -366,9 +366,9 @@ class TestTruckTracker:
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
-        # Only confirm action1
-        tracker.feed_action(tid, "action1")
-        tracker.feed_action(tid, "action1")
+        # Only confirm HandOverKeys
+        tracker.feed_action(tid, "HandOverKeys")
+        tracker.feed_action(tid, "HandOverKeys")
 
         # Truck leaves
         decision = tracker.update(FrameAnalysis())
@@ -386,15 +386,7 @@ class TestTruckTracker:
         """feed_action on unknown track_id returns empty string.
         对未知 track_id 调用 feed_action 返回空字符串。"""
         tracker = TruckTracker()
-        assert tracker.feed_action(999, "action1") == ""
-
-    def test_feed_action_normalizes_aliases(self):
-        tracker = TruckTracker(stability_min_count=1, min_presence_frames=1)
-        tracker.update(FrameAnalysis(trucks=[_truck_det()]))
-        tid = list(tracker.get_all_tracks().keys())[0]
-
-        assert tracker.feed_action(tid, "TakePhotosOfSeal") == "TakePhotosOfSeal"
-        assert "TakePhotosOfSeal" in tracker.get_track(tid).confirmed_actions
+        assert tracker.feed_action(999, "HandOverKeys") == ""
 
     def test_single_truck_replaces_when_old_leaves(self):
         """Only one truck tracked at a time; new one starts after old leaves.
@@ -556,7 +548,7 @@ class TestTruckMonitorProcessor:
             {"text": "ABC123", "confidence": 0.85, "points": [], "image_id": 0},
         ]
         vengine.classify.return_value = [
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(
@@ -639,7 +631,7 @@ class TestTruckMonitorProcessor:
             {"text": "ABC", "confidence": 0.9, "points": [], "image_id": 0},
         ]
         vengine.classify.return_value = [
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(
@@ -805,7 +797,7 @@ class TestTruckProcessorRoiFlow:
             {"text": "X", "confidence": 0.5, "points": [], "image_id": 0},
         ]
         vengine.classify.return_value = [
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(
@@ -852,7 +844,7 @@ class TestTruckProcessorRoiFlow:
             {"text": "ABC", "confidence": 0.9, "points": [], "image_id": 0},
         ]
         vengine.classify.return_value = [
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(
@@ -894,7 +886,7 @@ class TestTruckProcessorRoiFlow:
             {"text": "ABC", "confidence": 0.9, "points": [], "image_id": 0},
         ]
         vengine.classify.return_value = [
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(
@@ -971,7 +963,7 @@ class TestTruckProcessorRoiFlow:
             {"text": "XY789", "confidence": 0.88, "points": [], "image_id": 0},
         ]
         vengine.classify.return_value = [
-            {"label": "action2", "confidence": 0.85, "class_id": 2, "image_id": 0},
+            {"label": "PlaceWheelChock", "confidence": 0.85, "class_id": 2, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(
@@ -1027,7 +1019,7 @@ class TestDrawOnFrameWithClassifications:
                  "confidence": 0.9, "label": "truck"},
             ],
             classifications=[
-                {"stable_label": "action1", "raw_label": "action1",
+                {"stable_label": "HandOverKeys", "raw_label": "HandOverKeys",
                  "confidence": 0.9,
                  "person_bbox": [30, 30, 80, 150]},
             ],
@@ -1328,9 +1320,9 @@ class TestProcessorKeyMessages:
         ]
         vengine.ocr.return_value = []
         vengine.classify.return_value = [
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
-            {"label": "action1", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
+            {"label": "HandOverKeys", "confidence": 0.9, "class_id": 1, "image_id": 0},
         ]
 
         proc = TruckMonitorProcessor(

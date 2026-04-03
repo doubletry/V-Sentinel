@@ -131,11 +131,11 @@ class AsyncEmailClient:
         writer = csv.writer(output)
         writer.writerow(["序号", "区域", "回放位置或IP", "抽查内容/类型", "AI视觉分析结果"])
         writer.writerows(TruckAnalysisAgent.build_daily_summary_table_rows(visits))
-        encoded = ("\ufeff" + output.getvalue()).encode("utf-8")
+        csv_bytes_with_bom = ("\ufeff" + output.getvalue()).encode("utf-8")
         filename_date = str(until_iso or "")[:10] or "daily-summary"
         return email_pb2.Attachment(
             filename=f"truck-daily-summary-{filename_date}.csv",
-            data=encoded,
+            data=csv_bytes_with_bom,
             content_type="text/csv; charset=utf-8",
         )
 

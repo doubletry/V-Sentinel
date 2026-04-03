@@ -17,7 +17,12 @@ from backend.api import sources as sources_router
 from backend.api import vehicle_events as vehicle_events_router
 from backend.api import ws as ws_module
 from backend.config import settings
-from backend.db.database import close_db, get_all_settings, init_db, save_analysis_message
+from backend.db.database import (
+    close_db,
+    get_all_settings,
+    init_db,
+    save_analysis_message,
+)
 from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient

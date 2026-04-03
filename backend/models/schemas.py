@@ -91,6 +91,7 @@ class AnalysisMessage(BaseModel):
     source_id: str
     level: str  # "info", "warning", "alert" / 信息、警告、告警
     message: str
+    image_url: str | None = None
     image_base64: str | None = None
 
 

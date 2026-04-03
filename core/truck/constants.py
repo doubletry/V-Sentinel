@@ -33,8 +33,8 @@ REQUIRED_ACTIONS: frozenset[str] = frozenset(
         "PlaceWheelChock",
         "InnerInspectionOfTruck",
         "ExteriorInspectionOfTruck",
-        "TakePhotosOfGoods",
-        "TakePhotosOfSeal",
+        "TakePhotoOfGoods",
+        "TakePhotoOfSeal",
     }
 )
 """Required actions during a truck visit. 卡车到访期间要求识别到的动作。"""
@@ -80,6 +80,19 @@ LABEL_EN_TO_ZH: dict[str, str] = {
 }
 """English-to-Chinese labels for truck-scene messages. truck 场景中英文标签映射。"""
 
+ACTION_LABEL_ALIASES: dict[str, str] = {
+    "action1": "HandOverKeys",
+    "action2": "PlaceWheelChock",
+    "action3": "InnerInspectionOfTruck",
+    "action4": "ExteriorInspectionOfTruck",
+    "action5": "TakePhotoOfGoods",
+    "action6": "TakePhotoOfSeal",
+    "other": "Other",
+    "takephotosofgoods": "TakePhotoOfGoods",
+    "takephotosofseal": "TakePhotoOfSeal",
+}
+"""Canonical aliases for truck-scene classification labels. truck 场景分类标签规范化映射。"""
+
 
 def translate_label(label: str) -> str:
     """Translate one truck-scene label to Chinese when known.
@@ -91,3 +104,10 @@ def translate_labels(labels: Iterable[str] | None) -> list[str]:
     """Translate a list of truck-scene labels to Chinese.
     将一组 truck 场景标签翻译为中文。"""
     return [translate_label(str(label)) for label in labels or []]
+
+
+def normalize_action_label(label: str) -> str:
+    """Normalize one truck-scene classification label to its canonical value.
+    将单个 truck 场景分类标签归一化为规范值。"""
+    text = str(label or "").strip()
+    return ACTION_LABEL_ALIASES.get(text, ACTION_LABEL_ALIASES.get(text.lower(), text))

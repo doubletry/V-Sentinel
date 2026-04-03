@@ -908,7 +908,7 @@ class BaseVideoProcessor(ABC):
                         "-muxdelay", "0",
                         "-muxpreload", "0",
                         "-f", "rtsp",
-                        "-rtsp_transport", "tcp",
+                        "-rtsp_transport", "udp",
                         rtsp_url,
                     ]
                     self._push_proc = subprocess.Popen(

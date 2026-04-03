@@ -302,7 +302,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
                         f"到达时间：{enter_time}\n"
                         f"离开时间：{exit_time}"
                     ),
-                    "、".join(missing) if missing else "无异常",
+                    f"未执行 {'、'.join(missing)}" if missing else "无异常",
                 ]
             )
         return rows

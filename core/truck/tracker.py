@@ -44,6 +44,7 @@ from core.truck.constants import (
     REQUIRED_ACTIONS,
     STABILITY_MIN_COUNT,
     STABILITY_WINDOW,
+    normalize_action_label,
 )
 from core.truck.plate import should_replace_plate
 
@@ -420,7 +421,7 @@ class TruckTracker:
         """
         if self._track is None or self._track.track_id != track_id:
             return ""
-        normalized_label = label
+        normalized_label = normalize_action_label(label)
         self._track.action_history.append(normalized_label)
         stable = _majority_vote(
             self._track.action_history,

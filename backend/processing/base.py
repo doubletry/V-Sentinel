@@ -115,6 +115,7 @@ class BaseVideoProcessor(_CoreBaseVideoProcessor):
                         source_id=msg.get("source_id", self.source_id),
                         level=msg.get("level", "info"),
                         message=msg.get("message", ""),
+                        image_url=msg.get("image_url"),
                         image_base64=msg.get("image_base64"),
                     )
                 await self.ws_manager.broadcast(msg)

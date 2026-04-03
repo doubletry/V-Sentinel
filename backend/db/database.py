@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import aiosqlite
 from loguru import logger
@@ -65,10 +67,13 @@ CREATE TABLE IF NOT EXISTS analysis_messages (
     source_id TEXT NOT NULL,
     level TEXT NOT NULL,
     message TEXT NOT NULL,
+    image_url TEXT,
     image_base64 TEXT,
     created_at TEXT NOT NULL
 );
 """
+
+MESSAGE_IMAGE_URL_PREFIX = "/api/messages/images"
 
 PRAGMA_FK = "PRAGMA foreign_keys = ON;"
 PRAGMA_WAL = "PRAGMA journal_mode = WAL;"
@@ -175,6 +180,7 @@ async def init_db() -> None:
         await db.execute(CREATE_SETTINGS_TABLE)
         await db.execute(CREATE_VEHICLE_VISITS_TABLE)
         await db.execute(CREATE_ANALYSIS_MESSAGES_TABLE)
+        await _ensure_column_exists(db, "analysis_messages", "image_url", "TEXT")
         for key, value in DEFAULT_APP_SETTINGS.items():
             await db.execute(
                 "INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)",
@@ -188,6 +194,89 @@ def _now_iso() -> str:
     """Return current UTC time as an ISO 8601 string.
     返回当前 UTC 时间的 ISO 8601 字符串。"""
     return datetime.now(timezone.utc).isoformat()
+
+
+async def _ensure_column_exists(
+    db: aiosqlite.Connection,
+    table_name: str,
+    column_name: str,
+    column_sql: str,
+) -> None:
+    """Add a missing SQLite column for lightweight schema migrations.
+    为轻量级 SQLite 迁移补充缺失列。"""
+    async with db.execute(f"PRAGMA table_info({table_name})") as cursor:
+        rows = await cursor.fetchall()
+    if any(str(row[1]) == column_name for row in rows):
+        return
+    await db.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
+
+
+def get_message_image_dir() -> Path:
+    """Return the filesystem directory used for persisted message thumbnails.
+    返回持久化消息缩略图使用的文件系统目录。"""
+    return Path(_DB_PATH).resolve().parent / "message_thumbnails"
+
+
+def _build_message_image_url(relative_path: str) -> str:
+    return f"{MESSAGE_IMAGE_URL_PREFIX}/{relative_path.lstrip('/')}"
+
+
+def _message_image_path_from_url(image_url: str) -> Path | None:
+    text = str(image_url or "").strip()
+    prefix = f"{MESSAGE_IMAGE_URL_PREFIX}/"
+    if not text.startswith(prefix):
+        return None
+    relative = text[len(prefix):].strip("/")
+    if not relative:
+        return None
+    return get_message_image_dir() / relative
+
+
+def resolve_message_image_path(relative_path: str) -> Path | None:
+    """Resolve one public relative image path inside the thumbnail directory.
+    解析缩略图目录中的公开相对图片路径。"""
+    text = str(relative_path or "").strip().strip("/")
+    if not text:
+        return None
+    root = get_message_image_dir().resolve()
+    candidate = (root / text).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def materialize_message_image(image_base64: str | None, *, timestamp: str = "") -> str | None:
+    """Persist one base64 message image to disk and return its public URL.
+    将单条消息的 base64 图片落盘并返回其公开 URL。"""
+    payload = str(image_base64 or "").strip()
+    if not payload:
+        return None
+    try:
+        raw = base64.b64decode(payload, validate=True)
+    except Exception as exc:
+        logger.warning("Failed to decode message image payload: {}", exc)
+        return None
+    day = str(timestamp or "")[:10] or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    directory = get_message_image_dir() / day
+    directory.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}.jpg"
+    file_path = directory / filename
+    file_path.write_bytes(raw)
+    return _build_message_image_url(f"{day}/{filename}")
+
+
+def _delete_message_image(image_url: str | None) -> None:
+    """Best-effort deletion of a persisted message thumbnail.
+    尽力删除持久化消息缩略图。"""
+    path = _message_image_path_from_url(str(image_url or ""))
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.warning("Failed to delete persisted message image {}: {}", path, exc)
 
 
 def _message_retention_cutoff_iso(retention_days_raw: str | int) -> str:
@@ -502,11 +591,18 @@ async def prune_analysis_messages(retention_days: int) -> None:
     删除超过保留期的历史消息。"""
     cutoff = _message_retention_cutoff_iso(retention_days)
     async with _db_session() as db:
+        async with db.execute(
+            "SELECT image_url FROM analysis_messages WHERE created_at < ?",
+            (cutoff,),
+        ) as cursor:
+            rows = await cursor.fetchall()
         await db.execute(
             "DELETE FROM analysis_messages WHERE created_at < ?",
             (cutoff,),
         )
         await db.commit()
+    for row in rows:
+        _delete_message_image(row[0] if row else None)
 
 
 async def save_analysis_message(message: dict[str, str | None]) -> str:
@@ -514,11 +610,17 @@ async def save_analysis_message(message: dict[str, str | None]) -> str:
     持久化一条分析消息并清理过期记录。"""
     message_id = str(uuid.uuid4())
     created_at = str(message.get("timestamp") or _now_iso())
+    image_url = str(message.get("image_url") or "").strip() or None
+    if image_url is None:
+        image_url = materialize_message_image(
+            message.get("image_base64"),
+            timestamp=created_at,
+        )
     async with _db_session() as db:
         await db.execute(
             "INSERT INTO analysis_messages "
-            "(id, timestamp, source_name, source_id, level, message, image_base64, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(id, timestamp, source_name, source_id, level, message, image_url, image_base64, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 message_id,
                 str(message.get("timestamp") or created_at),
@@ -526,7 +628,8 @@ async def save_analysis_message(message: dict[str, str | None]) -> str:
                 str(message.get("source_id") or ""),
                 str(message.get("level") or "info"),
                 str(message.get("message") or ""),
-                message.get("image_base64"),
+                image_url,
+                None,
                 created_at,
             ),
         )
@@ -539,11 +642,18 @@ async def save_analysis_message(message: dict[str, str | None]) -> str:
         if row is not None:
             retention_days = row[0]
         cutoff = _message_retention_cutoff_iso(retention_days)
+        async with db.execute(
+            "SELECT image_url FROM analysis_messages WHERE created_at < ?",
+            (cutoff,),
+        ) as cursor:
+            expired_rows = await cursor.fetchall()
         await db.execute(
             "DELETE FROM analysis_messages WHERE created_at < ?",
             (cutoff,),
         )
         await db.commit()
+    for row in expired_rows:
+        _delete_message_image(row[0] if row else None)
     return message_id
 
 
@@ -565,7 +675,7 @@ async def list_analysis_messages(
     async with _db_session() as db:
         if source_id:
             async with db.execute(
-                "SELECT timestamp, source_name, source_id, level, message, image_base64, "
+                "SELECT timestamp, source_name, source_id, level, message, image_url, image_base64, "
                 "COUNT(*) OVER() AS total_count "
                 "FROM analysis_messages WHERE source_id = ? "
                 "ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -573,7 +683,7 @@ async def list_analysis_messages(
             ) as cursor:
                 rows = await cursor.fetchall()
             if rows:
-                total = int(rows[0][6])
+                total = int(rows[0][7])
             else:
                 async with db.execute(
                     "SELECT COUNT(*) FROM analysis_messages WHERE source_id = ?",
@@ -582,14 +692,14 @@ async def list_analysis_messages(
                     total = int((await cursor.fetchone())[0])
         else:
             async with db.execute(
-                "SELECT timestamp, source_name, source_id, level, message, image_base64, "
+                "SELECT timestamp, source_name, source_id, level, message, image_url, image_base64, "
                 "COUNT(*) OVER() AS total_count "
                 "FROM analysis_messages ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (safe_size, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
             if rows:
-                total = int(rows[0][6])
+                total = int(rows[0][7])
             else:
                 async with db.execute("SELECT COUNT(*) FROM analysis_messages") as cursor:
                     total = int((await cursor.fetchone())[0])
@@ -600,7 +710,8 @@ async def list_analysis_messages(
             "source_id": row[2],
             "level": row[3],
             "message": row[4],
-            "image_base64": row[5],
+            "image_url": row[5],
+            "image_base64": row[6],
         }
         for row in rows
     ]

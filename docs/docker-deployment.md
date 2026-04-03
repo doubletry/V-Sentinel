@@ -10,9 +10,9 @@ The build script automatically reads the current shell proxy settings (`HTTP_PRO
 
 When an HTTPS proxy is present:
 
-- the build script enables `RELAX_HTTPS_VERIFICATION=true` by default so npm / pip can work behind self-signed interception proxies
-- you can override that behavior with `RELAX_HTTPS_VERIFICATION=false ./scripts/build_docker.sh`
-- this is a build-time-only compatibility fallback for trusted internal networks, because it relaxes HTTPS validation for npm / pip dependency downloads
+- set `RELAX_HTTPS_VERIFICATION=true ./scripts/build_docker.sh` if you need npm / pip to relax HTTPS validation behind a self-signed interception proxy
+- leave `RELAX_HTTPS_VERIFICATION` unset to keep normal HTTPS verification
+- the relaxed mode is a build-time-only compatibility fallback for trusted internal networks, because it reduces HTTPS verification for npm / pip dependency downloads
 
 If the shell also exposes a readable PEM CA file path (`BUILD_CA_CERT`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`, `PIP_CERT`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, or `SSL_CERT_FILE`), that certificate is mounted into the build as an additional fallback.
 

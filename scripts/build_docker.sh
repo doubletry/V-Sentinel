@@ -65,7 +65,8 @@ first_existing_file() {
           printf '%s' "$value"
           return 0
         fi
-      elif head -n 5 "$value" | grep -q '^-----BEGIN CERTIFICATE-----'; then
+      elif head -n 20 "$value" | grep -q '^-----BEGIN CERTIFICATE-----' \
+        && tail -n 20 "$value" | grep -q '^-----END CERTIFICATE-----'; then
         printf '%s' "$value"
         return 0
       fi
@@ -103,10 +104,6 @@ if [[ -n "$HTTPS_PROXY_VALUE" ]]; then
     needs_host_gateway=true
     HTTPS_PROXY_VALUE="$rewritten"
   fi
-fi
-
-if [[ -z "$RELAX_HTTPS_VERIFICATION_VALUE" && -n "$HTTPS_PROXY_VALUE" ]]; then
-  RELAX_HTTPS_VERIFICATION_VALUE=true
 fi
 
 if [[ "$needs_host_gateway" = true ]]; then

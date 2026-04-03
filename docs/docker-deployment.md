@@ -8,6 +8,8 @@
 
 The build script automatically reads the current shell proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their lowercase variants) and passes them to `docker build` only for the image build. If the detected proxy host is `127.0.0.1` / `localhost`, it is rewritten to `host.docker.internal` for Docker build networking.
 
+When an HTTPS proxy is present, the Docker build prefers disabling SSL verification for npm / pip requests so self-signed interception proxies can work immediately. If the shell also exposes a readable CA file path (`BUILD_CA_CERT`, `NODE_EXTRA_CA_CERTS`, `NPM_CONFIG_CAFILE`, `PIP_CERT`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, or `SSL_CERT_FILE`), that certificate is mounted into the build as an additional fallback.
+
 You can override the image name or tag:
 
 ```bash

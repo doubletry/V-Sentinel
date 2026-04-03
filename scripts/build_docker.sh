@@ -7,6 +7,7 @@ DOCKER_BIN="${DOCKER_BIN:-docker}"
 
 build_args=()
 extra_args=()
+secret_args=()
 
 # Return the first non-empty proxy-related value from a list of candidates.
 first_non_empty() {
@@ -54,9 +55,30 @@ print(urlunsplit((parts.scheme, rewritten, parts.path, parts.query, parts.fragme
 PY
 }
 
+# Return the first readable CA certificate path from common shell/env settings.
+first_existing_file() {
+  local value
+  for value in "$@"; do
+    if [[ -n "${value:-}" && -f "$value" ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+  return 0
+}
+
 HTTP_PROXY_VALUE="$(first_non_empty "${HTTP_PROXY:-}" "${http_proxy:-}")"
 HTTPS_PROXY_VALUE="$(first_non_empty "${HTTPS_PROXY:-}" "${https_proxy:-}" "$HTTP_PROXY_VALUE")"
 NO_PROXY_VALUE="$(first_non_empty "${NO_PROXY:-}" "${no_proxy:-}")"
+BUILD_CA_CERT_PATH="$(first_existing_file \
+  "${BUILD_CA_CERT:-}" \
+  "${NODE_EXTRA_CA_CERTS:-}" \
+  "${NPM_CONFIG_CAFILE:-}" \
+  "${npm_config_cafile:-}" \
+  "${PIP_CERT:-}" \
+  "${REQUESTS_CA_BUNDLE:-}" \
+  "${CURL_CA_BUNDLE:-}" \
+  "${SSL_CERT_FILE:-}")"
 
 needs_host_gateway=false
 if [[ -n "$HTTP_PROXY_VALUE" ]]; then
@@ -97,12 +119,19 @@ for key in NO_PROXY no_proxy; do
   fi
 done
 
+if [[ -n "$BUILD_CA_CERT_PATH" ]]; then
+  secret_args+=(--secret "id=build_proxy_ca,src=${BUILD_CA_CERT_PATH}")
+fi
+
 docker_cmd=("${DOCKER_BIN}" build)
 if [[ ${#extra_args[@]} -gt 0 ]]; then
   docker_cmd+=("${extra_args[@]}")
 fi
 if [[ ${#build_args[@]} -gt 0 ]]; then
   docker_cmd+=("${build_args[@]}")
+fi
+if [[ ${#secret_args[@]} -gt 0 ]]; then
+  docker_cmd+=("${secret_args[@]}")
 fi
 docker_cmd+=(-t "${IMAGE_NAME}:${IMAGE_TAG}" .)
 

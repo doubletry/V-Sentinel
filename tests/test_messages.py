@@ -147,7 +147,7 @@ class TestMessagesAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert data["visits"][0]["plate"] == "ABC123"
-        assert data["visits"][0]["confirmed_actions"] == ["车身外检"]
+        assert data["visits"][0]["confirmed_actions"] == ["车外检查"]
         assert data["visits"][0]["missing_actions"] == ["货物拍照"]
         assert "ABC123" in data["summary_text"]
         assert "到达时间" in data["summary_text"]
@@ -169,7 +169,7 @@ class TestMessagesAPI:
             enter_time=now,
             exit_time=now,
             plate="XYZ888",
-            confirmed_actions=["车身外检"],
+            confirmed_actions=["车外检查"],
             missing_actions=[],
         )
 

@@ -33,8 +33,8 @@ REQUIRED_ACTIONS: frozenset[str] = frozenset(
         "PlaceWheelChock",
         "InnerInspectionOfTruck",
         "ExteriorInspectionOfTruck",
-        "TakePhotoOfGoods",
-        "TakePhotoOfSeal",
+        "TakePhotosOfGoods",
+        "TakePhotosOfSeal",
     }
 )
 """Required actions during a truck visit. 卡车到访期间要求识别到的动作。"""
@@ -45,10 +45,10 @@ OTHER_ACTION_LABEL: str = "Other"
 OCR_INTERVAL: int = 10
 """Frames between OCR attempts for the same truck. 同一卡车 OCR 间隔帧数。"""
 
-MAX_MISSING_FRAMES: int = 30
+MAX_MISSING_FRAMES: int = 500
 """Max consecutive missing frames before departure. 离场前允许的最大丢失帧数。"""
 
-MIN_PRESENCE_FRAMES: int = 16
+MIN_PRESENCE_FRAMES: int = 500
 """Frames needed to confirm a non-transient truck. 确认非路过卡车所需帧数。"""
 
 STABILITY_WINDOW: int = 7
@@ -69,11 +69,8 @@ LABEL_EN_TO_ZH: dict[str, str] = {
     "HandOverKeys": "上交钥匙",
     "PlaceWheelChock": "放三角木",
     "InnerInspectionOfTruck": "车内检查",
-    "ExteriorInspectionOfTruck": "车身外检",
-    # Support legacy singular aliases that may still appear in persisted visits.
-    "TakePhotoOfGoods": "货物拍照",
+    "ExteriorInspectionOfTruck": "车外检查",
     "TakePhotosOfGoods": "货物拍照",
-    "TakePhotoOfSeal": "封条拍照",
     "TakePhotosOfSeal": "封条拍照",
     "Other": "其他",
     "unknown": "未知",
@@ -85,11 +82,11 @@ ACTION_LABEL_ALIASES: dict[str, str] = {
     "action2": "PlaceWheelChock",
     "action3": "InnerInspectionOfTruck",
     "action4": "ExteriorInspectionOfTruck",
-    "action5": "TakePhotoOfGoods",
-    "action6": "TakePhotoOfSeal",
+    "action5": "TakePhotosOfGoods",
+    "action6": "TakePhotosOfSeal",
     "other": "Other",
-    "takephotosofgoods": "TakePhotoOfGoods",
-    "takephotosofseal": "TakePhotoOfSeal",
+    "takephotoofgoods": "TakePhotosOfGoods",
+    "takephotosofseal": "TakePhotosOfSeal",
 }
 """Canonical aliases for truck-scene classification labels. truck 场景分类标签规范化映射。"""
 
@@ -97,7 +94,8 @@ ACTION_LABEL_ALIASES: dict[str, str] = {
 def translate_label(label: str) -> str:
     """Translate one truck-scene label to Chinese when known.
     将单个 truck 场景标签翻译为中文（如已知）。"""
-    return LABEL_EN_TO_ZH.get(label, label)
+    normalized = normalize_action_label(label)
+    return LABEL_EN_TO_ZH.get(normalized, normalized)
 
 
 def translate_labels(labels: Iterable[str] | None) -> list[str]:

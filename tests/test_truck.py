@@ -393,8 +393,8 @@ class TestTruckTracker:
         tracker.update(FrameAnalysis(trucks=[_truck_det()]))
         tid = list(tracker.get_all_tracks().keys())[0]
 
-        assert tracker.feed_action(tid, "TakePhotosOfSeal") == "TakePhotoOfSeal"
-        assert "TakePhotoOfSeal" in tracker.get_track(tid).confirmed_actions
+        assert tracker.feed_action(tid, "TakePhotosOfSeal") == "TakePhotosOfSeal"
+        assert "TakePhotosOfSeal" in tracker.get_track(tid).confirmed_actions
 
     def test_single_truck_replaces_when_old_leaves(self):
         """Only one truck tracked at a time; new one starts after old leaves.
@@ -1412,7 +1412,7 @@ class TestProcessorKeyMessages:
         proc.tracker = TruckTracker(
             min_presence_frames=1,
             max_missing_frames=0,
-            required_actions={"ExteriorInspectionOfTruck", "TakePhotoOfSeal"},
+            required_actions={"ExteriorInspectionOfTruck", "TakePhotosOfSeal"},
         )
         frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
@@ -1428,5 +1428,5 @@ class TestProcessorKeyMessages:
             m for m in result.messages if "车辆离场" in m.get("message", "")
         ]
         assert len(departure_msgs) == 1
-        assert "车身外检" in departure_msgs[0]["message"]
+        assert "车外检查" in departure_msgs[0]["message"]
         assert "封条拍照" in departure_msgs[0]["message"]

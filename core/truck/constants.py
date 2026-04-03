@@ -70,6 +70,7 @@ LABEL_EN_TO_ZH: dict[str, str] = {
     "PlaceWheelChock": "放三角木",
     "InnerInspectionOfTruck": "车内检查",
     "ExteriorInspectionOfTruck": "车身外检",
+    # Support legacy singular aliases that may still appear in persisted visits.
     "TakePhotoOfGoods": "货物拍照",
     "TakePhotosOfGoods": "货物拍照",
     "TakePhotoOfSeal": "封条拍照",

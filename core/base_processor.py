@@ -511,18 +511,23 @@ class BaseVideoProcessor(ABC):
         return {"classifications": classifications}
 
     def _encode_thumbnail(
-        self, frame: np.ndarray | None, max_width: int = 480
+        self,
+        frame: np.ndarray | None,
+        max_width: int = 1920,
+        max_height: int = 1080,
     ) -> str | None:
-        """Encode a frame as a base64 JPEG thumbnail (RGB channel order).
-        将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
+        """Encode a message image as a base64 JPEG preview/original.
+        将消息图像编码为 base64 JPEG 预览/原图。"""
         if frame is None:
             return None
 
         h, w = frame.shape[:2]
-        if w > max_width:
-            scale = max_width / w
+        scale = min(max_width / max(w, 1), max_height / max(h, 1), 1.0)
+        if scale < 1.0:
             frame = cv2.resize(
-                frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
+                frame,
+                (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+                interpolation=cv2.INTER_AREA,
             )
 
         if _jpeg is not None:

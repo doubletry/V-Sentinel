@@ -52,6 +52,7 @@ async def get_today_vehicle_events() -> dict:
     start = local_start.astimezone(timezone.utc)
     now = local_now.astimezone(timezone.utc)
     visits = await get_vehicle_visits_between(start.isoformat(), now.isoformat())
+    translated_visits = TruckAnalysisAgent.translate_visits(visits)
     summary_text = TruckAnalysisAgent.build_daily_summary_text(
         visits,
         start.isoformat(),
@@ -63,7 +64,7 @@ async def get_today_vehicle_events() -> dict:
         "until": now.isoformat(),
         "timezone": str(app_settings.get("timezone") or "Asia/Shanghai"),
         "summary_text": summary_text,
-        "visits": visits,
+        "visits": translated_visits,
     }
 
 
@@ -88,6 +89,7 @@ async def send_summary_now(request: Request) -> dict:
         app_settings=app_settings,
         summary_text=summary_text,
         until_iso=until_iso,
+        visits=visits,
     )
     return {
         "status": result.get("status", "SUCCESS"),

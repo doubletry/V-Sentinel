@@ -4,12 +4,15 @@
 
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from typing import Any
 
 import grpc.aio
 
 from core.constants import EMAIL_PORT
 from core.proto import email_pb2, email_pb2_grpc
+from core.truck.agent import TruckAnalysisAgent
 
 
 class AsyncEmailClient:
@@ -86,6 +89,7 @@ class AsyncEmailClient:
         plain_text_body: str,
         html_body: str = "",
         overrides: dict[str, Any] | None = None,
+        attachments: list[email_pb2.Attachment] | None = None,
     ) -> email_pb2.SendEmailRequest:
         """Build a SendEmailRequest from persisted settings.
         根据持久化设置构建 SendEmailRequest。"""
@@ -115,6 +119,24 @@ class AsyncEmailClient:
             subject=subject,
             plain_text_body=plain_text_body,
             html_body=html_body or plain_text_body.replace("\n", "<br>"),
+            attachments=attachments or [],
+        )
+
+    @staticmethod
+    def _build_daily_summary_attachment(
+        visits: list[dict[str, Any]],
+        until_iso: str,
+    ) -> email_pb2.Attachment:
+        output = StringIO(newline="")
+        writer = csv.writer(output)
+        writer.writerow(["序号", "区域", "回放位置或IP", "抽查内容/类型", "AI视觉分析结果"])
+        writer.writerows(TruckAnalysisAgent.build_daily_summary_table_rows(visits))
+        encoded = ("\ufeff" + output.getvalue()).encode("utf-8")
+        filename_date = str(until_iso or "")[:10] or "daily-summary"
+        return email_pb2.Attachment(
+            filename=f"truck-daily-summary-{filename_date}.csv",
+            data=encoded,
+            content_type="text/csv; charset=utf-8",
         )
 
     async def send_test_email(
@@ -140,12 +162,17 @@ class AsyncEmailClient:
         app_settings: dict[str, str],
         summary_text: str,
         until_iso: str,
+        visits: list[dict[str, Any]] | None = None,
     ) -> dict[str, str]:
         """Send the daily truck summary email.
         发送 truck 每日总结邮件。"""
+        attachment = self._build_daily_summary_attachment(visits or [], until_iso)
         request = self.build_request(
             app_settings,
             subject=f"{self._product_name(app_settings)} 每日总结 {until_iso[:10]}",
-            plain_text_body=summary_text,
+            plain_text_body=(
+                f"{summary_text}\n\n请查收附件表格，已汇总全部视频源的货台检查结果。"
+            ),
+            attachments=[attachment],
         )
         return await self.send_email(request)

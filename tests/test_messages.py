@@ -116,14 +116,16 @@ class TestMessagesAPI:
             enter_time=now,
             exit_time=now,
             plate="ABC123",
-            confirmed_actions=["车身外检"],
-            missing_actions=["货物拍照"],
+            confirmed_actions=["ExteriorInspectionOfTruck"],
+            missing_actions=["TakePhotosOfGoods"],
         )
 
         resp = await async_client.get("/api/vehicle-events/today")
         assert resp.status_code == 200
         data = resp.json()
         assert data["visits"][0]["plate"] == "ABC123"
+        assert data["visits"][0]["confirmed_actions"] == ["车外检查"]
+        assert data["visits"][0]["missing_actions"] == ["货物拍照"]
         assert "ABC123" in data["summary_text"]
         assert "到达时间" in data["summary_text"]
         assert "离开时间" in data["summary_text"]

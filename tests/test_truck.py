@@ -1109,6 +1109,17 @@ class TestTruckArrival:
 class TestProcessorKeyMessages:
     """Tests for key-only messages in TruckMonitorProcessor."""
 
+    async def test_encode_thumbnail_preserves_full_hd_message_image(self):
+        class _DummyProcessor(BaseVideoProcessor):
+            async def process_frame(self, *args, **kwargs):
+                raise NotImplementedError
+
+        processor = object.__new__(_DummyProcessor)
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        image_base64 = BaseVideoProcessor._encode_thumbnail(processor, frame)
+        decoded = _decode_thumbnail(image_base64)
+        assert decoded.shape[:2] == (1080, 1920)
+
     async def test_arrival_message_produced(self):
         """Arrival message is produced when truck is first confirmed."""
         from core.truck.processor import TruckMonitorProcessor

@@ -10,6 +10,8 @@ truck 场景相关的模型名、标签、动作要求、跟踪参数和每日�
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 DETECTION_MODEL: str = "huotai"
 """Default truck-scene detection model name. 默认 truck 场景检测模型名称。"""
 
@@ -75,3 +77,14 @@ LABEL_EN_TO_ZH: dict[str, str] = {
 }
 """English-to-Chinese labels for truck-scene messages. truck 场景中英文标签映射。"""
 
+
+def translate_label(label: str) -> str:
+    """Translate one truck-scene label to Chinese when known.
+    将单个 truck 场景标签翻译为中文（如已知）。"""
+    return LABEL_EN_TO_ZH.get(label, label)
+
+
+def translate_labels(labels: Iterable[str] | None) -> list[str]:
+    """Translate a list of truck-scene labels to Chinese.
+    将一组 truck 场景标签翻译为中文。"""
+    return [translate_label(str(label)) for label in labels or []]

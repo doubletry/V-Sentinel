@@ -93,6 +93,27 @@ class TestAnalysisAgentBuildSummary:
         assert "2026-01-01 08:00" in text
         assert "2026-01-01 09:00" in text
 
+    def test_translate_visits_returns_chinese_actions(self):
+        visits = [{
+            "source_id": "s1",
+            "source_name": "Cam1",
+            "confirmed_actions": ["HandOverKeys"],
+            "missing_actions": ["TakePhotosOfSeal"],
+        }]
+        translated = AnalysisAgent.translate_visits(visits)
+        assert translated[0]["confirmed_actions"] == ["上交钥匙"]
+        assert translated[0]["missing_actions"] == ["封条拍照"]
+
+    def test_build_daily_summary_table_rows_merges_all_sources(self):
+        rows = AnalysisAgent.build_daily_summary_table_rows([
+            {"source_name": "Cam1", "missing_actions": ["HandOverKeys"]},
+            {"source_name": "Cam2", "missing_actions": []},
+        ])
+        assert rows == [
+            ["1", "", "Cam1", "货台检查", "上交钥匙"],
+            ["2", "", "Cam2", "货台检查", "无异常"],
+        ]
+
 
 class TestAnalysisAgentAggregation:
     async def test_aggregation_does_not_broadcast_generic_summary(self):

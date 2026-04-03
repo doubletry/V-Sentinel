@@ -3,6 +3,8 @@
 FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
+ARG RELAX_HTTPS_VERIFICATION=false
+
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""
 ARG NO_PROXY=""
@@ -12,7 +14,7 @@ ARG no_proxy=""
 
 COPY frontend/package.json ./
 RUN --mount=type=secret,id=build_proxy_ca,required=false \
-    if [ -n "${HTTP_PROXY:-}${http_proxy:-}${HTTPS_PROXY:-}${https_proxy:-}" ]; then \
+    if [ "${RELAX_HTTPS_VERIFICATION}" = "true" ]; then \
         export NODE_TLS_REJECT_UNAUTHORIZED=0 npm_config_strict_ssl=false NPM_CONFIG_STRICT_SSL=false; \
     fi; \
     if [ -f /run/secrets/build_proxy_ca ]; then \
@@ -25,6 +27,8 @@ RUN npm run build
 
 FROM python:3.11-slim
 WORKDIR /app
+
+ARG RELAX_HTTPS_VERIFICATION=false
 
 ARG HTTP_PROXY=""
 ARG HTTPS_PROXY=""
@@ -51,15 +55,15 @@ COPY scripts /app/scripts
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 RUN --mount=type=secret,id=build_proxy_ca,required=false \
-    pip_args="--no-cache-dir"; \
-    if [ -n "${HTTP_PROXY:-}${http_proxy:-}${HTTPS_PROXY:-}${https_proxy:-}" ]; then \
+    set -- pip install --no-cache-dir; \
+    if [ "${RELAX_HTTPS_VERIFICATION}" = "true" ]; then \
         export PYTHONHTTPSVERIFY=0; \
-        pip_args="$pip_args --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org"; \
+        set -- "$@" --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org; \
     fi; \
     if [ -f /run/secrets/build_proxy_ca ]; then \
         export PIP_CERT=/run/secrets/build_proxy_ca REQUESTS_CA_BUNDLE=/run/secrets/build_proxy_ca SSL_CERT_FILE=/run/secrets/build_proxy_ca; \
     fi; \
-    pip install $pip_args .
+    "$@" .
 
 RUN mkdir -p /app/data
 

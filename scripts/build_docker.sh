@@ -59,7 +59,7 @@ PY
 first_existing_file() {
   local value
   for value in "$@"; do
-    if [[ -n "${value:-}" && -f "$value" ]]; then
+    if [[ -n "${value:-}" && -f "$value" ]] && grep -q "BEGIN CERTIFICATE" "$value"; then
       printf '%s' "$value"
       return 0
     fi
@@ -70,6 +70,7 @@ first_existing_file() {
 HTTP_PROXY_VALUE="$(first_non_empty "${HTTP_PROXY:-}" "${http_proxy:-}")"
 HTTPS_PROXY_VALUE="$(first_non_empty "${HTTPS_PROXY:-}" "${https_proxy:-}" "$HTTP_PROXY_VALUE")"
 NO_PROXY_VALUE="$(first_non_empty "${NO_PROXY:-}" "${no_proxy:-}")"
+RELAX_HTTPS_VERIFICATION_VALUE="${RELAX_HTTPS_VERIFICATION:-}"
 BUILD_CA_CERT_PATH="$(first_existing_file \
   "${BUILD_CA_CERT:-}" \
   "${NODE_EXTRA_CA_CERTS:-}" \
@@ -97,6 +98,10 @@ if [[ -n "$HTTPS_PROXY_VALUE" ]]; then
   fi
 fi
 
+if [[ -z "$RELAX_HTTPS_VERIFICATION_VALUE" && (-n "$HTTP_PROXY_VALUE" || -n "$HTTPS_PROXY_VALUE") ]]; then
+  RELAX_HTTPS_VERIFICATION_VALUE=true
+fi
+
 if [[ "$needs_host_gateway" = true ]]; then
   extra_args+=(--add-host=host.docker.internal:host-gateway)
 fi
@@ -118,6 +123,10 @@ for key in NO_PROXY no_proxy; do
     build_args+=(--build-arg "${key}=${NO_PROXY_VALUE}")
   fi
 done
+
+if [[ -n "$RELAX_HTTPS_VERIFICATION_VALUE" ]]; then
+  build_args+=(--build-arg "RELAX_HTTPS_VERIFICATION=${RELAX_HTTPS_VERIFICATION_VALUE}")
+fi
 
 if [[ -n "$BUILD_CA_CERT_PATH" ]]; then
   secret_args+=(--secret "id=build_proxy_ca,src=${BUILD_CA_CERT_PATH}")

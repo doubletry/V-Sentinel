@@ -526,9 +526,11 @@ class BaseVideoProcessor(ABC):
             return None
         scale = min(max_width / w, max_height / h, 1.0)
         if scale < 1.0:
+            resized_width = max(1, int(round(w * scale)))
+            resized_height = max(1, int(round(h * scale)))
             frame = cv2.resize(
                 frame,
-                (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+                (resized_width, resized_height),
                 interpolation=cv2.INTER_AREA,
             )
 

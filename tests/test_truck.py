@@ -1397,5 +1397,5 @@ class TestProcessorKeyMessages:
             m for m in result.messages if "车辆离场" in m.get("message", "")
         ]
         assert len(departure_msgs) == 1
-        assert "车外检查" in departure_msgs[0]["message"]
+        assert "车身外检" in departure_msgs[0]["message"]
         assert "封条拍照" in departure_msgs[0]["message"]

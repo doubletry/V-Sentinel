@@ -59,9 +59,16 @@ PY
 first_existing_file() {
   local value
   for value in "$@"; do
-    if [[ -n "${value:-}" && -f "$value" ]] && head -n 5 "$value" | grep -q '^-----BEGIN CERTIFICATE-----'; then
-      printf '%s' "$value"
-      return 0
+    if [[ -n "${value:-}" && -f "$value" ]]; then
+      if command -v openssl >/dev/null 2>&1; then
+        if openssl x509 -in "$value" -noout >/dev/null 2>&1; then
+          printf '%s' "$value"
+          return 0
+        fi
+      elif head -n 5 "$value" | grep -q '^-----BEGIN CERTIFICATE-----'; then
+        printf '%s' "$value"
+        return 0
+      fi
     fi
   done
   return 0

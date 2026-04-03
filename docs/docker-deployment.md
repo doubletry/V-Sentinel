@@ -10,7 +10,7 @@ The build script automatically reads the current shell proxy settings (`HTTP_PRO
 
 When an HTTPS proxy is present:
 
-- run `RELAX_HTTPS_VERIFICATION=true ./scripts/build_docker.sh` if you need npm / pip to relax HTTPS validation behind a self-signed interception proxy
+- run `RELAX_HTTPS_VERIFICATION=true ./scripts/build_docker.sh` if you need npm / pip to relax HTTPS verification behind a self-signed interception proxy
 - leave `RELAX_HTTPS_VERIFICATION` unset to keep normal HTTPS verification
 - the relaxed mode is a build-time-only compatibility fallback for trusted internal networks, because it reduces HTTPS verification for npm / pip dependency downloads
 - pip relaxation only covers the default PyPI hosts added in the Dockerfile (`pypi.org`, `pypi.python.org`, and `files.pythonhosted.org`)

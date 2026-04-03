@@ -55,10 +55,11 @@ print(urlunsplit((parts.scheme, rewritten, parts.path, parts.query, parts.fragme
 PY
 }
 
-# Return the first readable CA certificate path from common shell/env settings.
-first_existing_file() {
+# Return the first readable CA certificate path that passes OpenSSL validation.
+first_valid_ca_cert() {
   local value
   if ! command -v openssl >/dev/null 2>&1; then
+    echo "warning: openssl not found; skipping BUILD_CA_CERT validation" >&2
     return 0
   fi
   for value in "$@"; do
@@ -76,7 +77,7 @@ HTTP_PROXY_VALUE="$(first_non_empty "${HTTP_PROXY:-}" "${http_proxy:-}")"
 HTTPS_PROXY_VALUE="$(first_non_empty "${HTTPS_PROXY:-}" "${https_proxy:-}" "$HTTP_PROXY_VALUE")"
 NO_PROXY_VALUE="$(first_non_empty "${NO_PROXY:-}" "${no_proxy:-}")"
 RELAX_HTTPS_VERIFICATION_VALUE="${RELAX_HTTPS_VERIFICATION:-}"
-BUILD_CA_CERT_PATH="$(first_existing_file \
+BUILD_CA_CERT_PATH="$(first_valid_ca_cert \
   "${BUILD_CA_CERT:-}" \
   "${NODE_EXTRA_CA_CERTS:-}" \
   "${NPM_CONFIG_CAFILE:-}" \

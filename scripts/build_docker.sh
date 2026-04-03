@@ -95,4 +95,13 @@ for key in NO_PROXY no_proxy; do
   fi
 done
 
-"${DOCKER_BIN}" build "${extra_args[@]}" "${build_args[@]}" -t "${IMAGE_NAME}:${IMAGE_TAG}" .
+docker_cmd=("${DOCKER_BIN}" build)
+if [[ ${#extra_args[@]} -gt 0 ]]; then
+  docker_cmd+=("${extra_args[@]}")
+fi
+if [[ ${#build_args[@]} -gt 0 ]]; then
+  docker_cmd+=("${build_args[@]}")
+fi
+docker_cmd+=(-t "${IMAGE_NAME}:${IMAGE_TAG}" .)
+
+"${docker_cmd[@]}"

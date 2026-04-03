@@ -59,7 +59,7 @@ PY
 first_existing_file() {
   local value
   for value in "$@"; do
-    if [[ -n "${value:-}" && -f "$value" ]] && grep -q "BEGIN CERTIFICATE" "$value"; then
+    if [[ -n "${value:-}" && -f "$value" ]] && grep -Eq '^-----BEGIN CERTIFICATE-----$' "$value"; then
       printf '%s' "$value"
       return 0
     fi
@@ -98,7 +98,7 @@ if [[ -n "$HTTPS_PROXY_VALUE" ]]; then
   fi
 fi
 
-if [[ -z "$RELAX_HTTPS_VERIFICATION_VALUE" && (-n "$HTTP_PROXY_VALUE" || -n "$HTTPS_PROXY_VALUE") ]]; then
+if [[ -z "$RELAX_HTTPS_VERIFICATION_VALUE" && -n "$HTTPS_PROXY_VALUE" ]]; then
   RELAX_HTTPS_VERIFICATION_VALUE=true
 fi
 

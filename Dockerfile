@@ -15,7 +15,7 @@ ARG no_proxy=""
 COPY frontend/package.json ./
 RUN --mount=type=secret,id=build_proxy_ca,required=false \
     if [ "${RELAX_HTTPS_VERIFICATION}" = "true" ]; then \
-        export NODE_TLS_REJECT_UNAUTHORIZED=0 npm_config_strict_ssl=false NPM_CONFIG_STRICT_SSL=false; \
+        export NPM_CONFIG_STRICT_SSL=false; \
     fi; \
     if [ -f /run/secrets/build_proxy_ca ]; then \
         export NODE_EXTRA_CA_CERTS=/run/secrets/build_proxy_ca NPM_CONFIG_CAFILE=/run/secrets/build_proxy_ca; \
@@ -57,7 +57,6 @@ COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 RUN --mount=type=secret,id=build_proxy_ca,required=false \
     set -- pip install --no-cache-dir; \
     if [ "${RELAX_HTTPS_VERIFICATION}" = "true" ]; then \
-        export PYTHONHTTPSVERIFY=0; \
         set -- "$@" --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org; \
     fi; \
     if [ -f /run/secrets/build_proxy_ca ]; then \

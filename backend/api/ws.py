@@ -53,9 +53,11 @@ class WSManager:
             )
             if message.image_url:
                 message.image_base64 = None
-        message_id: str | None = None
-        if self._persist_message is not None:
-            message_id = await self._persist_message(message)
+        message_id = (
+            await self._persist_message(message)
+            if self._persist_message is not None
+            else None
+        )
         if message_id and message.image_url:
             message.image_url = build_analysis_message_image_url(message_id)
         payload = message.model_dump_json()

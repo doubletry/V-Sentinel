@@ -26,7 +26,6 @@ from urllib.parse import urlsplit, urlunsplit
 
 value = os.environ.get("PROXY_VALUE", "").strip()
 if not value:
-    print("")
     raise SystemExit(0)
 
 parts = urlsplit(value)

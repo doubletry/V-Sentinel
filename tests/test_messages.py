@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from httpx import AsyncClient
 
 from backend.db.database import (
+    build_analysis_message_image_url,
     get_vehicle_visits_between,
     list_analysis_messages,
     save_analysis_message,
@@ -82,6 +83,23 @@ class TestMessagePersistence:
 
 
 class TestMessagesAPI:
+    async def test_message_image_endpoint_uses_message_id_url(self, async_client: AsyncClient):
+        encoded = base64.b64encode(b"jpeg-bytes").decode("ascii")
+        message_id = await save_analysis_message(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source_name": "Cam1",
+                "source_id": "s1",
+                "level": "info",
+                "message": "persisted",
+                "image_base64": encoded,
+            }
+        )
+
+        resp = await async_client.get(build_analysis_message_image_url(message_id))
+        assert resp.status_code == 200
+        assert resp.content == b"jpeg-bytes"
+
     async def test_list_persisted_messages(self, async_client: AsyncClient):
         await save_analysis_message(
             {

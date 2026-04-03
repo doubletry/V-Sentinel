@@ -220,7 +220,7 @@ def get_message_image_dir() -> Path:
     return Path(_DB_PATH).resolve().parent / "message_thumbnails"
 
 
-def _message_image_public_url(message_id: str) -> str:
+def build_analysis_message_image_url(message_id: str) -> str:
     return f"{MESSAGE_IMAGE_URL_PREFIX}/{message_id}/image"
 
 
@@ -733,7 +733,7 @@ async def list_analysis_messages(
             "source_id": row[3],
             "level": row[4],
             "message": row[5],
-            "image_url": _message_image_public_url(row[0]) if row[6] else None,
+            "image_url": build_analysis_message_image_url(row[0]) if row[6] else None,
             "image_base64": row[7],
         }
         for row in rows

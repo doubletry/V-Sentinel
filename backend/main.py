@@ -116,8 +116,8 @@ async def lifespan(app: FastAPI):
     _configure_stdlib_log_capture()
 
     # Initialize WebSocket manager / 初始化 WebSocket 管理器
-    async def _persist_message(message) -> None:
-        await save_analysis_message(message.model_dump())
+    async def _persist_message(message) -> str:
+        return await save_analysis_message(message.model_dump())
 
     ws_manager = ws_module.WSManager(persist_message=_persist_message)
 

@@ -6,6 +6,8 @@
 ./scripts/build_docker.sh
 ```
 
+The build script automatically reads the current shell proxy settings (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and their lowercase variants) and passes them to `docker build` only for the image build. If the detected proxy host is `127.0.0.1` / `localhost`, it is rewritten to `host.docker.internal` for Docker build networking.
+
 You can override the image name or tag:
 
 ```bash

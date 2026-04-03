@@ -248,12 +248,6 @@ def _normalize_stored_message_image_value(image_value: str | None) -> str | None
 
 def _message_image_path_from_url(image_url: str) -> Path | None:
     return _message_image_path_from_stored_value(image_url)
-    if not relative:
-        return None
-    parts = relative.split("/")
-    if len(parts) != 2:
-        return None
-    return resolve_message_image_path(parts[0], parts[1])
 
 
 def resolve_message_image_path(day: str, filename: str) -> Path | None:

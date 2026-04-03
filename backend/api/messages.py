@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from backend.db.database import list_analysis_messages, resolve_message_image_path
+from backend.db.database import get_analysis_message_image_path, list_analysis_messages
 from backend.models.schemas import AnalysisMessage, PaginatedMessagesResponse
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
@@ -31,11 +31,11 @@ async def get_messages(
     )
 
 
-@router.get("/images/{day}/{filename}", include_in_schema=False)
-async def get_message_image(day: str, filename: str) -> FileResponse:
+@router.get("/{message_id}/image", include_in_schema=False)
+async def get_message_image(message_id: str) -> FileResponse:
     """Serve one persisted analysis-message thumbnail from disk.
     从磁盘提供一张持久化分析消息缩略图。"""
-    file_path = resolve_message_image_path(day, filename)
+    file_path = await get_analysis_message_image_path(message_id)
     if file_path is None or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Message image not found")
     return FileResponse(file_path)

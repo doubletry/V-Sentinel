@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS analysis_messages (
 );
 """
 
-MESSAGE_IMAGE_URL_PREFIX = "/api/messages/images"
+MESSAGE_IMAGE_URL_PREFIX = "/api/messages"
 MESSAGE_IMAGE_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MESSAGE_IMAGE_FILENAME_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
 
@@ -220,16 +220,34 @@ def get_message_image_dir() -> Path:
     return Path(_DB_PATH).resolve().parent / "message_thumbnails"
 
 
-def _build_message_image_url(relative_path: str) -> str:
-    return f"{MESSAGE_IMAGE_URL_PREFIX}/{relative_path.lstrip('/')}"
+def _message_image_public_url(message_id: str) -> str:
+    return f"{MESSAGE_IMAGE_URL_PREFIX}/{message_id}/image"
+
+
+def _message_image_path_from_stored_value(image_value: str) -> Path | None:
+    text = str(image_value or "").strip().strip("/")
+    if not text:
+        return None
+    if text.startswith("api/messages/images/"):
+        text = text[len("api/messages/images/") :]
+    elif text.startswith("message-images/"):
+        text = text[len("message-images/") :]
+    parts = text.split("/")
+    if len(parts) != 2:
+        return None
+    day, filename = parts
+    return resolve_message_image_path(day, filename)
+
+
+def _normalize_stored_message_image_value(image_value: str | None) -> str | None:
+    path = _message_image_path_from_stored_value(str(image_value or ""))
+    if path is None:
+        return None
+    return f"{path.parent.name}/{path.name}"
 
 
 def _message_image_path_from_url(image_url: str) -> Path | None:
-    text = str(image_url or "").strip()
-    prefix = f"{MESSAGE_IMAGE_URL_PREFIX}/"
-    if not text.startswith(prefix):
-        return None
-    relative = text[len(prefix):].strip("/")
+    return _message_image_path_from_stored_value(image_url)
     if not relative:
         return None
     parts = relative.split("/")
@@ -259,8 +277,8 @@ def resolve_message_image_path(day: str, filename: str) -> Path | None:
 
 
 def materialize_message_image(image_base64: str | None, *, timestamp: str = "") -> str | None:
-    """Persist one base64 message image to disk and return its public URL.
-    将单条消息的 base64 图片落盘并返回其公开 URL。"""
+    """Persist one base64 message image to disk and return its stored path.
+    将单条消息的 base64 图片落盘并返回其存储路径。"""
     payload = str(image_base64 or "").strip()
     if not payload:
         return None
@@ -275,7 +293,7 @@ def materialize_message_image(image_base64: str | None, *, timestamp: str = "") 
     filename = f"{uuid.uuid4().hex}.jpg"
     file_path = directory / filename
     file_path.write_bytes(raw)
-    return _build_message_image_url(f"{day}/{filename}")
+    return f"{day}/{filename}"
 
 
 def _delete_message_image(image_url: str | None) -> None:
@@ -621,7 +639,7 @@ async def save_analysis_message(message: dict[str, str | None]) -> str:
     持久化一条分析消息并清理过期记录。"""
     message_id = str(uuid.uuid4())
     created_at = str(message.get("timestamp") or _now_iso())
-    image_url = str(message.get("image_url") or "").strip() or None
+    image_url = _normalize_stored_message_image_value(message.get("image_url"))
     if image_url is None:
         image_url = materialize_message_image(
             message.get("image_base64"),
@@ -686,7 +704,7 @@ async def list_analysis_messages(
     async with _db_session() as db:
         if source_id:
             async with db.execute(
-                "SELECT timestamp, source_name, source_id, level, message, image_url, image_base64, "
+                "SELECT id, timestamp, source_name, source_id, level, message, image_url, image_base64, "
                 "COUNT(*) OVER() AS total_count "
                 "FROM analysis_messages WHERE source_id = ? "
                 "ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -694,7 +712,7 @@ async def list_analysis_messages(
             ) as cursor:
                 rows = await cursor.fetchall()
             if rows:
-                total = int(rows[0][7])
+                total = int(rows[0][8])
             else:
                 async with db.execute(
                     "SELECT COUNT(*) FROM analysis_messages WHERE source_id = ?",
@@ -703,26 +721,26 @@ async def list_analysis_messages(
                     total = int((await cursor.fetchone())[0])
         else:
             async with db.execute(
-                "SELECT timestamp, source_name, source_id, level, message, image_url, image_base64, "
+                "SELECT id, timestamp, source_name, source_id, level, message, image_url, image_base64, "
                 "COUNT(*) OVER() AS total_count "
                 "FROM analysis_messages ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (safe_size, offset),
             ) as cursor:
                 rows = await cursor.fetchall()
             if rows:
-                total = int(rows[0][7])
+                total = int(rows[0][8])
             else:
                 async with db.execute("SELECT COUNT(*) FROM analysis_messages") as cursor:
                     total = int((await cursor.fetchone())[0])
     items = [
         {
-            "timestamp": row[0],
-            "source_name": row[1],
-            "source_id": row[2],
-            "level": row[3],
-            "message": row[4],
-            "image_url": row[5],
-            "image_base64": row[6],
+            "timestamp": row[1],
+            "source_name": row[2],
+            "source_id": row[3],
+            "level": row[4],
+            "message": row[5],
+            "image_url": _message_image_public_url(row[0]) if row[6] else None,
+            "image_base64": row[7],
         }
         for row in rows
     ]
@@ -734,3 +752,17 @@ async def list_analysis_messages(
         "total": total,
         "total_pages": total_pages,
     }
+
+
+async def get_analysis_message_image_path(message_id: str) -> Path | None:
+    """Resolve the persisted image path for one analysis message ID.
+    解析单条分析消息 ID 对应的持久化图片路径。"""
+    async with _db_session() as db:
+        async with db.execute(
+            "SELECT image_url FROM analysis_messages WHERE id = ?",
+            (message_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+    if row is None:
+        return None
+    return _message_image_path_from_stored_value(row[0])

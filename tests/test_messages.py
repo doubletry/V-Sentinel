@@ -46,7 +46,7 @@ class TestMessagePersistence:
         )
 
         rows = await list_analysis_messages(limit=10)
-        assert rows["items"][0]["image_url"].startswith("/api/messages/images/")
+        assert rows["items"][0]["image_url"].startswith("/api/messages/")
         assert rows["items"][0]["image_base64"] is None
 
         resp = await async_client.get(rows["items"][0]["image_url"])

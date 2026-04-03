@@ -524,8 +524,8 @@ class BaseVideoProcessor(ABC):
         h, w = frame.shape[:2]
         if h <= 0 or w <= 0:
             return None
-        scale = min(max_width / w, max_height / h, 1.0)
-        if scale < 1.0:
+        if w > max_width or h > max_height:
+            scale = min(max_width / w, max_height / h)
             resized_width = max(1, int(round(w * scale)))
             resized_height = max(1, int(round(h * scale)))
             frame = cv2.resize(

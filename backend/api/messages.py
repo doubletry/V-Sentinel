@@ -31,11 +31,11 @@ async def get_messages(
     )
 
 
-@router.get("/images/{image_path:path}", include_in_schema=False)
-async def get_message_image(image_path: str) -> FileResponse:
+@router.get("/images/{day}/{filename}", include_in_schema=False)
+async def get_message_image(day: str, filename: str) -> FileResponse:
     """Serve one persisted analysis-message thumbnail from disk.
     从磁盘提供一张持久化分析消息缩略图。"""
-    file_path = resolve_message_image_path(image_path)
+    file_path = resolve_message_image_path(day, filename)
     if file_path is None or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Message image not found")
     return FileResponse(file_path)

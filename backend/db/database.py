@@ -75,7 +75,8 @@ CREATE TABLE IF NOT EXISTS analysis_messages (
 """
 
 MESSAGE_IMAGE_URL_PREFIX = "/api/messages/images"
-MESSAGE_IMAGE_RELATIVE_PATH_RE = re.compile(r"^\d{4}-\d{2}-\d{2}/[0-9a-f]{32}\.jpg$")
+MESSAGE_IMAGE_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+MESSAGE_IMAGE_FILENAME_RE = re.compile(r"^[0-9a-f]{32}\.jpg$")
 
 PRAGMA_FK = "PRAGMA foreign_keys = ON;"
 PRAGMA_WAL = "PRAGMA journal_mode = WAL;"
@@ -231,19 +232,25 @@ def _message_image_path_from_url(image_url: str) -> Path | None:
     relative = text[len(prefix):].strip("/")
     if not relative:
         return None
-    return get_message_image_dir() / relative
-
-
-def resolve_message_image_path(relative_path: str) -> Path | None:
-    """Resolve one public relative image path inside the thumbnail directory.
-    解析缩略图目录中的公开相对图片路径。"""
-    text = str(relative_path or "").strip().strip("/")
-    if not text:
+    parts = relative.split("/")
+    if len(parts) != 2:
         return None
-    if not MESSAGE_IMAGE_RELATIVE_PATH_RE.fullmatch(text):
+    return resolve_message_image_path(parts[0], parts[1])
+
+
+def resolve_message_image_path(day: str, filename: str) -> Path | None:
+    """Resolve one validated message-image path inside the thumbnail directory.
+    解析缩略图目录中的单个已校验消息图片路径。"""
+    safe_day = str(day or "").strip()
+    safe_filename = str(filename or "").strip()
+    if not safe_day or not safe_filename:
+        return None
+    if not MESSAGE_IMAGE_DAY_RE.fullmatch(safe_day):
+        return None
+    if not MESSAGE_IMAGE_FILENAME_RE.fullmatch(safe_filename):
         return None
     root = get_message_image_dir().resolve()
-    candidate = (root / text).resolve()
+    candidate = (root / safe_day / safe_filename).resolve()
     try:
         candidate.relative_to(root)
     except ValueError:

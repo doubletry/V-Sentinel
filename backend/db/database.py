@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS analysis_messages (
 """
 
 MESSAGE_IMAGE_URL_PREFIX = "/api/messages/images"
+MESSAGE_IMAGE_RELATIVE_PATH_RE = re.compile(r"^\d{4}-\d{2}-\d{2}/[0-9a-f]{32}\.jpg$")
 
 PRAGMA_FK = "PRAGMA foreign_keys = ON;"
 PRAGMA_WAL = "PRAGMA journal_mode = WAL;"
@@ -237,6 +239,8 @@ def resolve_message_image_path(relative_path: str) -> Path | None:
     解析缩略图目录中的公开相对图片路径。"""
     text = str(relative_path or "").strip().strip("/")
     if not text:
+        return None
+    if not MESSAGE_IMAGE_RELATIVE_PATH_RE.fullmatch(text):
         return None
     root = get_message_image_dir().resolve()
     candidate = (root / text).resolve()

@@ -4,11 +4,12 @@
 
 from __future__ import annotations
 
-import csv
-from io import StringIO
+from io import BytesIO
 from typing import Any
 
 import grpc.aio
+from openpyxl import Workbook
+from openpyxl.styles import Alignment
 
 from core.constants import EMAIL_PORT
 from core.proto import email_pb2, email_pb2_grpc
@@ -126,17 +127,37 @@ class AsyncEmailClient:
     def _build_daily_summary_attachment(
         visits: list[dict[str, Any]],
         until_iso: str,
+        *,
+        timezone_name: str = "UTC",
     ) -> email_pb2.Attachment:
-        output = StringIO(newline="")
-        writer = csv.writer(output)
-        writer.writerow(["序号", "区域", "回放位置或IP", "抽查内容/类型", "AI视觉分析结果"])
-        writer.writerows(TruckAnalysisAgent.build_daily_summary_table_rows(visits))
-        csv_bytes_with_bom = ("\ufeff" + output.getvalue()).encode("utf-8")
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "AI货台分析报告"
+        headers = TruckAnalysisAgent.build_daily_summary_table_headers()
+        rows = TruckAnalysisAgent.build_daily_summary_table_rows(
+            visits,
+            timezone_name=timezone_name,
+        )
+        sheet.append(headers)
+        for row in rows:
+            sheet.append(row)
+        for row in sheet.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+        sheet.column_dimensions["A"].width = 10
+        sheet.column_dimensions["B"].width = 10
+        sheet.column_dimensions["C"].width = 24
+        sheet.column_dimensions["D"].width = 40
+        sheet.column_dimensions["E"].width = 28
+        output = BytesIO()
+        workbook.save(output)
         filename_date = str(until_iso or "")[:10] or "daily-summary"
         return email_pb2.Attachment(
-            filename=f"truck-daily-summary-{filename_date}.csv",
-            data=csv_bytes_with_bom,
-            content_type="text/csv; charset=utf-8",
+            filename=f"truck-daily-summary-{filename_date}.xlsx",
+            data=output.getvalue(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
         )
 
     async def send_test_email(
@@ -166,13 +187,29 @@ class AsyncEmailClient:
     ) -> dict[str, str]:
         """Send the daily truck summary email.
         发送 truck 每日总结邮件。"""
-        attachment = self._build_daily_summary_attachment(visits or [], until_iso)
+        timezone_name = str(app_settings.get("timezone") or "UTC")
+        attachment = self._build_daily_summary_attachment(
+            visits or [],
+            until_iso,
+            timezone_name=timezone_name,
+        )
+        plain_text_table = TruckAnalysisAgent.build_daily_summary_plain_text_table(
+            visits or [],
+            timezone_name=timezone_name,
+        )
+        html_table = TruckAnalysisAgent.build_daily_summary_html_table(
+            visits or [],
+            timezone_name=timezone_name,
+        )
         request = self.build_request(
             app_settings,
-            subject=f"{self._product_name(app_settings)} 每日总结 {until_iso[:10]}",
-            plain_text_body=(
-                f"{summary_text}\n\n请查收附件表格，已汇总全部视频源的货台检查结果。"
+            subject=TruckAnalysisAgent.build_daily_summary_email_subject(
+                visits or [],
+                until_iso,
+                timezone_name=timezone_name,
             ),
+            plain_text_body=plain_text_table,
+            html_body=html_table,
             attachments=[attachment],
         )
         return await self.send_email(request)

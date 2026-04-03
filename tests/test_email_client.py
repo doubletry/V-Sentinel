@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import csv
-from io import StringIO
+from io import BytesIO
 
+from openpyxl import load_workbook
 import pytest
 
 from core.email_client import AsyncEmailClient
@@ -50,7 +50,7 @@ class TestAsyncEmailClient:
         )
         assert request.subject == "My Sentinel 每日总结 2026-01-01"
 
-    async def test_send_daily_summary_email_attaches_single_csv_table(self):
+    async def test_send_daily_summary_email_attaches_single_xlsx_table(self):
         client = AsyncEmailClient()
         captured = {}
 
@@ -69,19 +69,47 @@ class TestAsyncEmailClient:
             summary_text="hello",
             until_iso="2026-01-01T12:00:00+00:00",
             visits=[
-                {"source_name": "Cam1", "missing_actions": ["HandOverKeys"]},
-                {"source_name": "Cam2", "missing_actions": []},
+                {
+                    "source_name": "Cam1",
+                    "plate": "ABC123",
+                    "enter_time": "2026-01-01T00:00:00+00:00",
+                    "exit_time": "2026-01-01T01:00:00+00:00",
+                    "missing_actions": ["HandOverKeys"],
+                },
+                {
+                    "source_name": "Cam2",
+                    "plate": "",
+                    "enter_time": "2026-01-01T02:00:00+00:00",
+                    "exit_time": "2026-01-01T03:00:00+00:00",
+                    "missing_actions": [],
+                },
             ],
         )
         request = captured["request"]
-        assert request.subject == "My Sentinel 每日总结 2026-01-01"
+        assert request.subject == "2026年01月01日AI货台分析报告-有异常"
         assert len(request.attachments) == 1
         attachment = request.attachments[0]
-        assert attachment.filename == "truck-daily-summary-2026-01-01.csv"
-        decoded = attachment.data.decode("utf-8-sig")
-        rows = list(csv.reader(StringIO(decoded)))
+        assert attachment.filename == "truck-daily-summary-2026-01-01.xlsx"
+        workbook = load_workbook(BytesIO(attachment.data))
+        sheet = workbook.active
+        rows = [list(row) for row in sheet.iter_rows(values_only=True)]
         assert rows == [
             ["序号", "区域", "回放位置或IP", "抽查内容/类型", "AI视觉分析结果"],
-            ["1", "", "Cam1", "货台检查", "上交钥匙"],
-            ["2", "", "Cam2", "货台检查", "无异常"],
+            [
+                "1",
+                None,
+                "Cam1",
+                "货台检查\n车牌号：ABC123\n到达时间：2026-01-01 00:00:00\n离开时间：2026-01-01 01:00:00",
+                "上交钥匙",
+            ],
+            [
+                "2",
+                None,
+                "Cam2",
+                "货台检查\n车牌号：未识别\n到达时间：2026-01-01 02:00:00\n离开时间：2026-01-01 03:00:00",
+                "无异常",
+            ],
         ]
+        assert "请查收附件" not in request.plain_text_body
+        assert request.plain_text_body.startswith("序号\t区域\t回放位置或IP")
+        assert "<table" in request.html_body

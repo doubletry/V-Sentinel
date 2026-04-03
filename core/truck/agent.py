@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -269,24 +270,109 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
 
     @classmethod
     def build_daily_summary_table_rows(
-        cls, visits: list[dict[str, Any]]
+        cls,
+        visits: list[dict[str, Any]],
+        *,
+        timezone_name: str = "UTC",
     ) -> list[list[str]]:
         """Build attachment rows for the truck daily-summary table.
         构建 truck 每日总结表格附件的数据行。"""
+        tzinfo = cls._get_zoneinfo(timezone_name)
         rows: list[list[str]] = []
         for index, visit in enumerate(visits, start=1):
             translated = cls.translate_visit(visit)
             missing = translated.get("missing_actions", [])
+            plate = str(translated.get("plate") or "未识别")
+            enter_time = cls._format_visit_time(
+                str(translated.get("enter_time") or ""),
+                tzinfo=tzinfo,
+            )
+            exit_time = cls._format_visit_time(
+                str(translated.get("exit_time") or ""),
+                tzinfo=tzinfo,
+            )
             rows.append(
                 [
                     str(index),
                     "",
                     str(translated.get("source_name") or translated.get("source_id") or ""),
-                    "货台检查",
+                    (
+                        "货台检查\n"
+                        f"车牌号：{plate}\n"
+                        f"到达时间：{enter_time}\n"
+                        f"离开时间：{exit_time}"
+                    ),
                     "、".join(missing) if missing else "无异常",
                 ]
             )
         return rows
+
+    @classmethod
+    def build_daily_summary_table_headers(cls) -> list[str]:
+        """Return headers for the truck daily-summary report table.
+        返回 truck 每日总结报表表头。"""
+        return ["序号", "区域", "回放位置或IP", "抽查内容/类型", "AI视觉分析结果"]
+
+    @classmethod
+    def build_daily_summary_plain_text_table(
+        cls,
+        visits: list[dict[str, Any]],
+        *,
+        timezone_name: str = "UTC",
+    ) -> str:
+        """Render the truck daily-summary table as plain text.
+        将 truck 每日总结表格渲染为纯文本。"""
+        headers = cls.build_daily_summary_table_headers()
+        rows = cls.build_daily_summary_table_rows(visits, timezone_name=timezone_name)
+        all_rows = [headers, *rows]
+        return "\n".join("\t".join(row) for row in all_rows)
+
+    @classmethod
+    def build_daily_summary_html_table(
+        cls,
+        visits: list[dict[str, Any]],
+        *,
+        timezone_name: str = "UTC",
+    ) -> str:
+        """Render the truck daily-summary table as HTML.
+        将 truck 每日总结表格渲染为 HTML。"""
+        headers = cls.build_daily_summary_table_headers()
+        rows = cls.build_daily_summary_table_rows(visits, timezone_name=timezone_name)
+        thead = "".join(f"<th>{escape(header)}</th>" for header in headers)
+        body_rows: list[str] = []
+        for row in rows:
+            cells = "".join(
+                f"<td>{escape(cell).replace(chr(10), '<br>')}</td>"
+                for cell in row
+            )
+            body_rows.append(f"<tr>{cells}</tr>")
+        tbody = "".join(body_rows)
+        return (
+            "<table border='1' cellspacing='0' cellpadding='6'>"
+            f"<thead><tr>{thead}</tr></thead>"
+            f"<tbody>{tbody}</tbody>"
+            "</table>"
+        )
+
+    @classmethod
+    def build_daily_summary_email_subject(
+        cls,
+        visits: list[dict[str, Any]],
+        until_iso: str,
+        *,
+        timezone_name: str = "UTC",
+    ) -> str:
+        """Build the truck daily-summary email subject.
+        构建 truck 每日总结邮件标题。"""
+        tzinfo = cls._get_zoneinfo(timezone_name)
+        try:
+            report_date = datetime.fromisoformat(until_iso).astimezone(tzinfo)
+        except Exception:
+            report_date = datetime.now(tzinfo)
+        suffix = "无出货车辆"
+        if visits:
+            suffix = "有异常" if any(visit.get("missing_actions") for visit in visits) else "无异常"
+        return report_date.strftime(f"%Y年%m月%d日AI货台分析报告-{suffix}")
 
     @classmethod
     def build_daily_summary_text(

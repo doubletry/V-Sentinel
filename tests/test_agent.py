@@ -106,13 +106,77 @@ class TestAnalysisAgentBuildSummary:
 
     def test_build_daily_summary_table_rows_merges_all_sources(self):
         rows = AnalysisAgent.build_daily_summary_table_rows([
-            {"source_name": "Cam1", "missing_actions": ["HandOverKeys"]},
-            {"source_name": "Cam2", "missing_actions": []},
-        ])
+            {
+                "source_name": "Cam1",
+                "plate": "ABC123",
+                "enter_time": "2026-01-01T00:00:00+00:00",
+                "exit_time": "2026-01-01T01:00:00+00:00",
+                "missing_actions": ["HandOverKeys"],
+            },
+            {
+                "source_name": "Cam2",
+                "plate": "",
+                "enter_time": "2026-01-01T02:00:00+00:00",
+                "exit_time": "2026-01-01T03:00:00+00:00",
+                "missing_actions": [],
+            },
+        ], timezone_name="Asia/Shanghai")
         assert rows == [
-            ["1", "", "Cam1", "货台检查", "上交钥匙"],
-            ["2", "", "Cam2", "货台检查", "无异常"],
+            [
+                "1",
+                "",
+                "Cam1",
+                "货台检查\n车牌号：ABC123\n到达时间：2026-01-01 08:00:00\n离开时间：2026-01-01 09:00:00",
+                "上交钥匙",
+            ],
+            [
+                "2",
+                "",
+                "Cam2",
+                "货台检查\n车牌号：未识别\n到达时间：2026-01-01 10:00:00\n离开时间：2026-01-01 11:00:00",
+                "无异常",
+            ],
         ]
+
+    def test_build_daily_summary_email_subject_uses_status(self):
+        assert AnalysisAgent.build_daily_summary_email_subject(
+            [],
+            "2026-01-01T01:00:00+00:00",
+            timezone_name="Asia/Shanghai",
+        ) == "2026年01月01日AI货台分析报告-无出货车辆"
+        assert AnalysisAgent.build_daily_summary_email_subject(
+            [{"missing_actions": []}],
+            "2026-01-01T01:00:00+00:00",
+            timezone_name="Asia/Shanghai",
+        ) == "2026年01月01日AI货台分析报告-无异常"
+        assert AnalysisAgent.build_daily_summary_email_subject(
+            [{"missing_actions": ["HandOverKeys"]}],
+            "2026-01-01T01:00:00+00:00",
+            timezone_name="Asia/Shanghai",
+        ) == "2026年01月01日AI货台分析报告-有异常"
+
+    def test_build_daily_summary_html_and_text_tables(self):
+        visits = [
+            {
+                "source_name": "Cam1",
+                "plate": "ABC123",
+                "enter_time": "2026-01-01T00:00:00+00:00",
+                "exit_time": "2026-01-01T01:00:00+00:00",
+                "missing_actions": [],
+            }
+        ]
+        plain_text = AnalysisAgent.build_daily_summary_plain_text_table(
+            visits,
+            timezone_name="Asia/Shanghai",
+        )
+        html = AnalysisAgent.build_daily_summary_html_table(
+            visits,
+            timezone_name="Asia/Shanghai",
+        )
+        assert "序号\t区域\t回放位置或IP\t抽查内容/类型\tAI视觉分析结果" in plain_text
+        assert "车牌号：ABC123" in plain_text
+        assert "<table" in html
+        assert "货台检查<br>车牌号：ABC123" in html
 
 
 class TestAnalysisAgentAggregation:

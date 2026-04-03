@@ -1285,6 +1285,37 @@ class TestProcessorKeyMessages:
         assert len(plate_msgs) == 1
         assert "BLX785" in plate_msgs[0]["message"]
 
+    async def test_same_plate_does_not_emit_duplicate_message(self):
+        from core.truck.processor import TruckMonitorProcessor
+
+        vengine = AsyncMock()
+        vengine.upload_and_get_key.return_value = "frame-key"
+        vengine.detect.return_value = [_truck_det(10, 10, 200, 200, label="truck")]
+        vengine.ocr.return_value = [
+            {"text": "ABC123", "confidence": 0.9, "points": [], "image_id": 0},
+        ]
+        vengine.classify.return_value = []
+
+        proc = TruckMonitorProcessor(
+            source_id="s1", source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            vengine_client=vengine,
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc.tracker = TruckTracker(min_presence_frames=1, ocr_interval=0)
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+        first = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        second = await proc.process_frame(
+            frame=frame, encoded=b"jpeg",
+            shape=(480, 640, 3), roi_pixel_points=[],
+        )
+        assert len([m for m in first.messages if "识别到车牌" in m.get("message", "")]) == 1
+        assert [m for m in second.messages if "识别到车牌" in m.get("message", "")] == []
+
     async def test_action_confirmation_message_has_image(self):
         """Action-confirmed message includes an image snapshot."""
         from core.truck.processor import TruckMonitorProcessor

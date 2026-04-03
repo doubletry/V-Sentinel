@@ -59,7 +59,7 @@ PY
 first_existing_file() {
   local value
   for value in "$@"; do
-    if [[ -n "${value:-}" && -f "$value" ]] && grep -q '^-----BEGIN CERTIFICATE-----' "$value"; then
+    if [[ -n "${value:-}" && -f "$value" ]] && head -n 5 "$value" | grep -q '^-----BEGIN CERTIFICATE-----'; then
       printf '%s' "$value"
       return 0
     fi

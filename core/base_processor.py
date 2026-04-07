@@ -926,10 +926,10 @@ class BaseVideoProcessor(ABC):
                     self._push_proc.stdin.write(frame.tobytes())
                     self._push_proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
-                logger.warning("Push error for {}: {}", output_rtsp_path, exc)
+                logger.warning("Push error for {}: {}", rtsp_url, exc)
                 self._close_push_process()
             except Exception as exc:
-                logger.warning("Push error for {}: {}", output_rtsp_path, exc)
+                logger.warning("Push error for {}: {}", rtsp_url, exc)
                 self._close_push_process()
 
     def _close_push_process(self) -> None:

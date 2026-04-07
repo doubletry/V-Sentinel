@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -20,12 +21,17 @@ from loguru import logger
 
 from core.analysis_agent import BaseAnalysisAgent
 from core.base_processor import AnalysisResult
-from core.truck.constants import DAILY_SUMMARY_HOUR, DAILY_SUMMARY_MINUTE, LABEL_EN_TO_ZH
+from core.truck.constants import (
+    DAILY_SUMMARY_HOUR,
+    DAILY_SUMMARY_MINUTE,
+    translate_label,
+    translate_labels,
+)
 
 MessageFactory = Callable[[Any], Any]
 PersistVisitHook = Callable[[str, str, dict[str, Any]], Awaitable[None]]
 LoadVisitsHook = Callable[[str], Awaitable[list[dict[str, Any]]]]
-SendDailySummaryEmailHook = Callable[[str, str], Awaitable[None]]
+SendDailySummaryEmailHook = Callable[[str, str, list[dict[str, Any]]], Awaitable[None]]
 LoadAppSettingsHook = Callable[[], Awaitable[dict[str, str]]]
 
 
@@ -123,12 +129,17 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             return []
         return await self._load_visits_since_hook(since_iso)
 
-    async def send_daily_summary_email(self, summary_text: str, until_iso: str) -> None:
+    async def send_daily_summary_email(
+        self,
+        summary_text: str,
+        until_iso: str,
+        visits: list[dict[str, Any]],
+    ) -> None:
         """Scenario hook for sending the daily summary through email.
         场景钩子：通过邮件发送每日总结。"""
         if self._send_daily_summary_email_hook is None:
             return
-        await self._send_daily_summary_email_hook(summary_text, until_iso)
+        await self._send_daily_summary_email_hook(summary_text, until_iso, visits)
 
     async def load_app_settings(self) -> dict[str, str]:
         """Scenario hook for fetching current app settings.
@@ -229,7 +240,7 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             )
         )
         try:
-            await self.send_daily_summary_email(summary_text, now_iso)
+            await self.send_daily_summary_email(summary_text, now_iso, visits)
         except Exception as exc:
             logger.error("Failed to send daily summary email: {}", exc)
         logger.info("Daily summary broadcast: {} visit(s)", len(visits))
@@ -238,7 +249,130 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
     def _translate_label(label: str) -> str:
         """Translate English labels to Chinese for summaries.
         将英文标签翻译为中文，用于总结。"""
-        return LABEL_EN_TO_ZH.get(label, label)
+        return translate_label(label)
+
+    @classmethod
+    def translate_visit(cls, visit: dict[str, Any]) -> dict[str, Any]:
+        """Return one visit with truck action labels translated to Chinese.
+        返回一个将 truck 动作标签翻译为中文的到访记录。"""
+        normalized = dict(visit)
+        normalized["confirmed_actions"] = translate_labels(
+            visit.get("confirmed_actions", [])
+        )
+        normalized["missing_actions"] = translate_labels(visit.get("missing_actions", []))
+        return normalized
+
+    @classmethod
+    def translate_visits(cls, visits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return translated truck visits for UI/API consumption.
+        返回供 UI/API 使用的已翻译 truck 到访记录。"""
+        return [cls.translate_visit(visit) for visit in visits]
+
+    @classmethod
+    def build_daily_summary_table_rows(
+        cls,
+        visits: list[dict[str, Any]],
+        *,
+        timezone_name: str = "UTC",
+    ) -> list[list[str]]:
+        """Build attachment rows for the truck daily-summary table.
+        构建 truck 每日总结表格附件的数据行。"""
+        tzinfo = cls._get_zoneinfo(timezone_name)
+        rows: list[list[str]] = []
+        for index, visit in enumerate(visits, start=1):
+            translated = cls.translate_visit(visit)
+            missing = translated.get("missing_actions", [])
+            plate = str(translated.get("plate") or "未识别")
+            enter_time = cls._format_visit_time(
+                str(translated.get("enter_time") or ""),
+                tzinfo=tzinfo,
+            )
+            exit_time = cls._format_visit_time(
+                str(translated.get("exit_time") or ""),
+                tzinfo=tzinfo,
+            )
+            rows.append(
+                [
+                    str(index),
+                    "",
+                    str(translated.get("source_name") or translated.get("source_id") or ""),
+                    (
+                        "货台检查\n"
+                        f"车牌号：{plate}\n"
+                        f"到达时间：{enter_time}\n"
+                        f"离开时间：{exit_time}"
+                    ),
+                    f"未执行 {'、'.join(missing)}" if missing else "无异常",
+                ]
+            )
+        return rows
+
+    @classmethod
+    def build_daily_summary_table_headers(cls) -> list[str]:
+        """Return headers for the truck daily-summary report table.
+        返回 truck 每日总结报表表头。"""
+        return ["序号", "区域", "回放位置或IP", "抽查内容/类型", "AI视觉分析结果"]
+
+    @classmethod
+    def build_daily_summary_plain_text_table(
+        cls,
+        visits: list[dict[str, Any]],
+        *,
+        timezone_name: str = "UTC",
+    ) -> str:
+        """Render the truck daily-summary table as plain text.
+        将 truck 每日总结表格渲染为纯文本。"""
+        headers = cls.build_daily_summary_table_headers()
+        rows = cls.build_daily_summary_table_rows(visits, timezone_name=timezone_name)
+        all_rows = [headers, *rows]
+        return "\n".join("\t".join(row) for row in all_rows)
+
+    @classmethod
+    def build_daily_summary_html_table(
+        cls,
+        visits: list[dict[str, Any]],
+        *,
+        timezone_name: str = "UTC",
+    ) -> str:
+        """Render the truck daily-summary table as HTML.
+        将 truck 每日总结表格渲染为 HTML。"""
+        headers = cls.build_daily_summary_table_headers()
+        rows = cls.build_daily_summary_table_rows(visits, timezone_name=timezone_name)
+        thead = "".join(f"<th>{escape(header)}</th>" for header in headers)
+        body_rows: list[str] = []
+        for row in rows:
+            cells = "".join(
+                f"<td>{escape(cell).replace(chr(10), '<br>')}</td>"
+                for cell in row
+            )
+            body_rows.append(f"<tr>{cells}</tr>")
+        tbody = "".join(body_rows)
+        return (
+            "<table border='1' cellspacing='0' cellpadding='6'>"
+            f"<thead><tr>{thead}</tr></thead>"
+            f"<tbody>{tbody}</tbody>"
+            "</table>"
+        )
+
+    @classmethod
+    def build_daily_summary_email_subject(
+        cls,
+        visits: list[dict[str, Any]],
+        until_iso: str,
+        *,
+        timezone_name: str = "UTC",
+    ) -> str:
+        """Build the truck daily-summary email subject.
+        构建 truck 每日总结邮件标题。"""
+        tzinfo = cls._get_zoneinfo(timezone_name)
+        try:
+            report_date = datetime.fromisoformat(until_iso).astimezone(tzinfo)
+        except Exception:
+            report_date = datetime.now(tzinfo)
+        suffix = "无出货车辆"
+        if visits:
+            suffix = "有异常" if any(visit.get("missing_actions") for visit in visits) else "无异常"
+        return report_date.strftime(f"%Y年%m月%d日AI货台分析报告-{suffix}")
 
     @classmethod
     def build_daily_summary_text(
@@ -294,14 +428,8 @@ class TruckAnalysisAgent(BaseAnalysisAgent):
             parts.append(f"\n▸ 摄像头「{source_name}」：{len(source_visits)} 辆车")
             for index, visit in enumerate(source_visits, start=1):
                 plate = visit.get("plate") or "未识别"
-                confirmed = [
-                    cls._translate_label(label)
-                    for label in visit.get("confirmed_actions", [])
-                ]
-                missing = [
-                    cls._translate_label(label)
-                    for label in visit.get("missing_actions", [])
-                ]
+                confirmed = translate_labels(visit.get("confirmed_actions", []))
+                missing = translate_labels(visit.get("missing_actions", []))
                 confirmed_str = "、".join(confirmed) if confirmed else "无"
                 missing_str = "、".join(missing) if missing else "无"
                 status = "✅ 合规" if not missing else "⚠️ 缺少动作"

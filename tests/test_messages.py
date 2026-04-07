@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 from httpx import AsyncClient
 
 from backend.db.database import (
+    build_analysis_message_image_url,
     get_vehicle_visits_between,
     list_analysis_messages,
     save_analysis_message,
@@ -30,6 +32,27 @@ class TestMessagePersistence:
         rows = await list_analysis_messages(limit=10)
         assert len(rows["items"]) == 1
         assert rows["items"][0]["message"] == "hello"
+
+    async def test_save_message_persists_image_to_filesystem(self, async_client: AsyncClient):
+        encoded = base64.b64encode(b"jpeg-bytes").decode("ascii")
+        await save_analysis_message(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source_name": "Cam1",
+                "source_id": "s1",
+                "level": "info",
+                "message": "hello",
+                "image_base64": encoded,
+            }
+        )
+
+        rows = await list_analysis_messages(limit=10)
+        assert rows["items"][0]["image_url"].startswith("/api/messages/")
+        assert rows["items"][0]["image_base64"] is None
+
+        resp = await async_client.get(rows["items"][0]["image_url"])
+        assert resp.status_code == 200
+        assert resp.content == b"jpeg-bytes"
 
     async def test_retention_prunes_old_messages(self, init_db):
         await update_settings({"message_retention_days": "1"})
@@ -60,6 +83,23 @@ class TestMessagePersistence:
 
 
 class TestMessagesAPI:
+    async def test_message_image_endpoint_uses_message_id_url(self, async_client: AsyncClient):
+        encoded = base64.b64encode(b"jpeg-bytes").decode("ascii")
+        message_id = await save_analysis_message(
+            {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source_name": "Cam1",
+                "source_id": "s1",
+                "level": "info",
+                "message": "persisted",
+                "image_base64": encoded,
+            }
+        )
+
+        resp = await async_client.get(build_analysis_message_image_url(message_id))
+        assert resp.status_code == 200
+        assert resp.content == b"jpeg-bytes"
+
     async def test_list_persisted_messages(self, async_client: AsyncClient):
         await save_analysis_message(
             {
@@ -78,6 +118,7 @@ class TestMessagesAPI:
         assert data["items"][0]["message"] == "persisted"
         assert data["items"][0]["level"] == "warning"
         assert data["total"] == 1
+        assert "image_url" in data["items"][0]
 
     async def test_list_persisted_messages_paginates(self, async_client: AsyncClient):
         for index in range(25):
@@ -116,14 +157,16 @@ class TestMessagesAPI:
             enter_time=now,
             exit_time=now,
             plate="ABC123",
-            confirmed_actions=["车身外检"],
-            missing_actions=["货物拍照"],
+            confirmed_actions=["ExteriorInspectionOfTruck"],
+            missing_actions=["TakePhotosOfGoods"],
         )
 
         resp = await async_client.get("/api/vehicle-events/today")
         assert resp.status_code == 200
         data = resp.json()
         assert data["visits"][0]["plate"] == "ABC123"
+        assert data["visits"][0]["confirmed_actions"] == ["车外检查"]
+        assert data["visits"][0]["missing_actions"] == ["货物拍照"]
         assert "ABC123" in data["summary_text"]
         assert "到达时间" in data["summary_text"]
         assert "离开时间" in data["summary_text"]
@@ -144,7 +187,7 @@ class TestMessagesAPI:
             enter_time=now,
             exit_time=now,
             plate="XYZ888",
-            confirmed_actions=["车身外检"],
+            confirmed_actions=["车外检查"],
             missing_actions=[],
         )
 

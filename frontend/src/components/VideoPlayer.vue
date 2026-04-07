@@ -45,17 +45,19 @@ const appSettingsStore = useAppSettingsStore()
 let _conn = null
 let _reconnectTimer = null
 let _reconnectAttempts = 0
+let _shouldReconnect = false
 const MAX_RECONNECT_DELAY = 30000 // 30s cap
 const STREAM_PENDING_RETRY_DELAY = 1000
 
 function _scheduleReconnect(delayOverride = null) {
+  if (!_shouldReconnect || !props.streamPath) return
   if (_reconnectTimer) return
   // Exponential backoff: 2s, 4s, 8s, 16s, 30s cap
   const delay = delayOverride ?? Math.min(2000 * Math.pow(2, _reconnectAttempts), MAX_RECONNECT_DELAY)
   _reconnectAttempts++
   _reconnectTimer = setTimeout(() => {
     _reconnectTimer = null
-    if (props.streamPath) connect()
+    if (_shouldReconnect && props.streamPath) connect()
   }, delay)
 }
 
@@ -68,6 +70,7 @@ function _cancelReconnect() {
 
 async function connect() {
   if (!props.streamPath) return
+  _shouldReconnect = true
   error.value = ''
   connected.value = false
 
@@ -78,6 +81,11 @@ async function connect() {
 
   try {
     _conn = await connectWebRTC(props.streamPath, videoEl.value, appSettingsStore.mediamtxWebrtcAddr)
+    if (!_shouldReconnect) {
+      _conn?.stop?.()
+      _conn = null
+      return
+    }
     connected.value = true
     _reconnectAttempts = 0
 
@@ -85,7 +93,7 @@ async function connect() {
     if (_conn.pc) {
       _conn.pc.onconnectionstatechange = () => {
         const state = _conn?.pc?.connectionState
-        if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+        if (_shouldReconnect && (state === 'failed' || state === 'disconnected' || state === 'closed')) {
           connected.value = false
           error.value = t('videoPlayer.connectionLost')
           _scheduleReconnect()
@@ -105,6 +113,7 @@ async function connect() {
 }
 
 function disconnect() {
+  _shouldReconnect = false
   _cancelReconnect()
   if (_conn) {
     _conn.stop()

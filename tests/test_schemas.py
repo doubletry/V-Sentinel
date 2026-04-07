@@ -138,6 +138,7 @@ class TestAnalysisMessage:
             level="info",
             message="Hello",
         )
+        assert m.image_url is None
         assert m.image_base64 is None
 
     def test_with_image(self):
@@ -147,6 +148,8 @@ class TestAnalysisMessage:
             source_id="1",
             level="alert",
             message="Alert!",
+            image_url="/message-images/2024-01-01/demo.jpg",
             image_base64="abc123==",
         )
+        assert m.image_url == "/message-images/2024-01-01/demo.jpg"
         assert m.image_base64 == "abc123=="

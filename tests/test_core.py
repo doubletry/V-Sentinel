@@ -628,7 +628,7 @@ class TestCoreBaseVideoProcessorPipeline:
         assert proc._source_fps == 30.0
         assert proc._current_publish_fps() == 10.0
 
-    def test_push_frame_uses_dynamic_fps_and_udp_transport(self, monkeypatch):
+    def test_push_frame_uses_dynamic_fps_and_tcp_transport(self, monkeypatch):
         proc = DummyCoreProcessor(
             source_id="s1",
             source_name="cam",
@@ -670,7 +670,7 @@ class TestCoreBaseVideoProcessorPipeline:
         assert cmd[0] == "ffmpeg"
         assert "-f" in cmd and "rawvideo" in cmd
         assert "-pix_fmt" in cmd and "rgb24" in cmd
-        assert "-rtsp_transport" in cmd and "udp" in cmd
+        assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
         assert "rtsp://localhost:8554/cam1_processed" == cmd[-1]
         assert f"{proc._current_publish_fps():.3f}" in cmd

@@ -420,8 +420,7 @@ class TruckTracker:
         """
         if self._track is None or self._track.track_id != track_id:
             return ""
-        normalized_label = label
-        self._track.action_history.append(normalized_label)
+        self._track.action_history.append(label)
         stable = _majority_vote(
             self._track.action_history,
             min_count=self.stability_min_count,

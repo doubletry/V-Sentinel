@@ -22,9 +22,10 @@ V-Sentinel is a full-stack video surveillance AI analysis platform that integrat
 │           │ WebRTC (WHEP)                   │ gRPC (async)          │
 │           ▼                                 ▼                       │
 │  ┌─────────────────┐         ┌──────────────────────────────────┐   │
-│  │    MediaMTX     │         │          V-Engine                │   │
-│  │  (RTSP→WebRTC)  │         │  Detection / Classification /   │   │
-│  └─────────────────┘         │  Action / OCR / Upload           │   │
+│  │ External RTSP / │         │          V-Engine                │   │
+│  │ WebRTC Gateway  │         │  Detection / Classification /   │   │
+│  │ (e.g. MediaMTX) │         │  Action / OCR / Upload           │   │
+│  └─────────────────┘         │                                  │   │
 │                               └──────────────────────────────────┘   │
 │                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐   │
@@ -63,7 +64,7 @@ Backend Async Processing Architecture:
 |---|---|
 | Frontend | Vue 3 + Element Plus + Vite |
 | Backend | FastAPI (Python, fully async) |
-| Video Streaming | MediaMTX (RTSP → WebRTC) |
+| Video Streaming | External RTSP/WebRTC gateway (MediaMTX-compatible) |
 | AI Inference | V-Engine gRPC microservices |
 | JPEG Encoding | TurboJPEG (via PyTurboJPEG) |
 | RTSP Push | Persistent av container per camera |
@@ -82,7 +83,7 @@ Backend Async Processing Architecture:
 - **Python** >= 3.11
 - **uv** — [install](https://docs.astral.sh/uv/getting-started/installation/)
 - **libturbojpeg** — required by PyTurboJPEG (`apt install libturbojpeg0-dev` on Debian/Ubuntu)
-- **MediaMTX** — [download](https://github.com/bluenviron/mediamtx/releases) or use Docker
+- **Optional video gateway** — a MediaMTX-compatible RTSP/WebRTC gateway is only required for the Video Wall page
 - **V-Engine** — running gRPC microservices (see [V-Engine repo](https://github.com/doubletry/V-Engine))
 
 ---
@@ -148,13 +149,15 @@ ACTION_ADDR=localhost:50053
 OCR_ADDR=localhost:50054
 UPLOAD_ADDR=localhost:50050
 
-# MediaMTX
+# Optional external video gateway (for Video Wall playback only)
 MEDIAMTX_RTSP_ADDR=rtsp://localhost:8554
 MEDIAMTX_WEBRTC_ADDR=http://localhost:8889
 
 # Database
 DB_PATH=./v_sentinel.db
 ```
+
+Runtime message thumbnails are persisted beside the database in `message_thumbnails/`.
 
 ### Frontend proxy port
 
@@ -313,11 +316,25 @@ See [`docs/processor-plugin-usage.md`](docs/processor-plugin-usage.md).
 
 ---
 
-## Docker Compose
+## Docker
+
+This repository now ships a **single-container** deployment flow.
 
 ```bash
-docker-compose up mediamtx
+./scripts/build_docker.sh
+docker run -d \
+  --name v-sentinel \
+  -p 8000:8000 \
+  -e DB_PATH=/app/data/v_sentinel.db \
+  -v "$(pwd)/data:/app/data" \
+  v-sentinel:latest
 ```
+
+- Frontend, REST API, WebSocket, and persisted message thumbnails are all served from port `8000`
+- `docker-compose` is no longer required
+- MediaMTX is not bundled into the image; configure any external RTSP/WebRTC gateway in the Settings page if you need live video playback
+
+See [`docs/docker-deployment.md`](docs/docker-deployment.md) for details.
 
 ---
 

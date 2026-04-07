@@ -67,6 +67,27 @@ class TestWSManager:
         ws1.send_text.assert_awaited_once()
         ws2.send_text.assert_awaited_once()
 
+    async def test_broadcast_image_uses_public_api_url_after_persist(self):
+        persisted = AsyncMock(return_value="message-123")
+        mgr = WSManager(persist_message=persisted)
+        ws = AsyncMock()
+        await mgr.connect(ws)
+
+        msg = AnalysisMessage(
+            timestamp="2026-04-03T00:00:00Z",
+            source_name="cam",
+            source_id="1",
+            level="info",
+            message="snapshot",
+            image_url="2026-04-03/demo.jpg",
+        )
+
+        await mgr.broadcast(msg)
+
+        persisted.assert_awaited_once()
+        payload = ws.send_text.call_args[0][0]
+        assert "/api/messages/message-123/image" in payload
+
     async def test_broadcast_removes_dead_connections(self):
         mgr = WSManager()
         ws_ok = AsyncMock()

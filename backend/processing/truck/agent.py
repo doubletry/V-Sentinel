@@ -55,7 +55,11 @@ class AnalysisAgent(TruckAnalysisAgent):
 
             return await get_all_settings()
 
-        async def _send_daily_summary_email(summary_text: str, until_iso: str) -> None:
+        async def _send_daily_summary_email(
+            summary_text: str,
+            until_iso: str,
+            visits: list[dict[str, str]],
+        ) -> None:
             from backend.db.database import get_all_settings
 
             app_settings = await get_all_settings()
@@ -63,6 +67,7 @@ class AnalysisAgent(TruckAnalysisAgent):
                 app_settings=app_settings,
                 summary_text=summary_text,
                 until_iso=until_iso,
+                visits=visits,
             )
 
         def _message_factory(message: object) -> AnalysisMessage:

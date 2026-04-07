@@ -511,18 +511,27 @@ class BaseVideoProcessor(ABC):
         return {"classifications": classifications}
 
     def _encode_thumbnail(
-        self, frame: np.ndarray | None, max_width: int = 480
+        self,
+        frame: np.ndarray | None,
+        max_width: int = 1920,
+        max_height: int = 1080,
     ) -> str | None:
-        """Encode a frame as a base64 JPEG thumbnail (RGB channel order).
-        将帧编码为 base64 JPEG 缩略图（RGB 通道顺序）。"""
+        """Encode a message image as a base64 JPEG, capped at Full HD by default.
+        将消息图像编码为 base64 JPEG，默认限制在 Full HD 尺寸内。"""
         if frame is None:
             return None
 
         h, w = frame.shape[:2]
-        if w > max_width:
-            scale = max_width / w
+        if h <= 0 or w <= 0:
+            return None
+        if w > max_width or h > max_height:
+            scale = min(max_width / w, max_height / h)
+            resized_width = min(max_width, max(1, int(round(w * scale))))
+            resized_height = min(max_height, max(1, int(round(h * scale))))
             frame = cv2.resize(
-                frame, (max_width, int(h * scale)), interpolation=cv2.INTER_AREA
+                frame,
+                (resized_width, resized_height),
+                interpolation=cv2.INTER_AREA,
             )
 
         if _jpeg is not None:
@@ -917,10 +926,10 @@ class BaseVideoProcessor(ABC):
                     self._push_proc.stdin.write(frame.tobytes())
                     self._push_proc.stdin.flush()
             except (BrokenPipeError, OSError) as exc:
-                logger.warning("Push error for {}: {}", output_rtsp_path, exc)
+                logger.warning("Push error for {}: {}", rtsp_url, exc)
                 self._close_push_process()
             except Exception as exc:
-                logger.warning("Push error for {}: {}", output_rtsp_path, exc)
+                logger.warning("Push error for {}: {}", rtsp_url, exc)
                 self._close_push_process()
 
     def _close_push_process(self) -> None:

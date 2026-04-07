@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from loguru import logger
 
+from backend.db.database import build_analysis_message_image_url, materialize_message_image
 from backend.models.schemas import AnalysisMessage
 
 router = APIRouter()
@@ -17,7 +18,7 @@ class WSManager:
 
     def __init__(
         self,
-        persist_message: Callable[[AnalysisMessage], Awaitable[None]] | None = None,
+        persist_message: Callable[[AnalysisMessage], Awaitable[str | None]] | None = None,
     ) -> None:
         self._connections: set[WebSocket] = set()
         self._lock = asyncio.Lock()
@@ -45,8 +46,19 @@ class WSManager:
     async def broadcast(self, message: AnalysisMessage) -> None:
         """Send a message to all connected WebSocket clients.
         向所有已连接的 WebSocket 客户端发送消息。"""
+        if message.image_base64 and not message.image_url:
+            message.image_url = materialize_message_image(
+                message.image_base64,
+                timestamp=message.timestamp,
+            )
+            if message.image_url:
+                message.image_base64 = None
         if self._persist_message is not None:
-            await self._persist_message(message)
+            message_id = await self._persist_message(message)
+        else:
+            message_id = None
+        if message_id and message.image_url:
+            message.image_url = build_analysis_message_image_url(message_id)
         payload = message.model_dump_json()
         dead: list[WebSocket] = []
         async with self._lock:

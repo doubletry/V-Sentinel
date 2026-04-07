@@ -17,7 +17,12 @@ from backend.api import sources as sources_router
 from backend.api import vehicle_events as vehicle_events_router
 from backend.api import ws as ws_module
 from backend.config import settings
-from backend.db.database import close_db, get_all_settings, init_db, save_analysis_message
+from backend.db.database import (
+    close_db,
+    get_all_settings,
+    init_db,
+    save_analysis_message,
+)
 from backend.processing.log_buffer import processing_log_buffer
 from backend.processing.manager import ProcessorManager
 from backend.vengine.client import AsyncVEngineClient
@@ -111,8 +116,8 @@ async def lifespan(app: FastAPI):
     _configure_stdlib_log_capture()
 
     # Initialize WebSocket manager / 初始化 WebSocket 管理器
-    async def _persist_message(message) -> None:
-        await save_analysis_message(message.model_dump())
+    async def _persist_message(message) -> str:
+        return await save_analysis_message(message.model_dump())
 
     ws_manager = ws_module.WSManager(persist_message=_persist_message)
 

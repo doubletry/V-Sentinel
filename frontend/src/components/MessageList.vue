@@ -18,11 +18,11 @@
         <span class="msg-time">{{ formatTimeWithTimezone(msg.timestamp, appSettingsStore.timeZone) }}</span>
       </div>
       <div class="msg-body">{{ msg.message }}</div>
-      <div v-if="msg.image_base64" class="msg-image">
+      <div v-if="messageImageSrc(msg)" class="msg-image">
         <img
-          :src="`data:image/jpeg;base64,${msg.image_base64}`"
+          :src="messageImageSrc(msg)"
           alt="snapshot"
-          @dblclick="openPreview(msg.image_base64)"
+          @dblclick="openPreview(messageImageSrc(msg))"
         />
       </div>
     </div>
@@ -61,8 +61,14 @@ function levelType(level) {
   return map[level] ?? ''
 }
 
-function openPreview(imageBase64) {
-  previewImage.value = `data:image/jpeg;base64,${imageBase64}`
+function messageImageSrc(message) {
+  if (message?.image_url) return message.image_url
+  if (message?.image_base64) return `data:image/jpeg;base64,${message.image_base64}`
+  return ''
+}
+
+function openPreview(imageSrc) {
+  previewImage.value = imageSrc
   previewVisible.value = true
 }
 </script>

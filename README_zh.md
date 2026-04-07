@@ -22,9 +22,10 @@ V-Sentinel 是一个全栈视频监控 AI 分析平台，与 [V-Engine](https://
 │           │ WebRTC (WHEP)                   │ gRPC (异步)           │
 │           ▼                                 ▼                       │
 │  ┌─────────────────┐         ┌──────────────────────────────────┐   │
-│  │    MediaMTX     │         │          V-Engine                │   │
-│  │  (RTSP→WebRTC)  │         │  检测 / 分类 / 行为分析 /        │   │
-│  └─────────────────┘         │  OCR / 上传                       │   │
+│  │ 外部 RTSP /     │         │          V-Engine                │   │
+│  │ WebRTC 网关     │         │  检测 / 分类 / 行为分析 /        │   │
+│  │ (如 MediaMTX)   │         │  OCR / 上传                       │   │
+│  └─────────────────┘         │                                  │   │
 │                               └──────────────────────────────────┘   │
 │                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐   │
@@ -62,7 +63,7 @@ V-Sentinel 是一个全栈视频监控 AI 分析平台，与 [V-Engine](https://
 |---|---|
 | 前端 | Vue 3 + Element Plus + Vite |
 | 后端 | FastAPI（Python，全异步） |
-| 视频流 | MediaMTX（RTSP → WebRTC） |
+| 视频流 | 外部 RTSP/WebRTC 网关（兼容 MediaMTX） |
 | AI 推理 | V-Engine gRPC 微服务 |
 | JPEG 编码 | TurboJPEG（通过 PyTurboJPEG） |
 | RTSP 推流 | 每路摄像头维持持久化 av 容器 |
@@ -81,7 +82,7 @@ V-Sentinel 是一个全栈视频监控 AI 分析平台，与 [V-Engine](https://
 - **Python** >= 3.11
 - **uv** — [安装指南](https://docs.astral.sh/uv/getting-started/installation/)
 - **libturbojpeg** — PyTurboJPEG 依赖（Debian/Ubuntu 下：`apt install libturbojpeg0-dev`）
-- **MediaMTX** — [下载](https://github.com/bluenviron/mediamtx/releases) 或使用 Docker
+- **可选视频网关** — 仅当需要使用视频墙播放时，才需要准备兼容 MediaMTX 的 RTSP/WebRTC 网关
 - **V-Engine** — 运行中的 gRPC 微服务（参见 [V-Engine 仓库](https://github.com/doubletry/V-Engine)）
 
 ---
@@ -147,13 +148,15 @@ ACTION_ADDR=localhost:50053
 OCR_ADDR=localhost:50054
 UPLOAD_ADDR=localhost:50050
 
-# MediaMTX
+# 可选外部视频网关（仅视频墙播放需要）
 MEDIAMTX_RTSP_ADDR=rtsp://localhost:8554
 MEDIAMTX_WEBRTC_ADDR=http://localhost:8889
 
 # 数据库
 DB_PATH=./v_sentinel.db
 ```
+
+运行时消息缩略图会保存在数据库同级目录下的 `message_thumbnails/` 中。
 
 ### 前端代理端口
 
@@ -301,11 +304,25 @@ class MyProcessor(BaseVideoProcessor):
 
 ---
 
-## Docker Compose
+## Docker
+
+仓库现已改为**单容器**部署方式。
 
 ```bash
-docker-compose up mediamtx
+./scripts/build_docker.sh
+docker run -d \
+  --name v-sentinel \
+  -p 8000:8000 \
+  -e DB_PATH=/app/data/v_sentinel.db \
+  -v "$(pwd)/data:/app/data" \
+  v-sentinel:latest
 ```
+
+- 前端、REST API、WebSocket 和消息缩略图统一由 `8000` 端口提供
+- 不再需要 `docker-compose`
+- 镜像内不再打包 MediaMTX；如需视频墙播放，请在设置页配置外部 RTSP/WebRTC 网关
+
+详见 [`docs/docker-deployment.md`](docs/docker-deployment.md)。
 
 ---
 

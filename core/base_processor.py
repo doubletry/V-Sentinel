@@ -48,6 +48,7 @@ GOP_DIVISOR = 2
 PUSH_STARTUP_CHECK_DELAY = 0.3  # seconds to wait after spawning ffmpeg to verify it is alive / 创建 ffmpeg 后等待验证存活的秒数
 PUSH_RETRY_BASE_COOLDOWN = 2.0  # initial cooldown seconds after push failure / 推流失败后的初始冷却秒数
 PUSH_RETRY_MAX_COOLDOWN = 30.0  # maximum cooldown between retries / 重试之间的最大冷却秒数
+MAX_STDERR_LOG_CHARS = 500  # truncation limit for logged ffmpeg stderr / 日志中 ffmpeg stderr 的截断长度
 
 try:
     from turbojpeg import TurboJPEG, TJPF_RGB
@@ -1007,7 +1008,7 @@ class BaseVideoProcessor(ABC):
                 return "(process still running)"
             data = self._push_proc.stderr.read()
             if data:
-                return data.decode("utf-8", errors="replace").strip()[-500:]
+                return data.decode("utf-8", errors="replace").strip()[-MAX_STDERR_LOG_CHARS:]
             return ""
         except Exception:
             return ""

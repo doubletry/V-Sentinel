@@ -771,8 +771,9 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._update_publish_fps(30.0)
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
 
-        # Set a cooldown in the future.
-        proc._push_retry_after = _time.monotonic() + 999
+        # Set a cooldown far in the future so it is guaranteed to be active.
+        _far_future_seconds = 3600
+        proc._push_retry_after = _time.monotonic() + _far_future_seconds
         proc._push_consecutive_failures = 1
 
         popen_called = []

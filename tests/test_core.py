@@ -615,6 +615,43 @@ class TestCoreBaseVideoProcessorPipeline:
         assert pushed
         assert any(frame.sum() == frame.size * 255 for frame in pushed)
 
+    async def test_output_worker_survives_push_frame_exception(self):
+        """Output worker should keep running even if _push_frame raises."""
+        class OutputProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = OutputProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        call_count = 0
+
+        def _failing_then_ok_push(frame, path):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient error")
+            # Second call succeeds
+
+        proc._push_frame = _failing_then_ok_push
+        proc._update_publish_fps(TEST_SOURCE_FPS)
+        proc._start_output_worker()
+
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        proc._enqueue_output(
+            frame,
+            AnalysisResult(annotated_frame=frame.copy()),
+            "cam1_processed",
+        )
+        await asyncio.sleep(TEST_PUBLISH_WAIT)
+        proc._stop_output_worker()
+
+        # Output worker should have survived the first exception and called push again.
+        assert call_count >= 2
+
     def test_update_publish_fps_tracks_sampled_input_rate(self):
         proc = DummyCoreProcessor(
             source_id="s1",
@@ -676,6 +713,159 @@ class TestCoreBaseVideoProcessorPipeline:
         assert f"{proc._current_publish_fps():.3f}" in cmd
         captured["proc"].stdin.write.assert_called_once_with(frame.tobytes())
         captured["proc"].stdin.flush.assert_called_once()
+
+    def test_push_frame_captures_stderr_on_immediate_exit(self, monkeypatch):
+        """When ffmpeg exits immediately, stderr is captured and a retry cooldown is set."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        class _DeadProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+                self.stderr = MagicMock()
+                self.returncode = 1
+                self.stderr.read.return_value = b"Connection refused"
+
+            def poll(self):
+                return 1  # process already exited
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        def _fake_popen(cmd, **kwargs):
+            return _DeadProc()
+
+        monkeypatch.setattr("core.base_processor.subprocess.Popen", _fake_popen)
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        # Process should have been cleaned up.
+        assert proc._push_proc is None
+        # Retry cooldown should be active.
+        assert proc._push_consecutive_failures == 1
+        assert proc._push_retry_after > 0
+
+    def test_push_frame_respects_retry_cooldown(self, monkeypatch):
+        """Push attempts are skipped during the retry cooldown period."""
+        import time as _time
+
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        # Set a cooldown in the future.
+        proc._push_retry_after = _time.monotonic() + 999
+        proc._push_consecutive_failures = 1
+
+        popen_called = []
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen",
+            lambda *a, **kw: popen_called.append(1),
+        )
+
+        proc._push_frame(frame, "cam1_processed")
+        # Popen should NOT have been called because we're in cooldown.
+        assert len(popen_called) == 0
+
+    def test_push_frame_resets_failures_on_success(self, monkeypatch):
+        """Successful write resets the consecutive failure counter."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        proc._push_consecutive_failures = 3
+        proc._push_retry_after = 0.0
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        class _FakeProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+                self.stderr = MagicMock()
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen", lambda *a, **kw: _FakeProc()
+        )
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        assert proc._push_consecutive_failures == 0
+        assert proc._push_retry_after == 0.0
+
+    def test_push_frame_broken_pipe_sets_cooldown(self, monkeypatch):
+        """BrokenPipeError sets a retry cooldown and captures stderr."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        class _FailingProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+                self.stdin.write.side_effect = BrokenPipeError("Broken pipe")
+                self.stderr = MagicMock()
+                self.stderr.read.return_value = b""
+                self.returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen", lambda *a, **kw: _FailingProc()
+        )
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        assert proc._push_proc is None
+        assert proc._push_consecutive_failures == 1
+        assert proc._push_retry_after > 0
 
     def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):
         class _CodecContext:

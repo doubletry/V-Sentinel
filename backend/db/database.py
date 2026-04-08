@@ -609,6 +609,17 @@ async def get_vehicle_visits_between(start_iso: str, end_iso: str) -> list[dict]
     return result
 
 
+async def delete_vehicle_visit(visit_id: str) -> bool:
+    """Delete a vehicle visit record by ID. Returns True if a row was deleted.
+    按 ID 删除一条车辆到访记录。若删除了行则返回 True。"""
+    async with _db_session() as db:
+        cursor = await db.execute(
+            "DELETE FROM vehicle_visits WHERE id = ?", (visit_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+
 async def prune_analysis_messages(retention_days: int) -> None:
     """Delete messages older than the configured retention window.
     删除超过保留期的历史消息。"""

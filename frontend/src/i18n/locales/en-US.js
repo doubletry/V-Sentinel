@@ -144,6 +144,12 @@ export default {
     rangeDisplay: 'Showing {start}-{end}',
     none: 'None',
     loadFailed: 'Failed to load vehicle events: {message}',
+    actions: 'Actions',
+    delete: 'Delete',
+    deleteConfirmTitle: 'Confirm Delete',
+    deleteConfirmMessage: 'Delete this vehicle event? This cannot be undone.',
+    deleteSuccess: 'Deleted successfully',
+    deleteFailed: 'Failed to delete: {message}',
   },
   service: {
     noSources: 'No sources available to start',

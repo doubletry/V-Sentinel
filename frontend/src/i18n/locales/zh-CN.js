@@ -144,6 +144,12 @@ export default {
     rangeDisplay: '当前显示 {start}-{end} 条',
     none: '无',
     loadFailed: '加载当天车辆事件失败：{message}',
+    actions: '操作',
+    delete: '删除',
+    deleteConfirmTitle: '确认删除',
+    deleteConfirmMessage: '确认删除此车辆事件？删除后不可恢复。',
+    deleteSuccess: '删除成功',
+    deleteFailed: '删除失败：{message}',
   },
   service: {
     noSources: '暂无可启动的视频源',

@@ -146,7 +146,6 @@ export default {
     loadFailed: 'Failed to load vehicle events: {message}',
     actions: 'Actions',
     delete: 'Delete',
-    deleteConfirmTitle: 'Confirm Delete',
     deleteConfirmMessage: 'Delete this vehicle event? This cannot be undone.',
     deleteSuccess: 'Deleted successfully',
     deleteFailed: 'Failed to delete: {message}',

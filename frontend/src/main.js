@@ -12,6 +12,7 @@ import ElInput from 'element-plus/es/components/input/index'
 import ElLoading from 'element-plus/es/components/loading/index'
 import ElMenu, { ElMenuItem } from 'element-plus/es/components/menu/index'
 import ElPagination from 'element-plus/es/components/pagination/index'
+import ElPopconfirm from 'element-plus/es/components/popconfirm/index'
 import ElScrollbar from 'element-plus/es/components/scrollbar/index'
 import ElSelect, { ElOption } from 'element-plus/es/components/select/index'
 import ElSwitch from 'element-plus/es/components/switch/index'
@@ -65,6 +66,7 @@ const elementPlusComponents = [
   ElMenuItem,
   ElOption,
   ElPagination,
+  ElPopconfirm,
   ElScrollbar,
   ElSelect,
   ElSwitch,

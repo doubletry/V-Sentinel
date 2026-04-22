@@ -12,11 +12,9 @@ function normalizeRoutePath(value) {
  * Connect to a gateway stream via backend-proxied WebRTC (WHEP).
  * @param {string} streamPath - The stream path on MediaMTX (e.g. "camera1")
  * @param {HTMLVideoElement} videoEl - The video element to attach to
- * @param {string} webrtcBaseUrl - Reserved for compatibility with existing callers
- * @param {object} [options] - Reserved for compatibility with existing callers
  * @returns {object} - { pc: RTCPeerConnection, stop: Function }
  */
-export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options = {}) {
+export async function connectWebRTC(streamPath, videoEl) {
   const route = normalizeRoutePath(streamPath)
   const apiBase = normalizeBaseUrl(config.apiBaseUrl)
   const whepUrl = `${apiBase}/api/webrtc/${route}/whep`

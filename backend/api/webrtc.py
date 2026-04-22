@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from backend.db.database import get_all_settings
 
 router = APIRouter(prefix="/api/webrtc", tags=["webrtc"])
-WHEP_PROXY_TIMEOUT_SECONDS = 10.0
+_WHEP_PROXY_TIMEOUT_SECONDS = 10.0
 
 
 def _build_basic_auth_header(username: str, password: str) -> str:
@@ -45,7 +45,7 @@ async def proxy_whep_offer(stream_path: str, request: Request) -> Response:
         )
 
     try:
-        async with httpx.AsyncClient(timeout=WHEP_PROXY_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=_WHEP_PROXY_TIMEOUT_SECONDS) as client:
             upstream = await client.post(target_url, content=offer_sdp, headers=headers)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"WHEP request failed: {exc}") from exc

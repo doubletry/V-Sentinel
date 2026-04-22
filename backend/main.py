@@ -169,6 +169,7 @@ async def lifespan(app: FastAPI):
         app_settings=app_settings,
         email_client=email_client,
     )
+    app.state.processor_manager = processor_manager
     await processor_manager.start_agent()
 
     logger.info("{} started successfully", settings.app_name)

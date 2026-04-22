@@ -51,8 +51,7 @@ async def update_settings(data: AppSettingsUpdate, request: Request) -> dict[str
     await vengine_client.reconnect_from_settings(result)
     email_client = request.app.state.email_client
     await email_client.reconnect_from_settings(result)
-    from backend.main import processor_manager
-    processor_manager.update_app_settings(result)
+    request.app.state.processor_manager.update_app_settings(result)
 
     return result
 

@@ -80,15 +80,7 @@ async function connect() {
   }
 
   try {
-    _conn = await connectWebRTC(
-      props.streamPath,
-      videoEl.value,
-      appSettingsStore.mediamtxWebrtcAddr,
-      {
-        username: appSettingsStore.mediamtxUsername,
-        password: appSettingsStore.mediamtxPassword,
-      }
-    )
+    _conn = await connectWebRTC(props.streamPath, videoEl.value)
     if (!_shouldReconnect) {
       _conn?.stop?.()
       _conn = null

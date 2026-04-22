@@ -21,7 +21,8 @@ export function buildRtspUrl(rtspBaseAddress, routePath, username = '', password
       parsed.username = ''
       parsed.password = ''
     }
-    return `${String(parsed).replace(/\/+$/, '')}/${route}`
+    const href = parsed.toString().replace(/\/+$/, '')
+    return `${href}/${route}`
   } catch (_) {
     return `${base}/${route}`
   }

@@ -564,7 +564,7 @@ def _build_source_rtsp_url(
     return f"{rebuilt}/{route}"
 
 
-def _extract_route_path_from_managed_rtsp_url(
+def _extract_route_path(
     rtsp_url: str,
     rtsp_base_address: str | None,
 ) -> str | None:
@@ -599,7 +599,7 @@ def _extract_route_path_from_managed_rtsp_url(
     if not source_path.startswith(prefix):
         return None
 
-    route = source_path[len(prefix):].strip("/")
+    route = source_path.removeprefix(prefix).strip("/")
     return unquote(route) if route else None
 
 
@@ -626,7 +626,7 @@ async def sync_source_rtsp_urls_with_settings(
         changed_ids: list[str] = []
         for row in rows:
             source_id, _name, rtsp_url, _created_at = row
-            route_path = _extract_route_path_from_managed_rtsp_url(rtsp_url, previous_base)
+            route_path = _extract_route_path(rtsp_url, previous_base)
             if not route_path:
                 continue
 

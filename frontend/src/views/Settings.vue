@@ -428,14 +428,14 @@ async function save() {
   saving.value = true
   const previousSettings = appSettingsStore.settings || {}
   const previousPlugin = previousSettings.processor_plugin || 'truck'
-  const streamSettingsChanged =
+  const mediamtxSettingsChanged =
     previousSettings.mediamtx_rtsp_addr !== form.value.mediamtx_rtsp_addr ||
     previousSettings.mediamtx_username !== form.value.mediamtx_username ||
     previousSettings.mediamtx_password !== form.value.mediamtx_password
   try {
     syncRoiTagOptionsToForm()
     const pluginChanged = previousPlugin !== form.value.processor_plugin
-    const requiresProcessingRefresh = pluginChanged || streamSettingsChanged
+    const requiresProcessingRefresh = pluginChanged || mediamtxSettingsChanged
     let runningSourceIds = []
     if (requiresProcessingRefresh) {
       await sourceStore.syncProcessorStatus()
@@ -446,7 +446,7 @@ async function save() {
     Object.assign(form.value, data)
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     appSettingsStore.applyLanguage(form.value.ui_language)
-    if (streamSettingsChanged) {
+    if (mediamtxSettingsChanged) {
       await sourceStore.fetchSources()
     }
 

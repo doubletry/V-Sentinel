@@ -426,12 +426,18 @@ async function reload() {
 
 async function save() {
   saving.value = true
-  const previousPlugin = appSettingsStore.settings?.processor_plugin || 'truck'
+  const previousSettings = appSettingsStore.settings || {}
+  const previousPlugin = previousSettings.processor_plugin || 'truck'
+  const streamSettingsChanged =
+    previousSettings.mediamtx_rtsp_addr !== form.value.mediamtx_rtsp_addr ||
+    previousSettings.mediamtx_username !== form.value.mediamtx_username ||
+    previousSettings.mediamtx_password !== form.value.mediamtx_password
   try {
     syncRoiTagOptionsToForm()
     const pluginChanged = previousPlugin !== form.value.processor_plugin
+    const requiresProcessingRefresh = pluginChanged || streamSettingsChanged
     let runningSourceIds = []
-    if (pluginChanged) {
+    if (requiresProcessingRefresh) {
       await sourceStore.syncProcessorStatus()
       runningSourceIds = sourceStore.getRunningSourceIdsSnapshot()
     }
@@ -440,8 +446,11 @@ async function save() {
     Object.assign(form.value, data)
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     appSettingsStore.applyLanguage(form.value.ui_language)
+    if (streamSettingsChanged) {
+      await sourceStore.fetchSources()
+    }
 
-    if (!pluginChanged) {
+    if (!requiresProcessingRefresh) {
       ElMessage.success(t('settings.settingsSaved'))
       return
     }

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from backend.api import processor as processor_router
@@ -15,6 +15,7 @@ from backend.api import messages as messages_router
 from backend.api import settings as settings_router
 from backend.api import sources as sources_router
 from backend.api import vehicle_events as vehicle_events_router
+from backend.api import webrtc as webrtc_router
 from backend.api import ws as ws_module
 from backend.config import settings
 from backend.db.database import (
@@ -79,6 +80,30 @@ def datetime_from_record(record: logging.LogRecord) -> str:
     from datetime import datetime, timezone
 
     return datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
+
+
+def configure_frontend_routes(app: FastAPI, frontend_dist: Path) -> None:
+    """Serve built SPA assets with an index.html fallback for client routes.
+    为构建后的 SPA 提供静态资源和 index.html 回退。"""
+    index_file = frontend_dist / "index.html"
+    if not index_file.exists():
+        return
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_index() -> FileResponse:
+        return FileResponse(index_file)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_catch_all(full_path: str) -> FileResponse:
+        requested = (frontend_dist / full_path).resolve()
+        try:
+            requested.relative_to(frontend_dist.resolve())
+        except ValueError:
+            return FileResponse(index_file)
+
+        if requested.is_file():
+            return FileResponse(requested)
+        return FileResponse(index_file)
 
 
 _STDLIB_LOG_HANDLER = _StdlibProcessingLogHandler()
@@ -183,6 +208,7 @@ app.include_router(processor_router.router)
 app.include_router(messages_router.router)
 app.include_router(settings_router.router)
 app.include_router(vehicle_events_router.router)
+app.include_router(webrtc_router.router)
 app.include_router(ws_module.router)
 
 
@@ -196,5 +222,5 @@ async def health() -> dict:
 # ── Static files (production: serve built frontend) / 静态文件（生产环境：托管构建后的前端） ──
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+    configure_frontend_routes(app, _frontend_dist)
     logger.info("Serving frontend from {}", _frontend_dist)

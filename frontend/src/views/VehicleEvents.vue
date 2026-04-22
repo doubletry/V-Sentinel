@@ -57,7 +57,7 @@
             {{ (row.missing_actions || []).length ? t('vehicleEvents.statusMissing') : t('vehicleEvents.statusComplete') }}
           </template>
         </el-table-column>
-        <el-table-column :label="t('vehicleEvents.actions')" min-width="100" fixed="right">
+        <el-table-column :label="t('vehicleEvents.actions')" width="120" fixed="right" align="center">
           <template #default="{ row }">
             <el-popconfirm
               :title="t('vehicleEvents.deleteConfirmMessage')"
@@ -65,7 +65,7 @@
               @confirm="handleDelete(row)"
             >
               <template #reference>
-                <el-button type="danger" size="small" link>
+                <el-button type="danger" size="small" plain>
                   {{ t('vehicleEvents.delete') }}
                 </el-button>
               </template>

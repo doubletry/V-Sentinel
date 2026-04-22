@@ -110,6 +110,32 @@ class TestSettingsAPI:
         data = resp.json()
         assert "vengine_host" in data
 
+    async def test_update_mediamtx_settings_rewrites_existing_source_urls(
+        self,
+        async_client: AsyncClient,
+    ):
+        create_resp = await async_client.post(
+            "/api/sources",
+            json={"name": "Camera 1", "rtsp_url": "rtsp://localhost:8554/cam1"},
+        )
+        assert create_resp.status_code == 201
+
+        update_resp = await async_client.put(
+            "/api/settings",
+            json={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "alice",
+                "mediamtx_password": "s3cret",
+            },
+        )
+        assert update_resp.status_code == 200
+
+        list_resp = await async_client.get("/api/sources")
+        assert list_resp.status_code == 200
+        sources = list_resp.json()
+        assert len(sources) == 1
+        assert sources[0]["rtsp_url"] == "rtsp://alice:s3cret@localhost:8554/cam1"
+
     async def test_email_test_endpoint(self, async_client: AsyncClient):
         from backend.main import app
 

@@ -6,11 +6,25 @@ export function normalizeBaseAddress(value) {
   return String(value || '').trim().replace(/\/+$/, '')
 }
 
-export function buildRtspUrl(rtspBaseAddress, routePath) {
+export function buildRtspUrl(rtspBaseAddress, routePath, username = '', password = '') {
   const base = normalizeBaseAddress(rtspBaseAddress)
   const route = normalizeRoutePath(routePath)
   if (!base || !route) return ''
-  return `${base}/${route}`
+
+  try {
+    const parsed = new URL(base)
+    const user = String(username || '').trim()
+    if (user) {
+      parsed.username = user
+      parsed.password = String(password || '')
+    } else {
+      parsed.username = ''
+      parsed.password = ''
+    }
+    return `${String(parsed).replace(/\/+$/, '')}/${route}`
+  } catch (_) {
+    return `${base}/${route}`
+  }
 }
 
 export function extractRoutePath(rtspUrl, rtspBaseAddress) {
@@ -18,8 +32,24 @@ export function extractRoutePath(rtspUrl, rtspBaseAddress) {
   if (!full) return ''
 
   const base = normalizeBaseAddress(rtspBaseAddress)
-  if (base && full.startsWith(`${base}/`)) {
-    return normalizeRoutePath(full.slice(base.length + 1))
+  if (base) {
+    try {
+      const fullUrl = new URL(full)
+      const baseUrl = new URL(base)
+      if (
+        fullUrl.protocol === baseUrl.protocol &&
+        fullUrl.hostname === baseUrl.hostname &&
+        fullUrl.port === baseUrl.port &&
+        fullUrl.pathname.startsWith(`${baseUrl.pathname.replace(/\/+$/, '')}/`)
+      ) {
+        const prefix = `${baseUrl.pathname.replace(/\/+$/, '')}/`
+        return normalizeRoutePath(fullUrl.pathname.slice(prefix.length))
+      }
+    } catch (_) {
+      if (full.startsWith(`${base}/`)) {
+        return normalizeRoutePath(full.slice(base.length + 1))
+      }
+    }
   }
 
   try {

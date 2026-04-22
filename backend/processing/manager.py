@@ -51,6 +51,12 @@ class ProcessorManager:
         停止分析代理（关闭时调用）。"""
         await self._agent.stop()
 
+    def update_app_settings(self, app_settings: dict[str, str]) -> None:
+        """Refresh shared app settings for future and running processors.
+        刷新供未来和运行中处理器共享的应用设置。"""
+        self._app_settings.clear()
+        self._app_settings.update(app_settings)
+
     async def start_processor(self, source_id: str) -> dict:
         """Start a processor for the given source_id.
         为指定的 source_id 启动处理器。

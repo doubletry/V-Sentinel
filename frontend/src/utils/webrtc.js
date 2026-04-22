@@ -149,7 +149,12 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
   })
 
   if (queuedCandidates.length) {
-    patchLocalCandidates(sessionUrl, offerData, queuedCandidates.splice(0), authHeaders)
+    patchLocalCandidates(
+      sessionUrl,
+      offerData,
+      queuedCandidates.splice(0, queuedCandidates.length),
+      authHeaders
+    )
   }
 
   return {

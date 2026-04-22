@@ -13,9 +13,10 @@ function normalizeRoutePath(value) {
  * @param {string} streamPath - The stream path on MediaMTX (e.g. "camera1")
  * @param {HTMLVideoElement} videoEl - The video element to attach to
  * @param {string} webrtcBaseUrl - MediaMTX WebRTC base address from settings
+ * @param {object} [options] - Optional auth options { username, password }
  * @returns {object} - { pc: RTCPeerConnection, stop: Function }
  */
-export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl) {
+export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options = {}) {
   const base = normalizeBaseUrl(webrtcBaseUrl || config.mediamtxWebrtcUrl)
   const route = normalizeRoutePath(streamPath)
   const whepUrl = `${base}/${route}/whep`
@@ -44,12 +45,20 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl) {
   // Wait for ICE gathering to complete (or timeout)
   await waitForIceGathering(pc)
 
+  // Build request headers, optionally including HTTP Basic auth for MediaMTX.
+  const headers = { 'Content-Type': 'application/sdp' }
+  const username = String(options.username || '')
+  if (username) {
+    const password = String(options.password || '')
+    headers.Authorization = 'Basic ' + buildBasicAuthToken(username, password)
+  }
+
   // Send offer to MediaMTX WHEP endpoint
   let response
   try {
     response = await fetch(whepUrl, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
+      headers,
       body: pc.localDescription.sdp,
     })
   } catch (err) {
@@ -91,4 +100,20 @@ function waitForIceGathering(pc) {
       }
     })
   })
+}
+
+/**
+ * Build a base64-encoded HTTP Basic auth token from username/password.
+ * Uses btoa when available (browsers); falls back to Buffer for Node tests.
+ */
+function buildBasicAuthToken(username, password) {
+  const raw = `${username}:${password}`
+  if (typeof btoa === 'function') {
+    // btoa requires a binary (latin-1) string; encode UTF-8 first to support
+    // non-ASCII credentials safely.
+    const utf8 = unescape(encodeURIComponent(raw))
+    return btoa(utf8)
+  }
+  // Node fallback for test environments where btoa is unavailable.
+  return Buffer.from(raw, 'utf-8').toString('base64')
 }

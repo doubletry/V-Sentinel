@@ -18,7 +18,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote
 
 import cv2
 import numpy as np
@@ -873,6 +873,27 @@ class BaseVideoProcessor(ABC):
             frame = frame[:new_h, :new_w]
         return frame
 
+    def _build_push_rtsp_url(self, output_rtsp_path: str) -> str:
+        """Build the RTSP push URL, injecting MediaMTX credentials when configured.
+        构造 RTSP 推流 URL，已配置 MediaMTX 账号密码时会注入到 URL 中。"""
+        base = str(
+            self.app_settings.get("mediamtx_rtsp_addr", "rtsp://localhost:8554")
+        ).rstrip("/")
+        username = str(self.app_settings.get("mediamtx_username", "") or "")
+        password = str(self.app_settings.get("mediamtx_password", "") or "")
+        if username:
+            parsed = urlparse(base)
+            host = parsed.hostname or ""
+            if host:
+                userinfo = quote(username, safe="")
+                if password:
+                    userinfo += ":" + quote(password, safe="")
+                netloc = userinfo + "@" + host
+                if parsed.port is not None:
+                    netloc += f":{parsed.port}"
+                base = parsed._replace(netloc=netloc).geturl().rstrip("/")
+        return f"{base}/{output_rtsp_path}"
+
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.
         通过持久化 ffmpeg 子进程将标注帧推送到 MediaMTX。"""
@@ -881,10 +902,7 @@ class BaseVideoProcessor(ABC):
         if h == 0 or w == 0:
             return
 
-        rtsp_url = (
-            f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
-            f"/{output_rtsp_path}"
-        )
+        rtsp_url = self._build_push_rtsp_url(output_rtsp_path)
 
         with self._push_lock:
             # Respect retry cooldown after previous failures.

@@ -868,6 +868,68 @@ class TestCoreBaseVideoProcessorPipeline:
         assert proc._push_consecutive_failures == 1
         assert proc._push_retry_after > 0
 
+    def test_build_push_rtsp_url_without_credentials(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        assert (
+            proc._build_push_rtsp_url("cam1_processed")
+            == "rtsp://localhost:8554/cam1_processed"
+        )
+
+    def test_build_push_rtsp_url_injects_credentials(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "alice",
+                "mediamtx_password": "s3cret",
+            },
+        )
+        assert (
+            proc._build_push_rtsp_url("cam1_processed")
+            == "rtsp://alice:s3cret@localhost:8554/cam1_processed"
+        )
+
+    def test_build_push_rtsp_url_url_encodes_special_chars(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "user@home",
+                "mediamtx_password": "p@ss:word/!",
+            },
+        )
+        url = proc._build_push_rtsp_url("cam1_processed")
+        # '@', ':' and '/' inside credentials must be percent-encoded so they
+        # don't break URL parsing.
+        assert url == (
+            "rtsp://user%40home:p%40ss%3Aword%2F%21@localhost:8554/cam1_processed"
+        )
+
+    def test_build_push_rtsp_url_username_only(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "alice",
+                "mediamtx_password": "",
+            },
+        )
+        assert (
+            proc._build_push_rtsp_url("cam1_processed")
+            == "rtsp://alice@localhost:8554/cam1_processed"
+        )
+
     def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):
         class _CodecContext:
             framerate = 25

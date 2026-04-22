@@ -194,6 +194,18 @@
           <el-form-item :label="t('settings.webrtcAddress')">
             <el-input v-model="form.mediamtx_webrtc_addr" placeholder="http://localhost:8889" />
           </el-form-item>
+          <el-form-item :label="t('settings.mediamtxUsername')">
+            <el-input v-model="form.mediamtx_username" :placeholder="t('settings.mediamtxUsernamePlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="t('settings.mediamtxPassword')">
+            <el-input
+              v-model="form.mediamtx_password"
+              type="password"
+              show-password
+              :placeholder="t('settings.mediamtxPasswordPlaceholder')"
+            />
+          </el-form-item>
+          <p class="form-hint">{{ t('settings.mediamtxAuthHint') }}</p>
         </section>
 
         <section class="settings-section">
@@ -327,6 +339,8 @@ const form = ref({
   upload_enabled: 'true',
   mediamtx_rtsp_addr: '',
   mediamtx_webrtc_addr: '',
+  mediamtx_username: '',
+  mediamtx_password: '',
   email_from_address: '',
   email_from_auth_code: '',
   email_to_addresses: '',

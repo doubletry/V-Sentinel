@@ -6,6 +6,12 @@ export function normalizeBaseAddress(value) {
   return String(value || '').trim().replace(/\/+$/, '')
 }
 
+function logParseWarning(message, value, error) {
+  if (import.meta.env.DEV) {
+    console.warn(message, value, error)
+  }
+}
+
 export function buildRtspUrl(rtspBaseAddress, routePath, username = '', password = '') {
   const base = normalizeBaseAddress(rtspBaseAddress)
   const route = normalizeRoutePath(routePath)
@@ -23,7 +29,8 @@ export function buildRtspUrl(rtspBaseAddress, routePath, username = '', password
     }
     const href = parsed.toString().replace(/\/+$/, '')
     return `${href}/${route}`
-  } catch (_) {
+  } catch (error) {
+    logParseWarning('Failed to parse RTSP base address:', rtspBaseAddress, error)
     return `${base}/${route}`
   }
 }
@@ -46,7 +53,8 @@ export function extractRoutePath(rtspUrl, rtspBaseAddress) {
         const prefix = `${baseUrl.pathname.replace(/\/+$/, '')}/`
         return normalizeRoutePath(fullUrl.pathname.slice(prefix.length))
       }
-    } catch (_) {
+    } catch (error) {
+      logParseWarning('Failed to parse source/base RTSP URLs:', { rtspUrl, rtspBaseAddress }, error)
       if (full.startsWith(`${base}/`)) {
         return normalizeRoutePath(full.slice(base.length + 1))
       }

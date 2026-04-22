@@ -18,7 +18,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse, urlunparse, quote
 
 import cv2
 import numpy as np
@@ -891,7 +891,16 @@ class BaseVideoProcessor(ABC):
                 netloc = userinfo + "@" + host
                 if parsed.port is not None:
                     netloc += f":{parsed.port}"
-                base = parsed._replace(netloc=netloc).geturl().rstrip("/")
+                base = urlunparse(
+                    (
+                        parsed.scheme,
+                        netloc,
+                        parsed.path,
+                        parsed.params,
+                        parsed.query,
+                        parsed.fragment,
+                    )
+                ).rstrip("/")
         return f"{base}/{output_rtsp_path}"
 
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:

@@ -108,12 +108,16 @@ function waitForIceGathering(pc) {
  */
 function buildBasicAuthToken(username, password) {
   const raw = `${username}:${password}`
-  if (typeof btoa === 'function') {
-    // btoa requires a binary (latin-1) string; encode UTF-8 first to support
-    // non-ASCII credentials safely.
-    const utf8 = unescape(encodeURIComponent(raw))
-    return btoa(utf8)
+  if (typeof btoa === 'function' && typeof TextEncoder !== 'undefined') {
+    // btoa requires a binary (latin-1) string; encode UTF-8 first via
+    // TextEncoder to support non-ASCII credentials safely.
+    const utf8Bytes = new TextEncoder().encode(raw)
+    let binary = ''
+    for (let i = 0; i < utf8Bytes.length; i += 1) {
+      binary += String.fromCharCode(utf8Bytes[i])
+    }
+    return btoa(binary)
   }
-  // Node fallback for test environments where btoa is unavailable.
+  // Node fallback for test environments where btoa/TextEncoder are unavailable.
   return Buffer.from(raw, 'utf-8').toString('base64')
 }

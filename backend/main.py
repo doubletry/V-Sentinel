@@ -15,7 +15,6 @@ from backend.api import messages as messages_router
 from backend.api import settings as settings_router
 from backend.api import sources as sources_router
 from backend.api import vehicle_events as vehicle_events_router
-from backend.api import webrtc as webrtc_router
 from backend.api import ws as ws_module
 from backend.config import settings
 from backend.db.database import (
@@ -209,7 +208,6 @@ app.include_router(processor_router.router)
 app.include_router(messages_router.router)
 app.include_router(settings_router.router)
 app.include_router(vehicle_events_router.router)
-app.include_router(webrtc_router.router)
 app.include_router(ws_module.router)
 
 

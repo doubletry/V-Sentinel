@@ -20,11 +20,11 @@ export function buildBasicAuthHeader(username, password) {
   const raw = `${user}:${String(password || '')}`
   if (typeof btoa === 'function' && typeof TextEncoder !== 'undefined') {
     const utf8Bytes = new TextEncoder().encode(raw)
-    let binary = ''
+    let binaryString = ''
     for (let i = 0; i < utf8Bytes.length; i += 1) {
-      binary += String.fromCharCode(utf8Bytes[i])
+      binaryString += String.fromCharCode(utf8Bytes[i])
     }
-    return { Authorization: `Basic ${btoa(binary)}` }
+    return { Authorization: `Basic ${btoa(binaryString)}` }
   }
 
   return {

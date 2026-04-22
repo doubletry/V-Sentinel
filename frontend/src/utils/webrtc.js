@@ -62,7 +62,10 @@ function patchLocalCandidates(sessionUrl, offerData, candidates, authHeaders) {
     },
     body: generateSdpFragment(offerData, candidates),
   }).catch((error) => {
-    console.warn('Failed to PATCH WHEP ICE candidates:', error)
+    console.warn(
+      'Failed to send ICE candidates to WHEP session (connection quality may be affected):',
+      error
+    )
   })
 }
 
@@ -105,6 +108,8 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
 
   pc.addTransceiver('video', { direction: transceiverDirection })
   pc.addTransceiver('audio', { direction: transceiverDirection })
+  // MediaMTX's documented browser WHEP flow creates a local data channel so
+  // the peer connection can receive server-side data channels when available.
   pc.createDataChannel('')
 
   pc.ontrack = (event) => {

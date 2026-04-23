@@ -20,8 +20,9 @@ export function buildWhepUrl(webrtcBaseUrl, streamPath) {
     }
     if (!route) return ''
 
-    const normalizedPathname = parsed.pathname.replace(/^\/+|\/+$/g, '')
-    parsed.pathname = `/${[normalizedPathname, route, 'whep'].filter(Boolean).join('/')}`
+    const trimmedPathname = parsed.pathname.replace(/^\/+|\/+$/g, '')
+    // Build `/optional-base-path/{streamPath}/whep` without duplicate separators.
+    parsed.pathname = `/${[trimmedPathname, route, 'whep'].filter(Boolean).join('/')}`
     return parsed.toString()
   } catch (error) {
     if (import.meta.env.DEV) {

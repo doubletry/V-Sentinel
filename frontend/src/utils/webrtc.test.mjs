@@ -73,5 +73,5 @@ test('connectWebRTC continues with POST when ICE OPTIONS fails', async () => {
   assert.equal(calls[0].options.method, 'OPTIONS')
   assert.equal(calls[1].options.method, 'POST')
   assert.equal(calls[1].options.headers.Authorization, 'Basic YWxpY2U6c2VjcmV0')
-  assert.equal(calls[1].options.headers['Content-Type'], undefined)
+  assert.equal(calls[1].options.headers['Content-Type'], 'application/sdp')
 })

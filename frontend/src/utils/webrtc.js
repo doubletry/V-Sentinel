@@ -88,7 +88,9 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
   }
 
   const endpointHeaders = buildWhepEndpointHeaders(options.username, options.password)
-  const offerHeaders = buildWhepEndpointHeaders(options.username, options.password)
+  const offerHeaders = buildWhepEndpointHeaders(options.username, options.password, {
+    'Content-Type': 'application/sdp',
+  })
   let iceServers = []
   try {
     iceServers = await requestIceServers(whepUrl, endpointHeaders)

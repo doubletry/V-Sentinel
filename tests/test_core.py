@@ -15,14 +15,10 @@ from core.base_processor import (
     ROI,
     ROIPoint,
 )
-from core.constants import FRAME_SAMPLE_INTERVAL
 
 TEST_WAIT_FRAME_COUNT = 3
 TEST_SOURCE_FPS = 30.0
-TEST_SAMPLED_PUBLISH_FPS = max(
-    TEST_SOURCE_FPS / max(FRAME_SAMPLE_INTERVAL, 1), 1.0
-)
-TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_SAMPLED_PUBLISH_FPS
+TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_SOURCE_FPS
 # Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
 # 为线程调度和 CI 抖动预留适度容差。
 TIMING_TOLERANCE_FACTOR = 1.8
@@ -575,8 +571,8 @@ class TestCoreBaseVideoProcessorPipeline:
             later - earlier for earlier, later in zip(push_times, push_times[1:])
         ]
         assert intervals
-        assert min(intervals) >= (1 / TEST_SAMPLED_PUBLISH_FPS) / TIMING_TOLERANCE_FACTOR
-        assert max(intervals) <= (1 / TEST_SAMPLED_PUBLISH_FPS) * TIMING_TOLERANCE_FACTOR
+        assert min(intervals) >= (1 / TEST_SOURCE_FPS) / TIMING_TOLERANCE_FACTOR
+        assert max(intervals) <= (1 / TEST_SOURCE_FPS) * TIMING_TOLERANCE_FACTOR
 
     async def test_output_worker_uses_latest_frame_from_queue(self):
         class OutputProcessor(BaseVideoProcessor):
@@ -698,7 +694,7 @@ class TestCoreBaseVideoProcessorPipeline:
         assert len(pushed) >= 2
         assert np.array_equal(pushed[-1], frame2)
 
-    def test_update_publish_fps_tracks_sampled_input_rate(self):
+    def test_update_publish_fps_tracks_source_rate(self):
         proc = DummyCoreProcessor(
             source_id="s1",
             source_name="cam",
@@ -709,7 +705,7 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._update_publish_fps(30.0)
 
         assert proc._source_fps == 30.0
-        assert proc._current_publish_fps() == 10.0
+        assert proc._current_publish_fps() == 30.0
 
     def test_push_frame_uses_dynamic_fps_and_tcp_transport(self, monkeypatch):
         proc = DummyCoreProcessor(
@@ -1022,3 +1018,9 @@ class TestCoreBaseVideoProcessorPipeline:
             guessed_rate = None
 
         assert BaseVideoProcessor._stream_fps(_Stream()) is None
+
+    def test_observed_fps_rounds_estimate_after_observation_window(self):
+        assert BaseVideoProcessor._observed_fps(31, 1.01) == 30.0
+
+    def test_observed_fps_requires_enough_elapsed_time(self):
+        assert BaseVideoProcessor._observed_fps(31, 0.5) is None

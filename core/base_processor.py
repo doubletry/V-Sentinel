@@ -43,6 +43,7 @@ LOW_LATENCY_ANALYZEDURATION = "0"
 STREAM_TIMEOUT_MICROSECONDS = "5000000"
 OUTPUT_QUEUE_TIMEOUT_SEC = 0.2
 MAX_REASONABLE_SOURCE_FPS = 120.0
+OBSERVED_FPS_ESTIMATE_WINDOW_SEC = 1.0
 FPS_CHANGE_THRESHOLD = 0.01
 GOP_DIVISOR = 2
 PUSH_STARTUP_CHECK_DELAY = 0.3  # seconds to wait after spawning ffmpeg to verify it is alive / 创建 ffmpeg 后等待验证存活的秒数
@@ -278,13 +279,30 @@ class BaseVideoProcessor(ABC):
                         f"No video track found in stream {self.rtsp_url}"
                     )
                 video_stream.thread_type = "AUTO"
-                self._update_publish_fps(self._stream_fps(video_stream))
+                source_fps = self._stream_fps(video_stream)
+                self._update_publish_fps(source_fps)
+                observed_first_frame_at: float | None = None
+                observed_frame_count = 0
 
                 for frame in container.decode(video=0):
                     if self._stop_event.is_set():
                         break
                     stream_ok = True
                     reconnect_attempts = 0
+                    if source_fps is None:
+                        now = _time.monotonic()
+                        if observed_first_frame_at is None:
+                            observed_first_frame_at = now
+                            observed_frame_count = 1
+                        else:
+                            observed_frame_count += 1
+                            observed_fps = self._observed_fps(
+                                observed_frame_count,
+                                now - observed_first_frame_at,
+                            )
+                            if observed_fps is not None:
+                                source_fps = observed_fps
+                                self._update_publish_fps(source_fps)
                     frame_counter += 1
                     if (
                         FRAME_SAMPLE_INTERVAL > 1
@@ -371,6 +389,21 @@ class BaseVideoProcessor(ABC):
                 continue
             if math.isfinite(value) and 0 < value <= MAX_REASONABLE_SOURCE_FPS:
                 return value
+        return None
+
+    @staticmethod
+    def _observed_fps(frame_count: int, elapsed_seconds: float) -> float | None:
+        """Estimate rounded FPS from observed decoded frames over time.
+        基于一段时间内观察到的解码帧估算取整后的 FPS。"""
+        if (
+            frame_count < 2
+            or not math.isfinite(elapsed_seconds)
+            or elapsed_seconds < OBSERVED_FPS_ESTIMATE_WINDOW_SEC
+        ):
+            return None
+        estimated_fps = round((frame_count - 1) / elapsed_seconds)
+        if 0 < estimated_fps <= MAX_REASONABLE_SOURCE_FPS:
+            return float(estimated_fps)
         return None
 
     # ── Abstract method ───────────────────────────────────────────────────
@@ -712,19 +745,13 @@ class BaseVideoProcessor(ABC):
         输入流未报告帧率前使用的默认推流 FPS。"""
         return float(FALLBACK_PUBLISH_FPS)
 
-    @staticmethod
-    def _sampled_publish_fps(source_fps: float, sample_interval: int) -> float:
-        """Convert input FPS to effective sampled publish FPS.
-        将输入 FPS 转成采样后的有效推流 FPS。"""
-        return max(source_fps / max(sample_interval, 1), 1.0)
-
     def _update_publish_fps(self, source_fps: float | None) -> None:
-        """Refresh effective publish FPS from source FPS and sample interval.
-        根据源流 FPS 和采样间隔刷新有效推流 FPS。"""
+        """Refresh effective publish FPS from source FPS.
+        根据源流 FPS 刷新有效推流 FPS。"""
         if source_fps is None or not math.isfinite(source_fps) or source_fps <= 0:
             publish_fps = self._default_publish_fps()
         else:
-            publish_fps = self._sampled_publish_fps(source_fps, FRAME_SAMPLE_INTERVAL)
+            publish_fps = float(source_fps)
         with self._publish_state_lock:
             self._source_fps = source_fps
             self._publish_fps = publish_fps

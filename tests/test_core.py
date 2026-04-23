@@ -670,6 +670,7 @@ class TestCoreBaseVideoProcessorPipeline:
 
         proc._push_frame = _record_push
         proc._publish_fps = 5.0
+        frame_period = 1.0 / proc._publish_fps
         proc._start_output_worker()
 
         frame1 = np.full((64, 64, 3), 1, dtype=np.uint8)
@@ -685,11 +686,13 @@ class TestCoreBaseVideoProcessorPipeline:
             "cam1_processed",
         )
 
-        await asyncio.sleep(0.05)
+        # Sleep for less than one frame period so only the initial immediate push should happen.
+        await asyncio.sleep(frame_period / 4)
         assert len(pushed) == 1
         assert np.array_equal(pushed[0], frame1)
 
-        await asyncio.sleep(0.25)
+        # Wait long enough for the next scheduled publish to send the latest coalesced frame.
+        await asyncio.sleep(frame_period * 1.25)
         proc._stop_output_worker()
 
         assert len(pushed) >= 2

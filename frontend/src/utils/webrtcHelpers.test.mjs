@@ -18,6 +18,20 @@ test('buildWhepUrl normalizes the base URL and route path', () => {
   )
 })
 
+test('buildWhepUrl accepts a full WHEP endpoint URL unchanged', () => {
+  assert.equal(
+    buildWhepUrl('http://localhost:8889/cam1/whep', '/ignored/'),
+    'http://localhost:8889/cam1/whep'
+  )
+})
+
+test('buildWhepUrl preserves query parameters on a full WHEP endpoint URL', () => {
+  assert.equal(
+    buildWhepUrl('http://localhost:8889/cam1/whep?token=abc', '/ignored/'),
+    'http://localhost:8889/cam1/whep?token=abc'
+  )
+})
+
 test('buildBasicAuthHeader encodes username and password', () => {
   assert.deepEqual(buildBasicAuthHeader('alice', 'secret'), {
     Authorization: 'Basic YWxpY2U6c2VjcmV0',

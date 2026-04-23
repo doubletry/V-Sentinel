@@ -9,8 +9,25 @@ export function normalizeRoutePath(value) {
 export function buildWhepUrl(webrtcBaseUrl, streamPath) {
   const base = normalizeBaseUrl(webrtcBaseUrl)
   const route = normalizeRoutePath(streamPath)
-  if (!base || !route) return ''
-  return `${base}/${route}/whep`
+  if (!base) return ''
+
+  try {
+    const parsed = new URL(base)
+    if (/\/whep\/?$/i.test(parsed.pathname)) {
+      return parsed.toString()
+    }
+    if (!route) return ''
+
+    const basePath = parsed.pathname.replace(/\/+$/, '')
+    parsed.pathname = `${basePath}/${route}/whep`.replace(/\/{2,}/g, '/')
+    return parsed.toString()
+  } catch (_) {
+    if (/\/whep\/?$/i.test(base)) {
+      return base
+    }
+    if (!route) return ''
+    return `${base}/${route}/whep`
+  }
 }
 
 export function buildBasicAuthHeader(username, password) {

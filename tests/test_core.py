@@ -1024,3 +1024,6 @@ class TestCoreBaseVideoProcessorPipeline:
 
     def test_observed_fps_requires_enough_elapsed_time(self):
         assert BaseVideoProcessor._observed_fps(31, 0.5) is None
+
+    def test_observed_fps_rejects_unreasonable_estimate(self):
+        assert BaseVideoProcessor._observed_fps(500, 1.0) is None

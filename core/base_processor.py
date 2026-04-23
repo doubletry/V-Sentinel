@@ -301,6 +301,8 @@ class BaseVideoProcessor(ABC):
                                 now - observed_first_frame_at,
                             )
                             if observed_fps is not None:
+                                # Stop re-estimating after the first stable
+                                # observed FPS is obtained.
                                 source_fps = observed_fps
                                 self._update_publish_fps(source_fps)
                     frame_counter += 1
@@ -401,6 +403,8 @@ class BaseVideoProcessor(ABC):
             or elapsed_seconds < OBSERVED_FPS_ESTIMATE_WINDOW_SEC
         ):
             return None
+        # FPS is derived from intervals between decoded frames, so N frames
+        # over a window only contain N-1 frame gaps.
         estimated_fps = round((frame_count - 1) / elapsed_seconds)
         if 0 < estimated_fps <= MAX_REASONABLE_SOURCE_FPS:
             return float(estimated_fps)

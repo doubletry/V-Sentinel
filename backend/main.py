@@ -11,7 +11,6 @@ from fastapi.responses import FileResponse
 from loguru import logger
 
 from backend.api import processor as processor_router
-from backend.api import mediamtx as mediamtx_router
 from backend.api import messages as messages_router
 from backend.api import settings as settings_router
 from backend.api import sources as sources_router
@@ -207,7 +206,6 @@ app.add_middleware(
 app.include_router(sources_router.router)
 app.include_router(processor_router.router)
 app.include_router(messages_router.router)
-app.include_router(mediamtx_router.router)
 app.include_router(settings_router.router)
 app.include_router(vehicle_events_router.router)
 app.include_router(ws_module.router)

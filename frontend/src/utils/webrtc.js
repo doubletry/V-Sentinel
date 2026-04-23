@@ -88,10 +88,16 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
   }
 
   const endpointHeaders = buildWhepEndpointHeaders(options.username, options.password)
-  const offerHeaders = buildWhepEndpointHeaders(options.username, options.password, {
-    'Content-Type': 'application/sdp',
-  })
-  const iceServers = await requestIceServers(whepUrl, endpointHeaders)
+  const offerHeaders = buildWhepEndpointHeaders(options.username, options.password)
+  let iceServers = []
+  try {
+    iceServers = await requestIceServers(whepUrl, endpointHeaders)
+  } catch (error) {
+    console.warn(
+      'Failed to fetch WHEP ICE servers via OPTIONS, continuing with browser defaults:',
+      error
+    )
+  }
   const pc = new RTCPeerConnection({
     iceServers,
     sdpSemantics: 'unified-plan',

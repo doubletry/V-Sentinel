@@ -826,8 +826,10 @@ class BaseVideoProcessor(ABC):
                 latest_frame, latest_path = self._prepare_output_item(item)
                 if latest_frame is None:
                     continue
-                self._push_frame(latest_frame.copy(), latest_path)
-                next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
+                now = time.monotonic()
+                if now >= next_deadline:
+                    self._push_frame(latest_frame.copy(), latest_path)
+                    next_deadline = now + (1.0 / self._current_publish_fps())
             except Exception as exc:
                 logger.error(
                     "Output worker error for {}: {}", self.source_id, exc

@@ -3,22 +3,8 @@ import {
   buildWhepPatchHeaders,
   buildWhepUrl,
   generateSdpFragment,
-  linkHeaderToIceServers,
   parseOfferData,
 } from './webrtcHelpers.mjs'
-
-async function requestIceServers(whepUrl, authHeaders) {
-  const response = await fetch(whepUrl, {
-    method: 'OPTIONS',
-    headers: authHeaders,
-  })
-
-  if (!response.ok) {
-    throw new Error(`WHEP ICE request failed: ${response.status} ${response.statusText}`)
-  }
-
-  return linkHeaderToIceServers(response.headers.get('Link'))
-}
 
 async function sendOffer(whepUrl, offerSdp, authHeaders) {
   const response = await fetch(whepUrl, {
@@ -87,21 +73,11 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
     throw new Error('Missing WebRTC gateway address')
   }
 
-  const endpointHeaders = buildWhepEndpointHeaders(options.username, options.password)
   const offerHeaders = buildWhepEndpointHeaders(options.username, options.password, {
     'Content-Type': 'application/sdp',
   })
-  let iceServers = []
-  try {
-    iceServers = await requestIceServers(whepUrl, endpointHeaders)
-  } catch (error) {
-    console.warn(
-      'Failed to fetch WHEP ICE servers via OPTIONS, continuing with browser defaults:',
-      error
-    )
-  }
   const pc = new RTCPeerConnection({
-    iceServers,
+    iceServers: [],
     sdpSemantics: 'unified-plan',
   })
 

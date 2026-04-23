@@ -652,6 +652,49 @@ class TestCoreBaseVideoProcessorPipeline:
         # Output worker should have survived the first exception and called push again.
         assert call_count >= 2
 
+    async def test_output_worker_keeps_steady_cadence_when_new_frames_arrive_early(self):
+        class OutputProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = OutputProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        pushed: list[np.ndarray] = []
+
+        def _record_push(frame, path):
+            pushed.append(frame.copy())
+
+        proc._push_frame = _record_push
+        proc._publish_fps = 5.0
+        proc._start_output_worker()
+
+        frame1 = np.full((64, 64, 3), 1, dtype=np.uint8)
+        frame2 = np.full((64, 64, 3), 2, dtype=np.uint8)
+        proc._enqueue_output(
+            frame1,
+            AnalysisResult(annotated_frame=frame1.copy()),
+            "cam1_processed",
+        )
+        proc._enqueue_output(
+            frame2,
+            AnalysisResult(annotated_frame=frame2.copy()),
+            "cam1_processed",
+        )
+
+        await asyncio.sleep(0.05)
+        assert len(pushed) == 1
+        assert np.array_equal(pushed[0], frame1)
+
+        await asyncio.sleep(0.25)
+        proc._stop_output_worker()
+
+        assert len(pushed) >= 2
+        assert np.array_equal(pushed[-1], frame2)
+
     def test_update_publish_fps_tracks_sampled_input_rate(self):
         proc = DummyCoreProcessor(
             source_id="s1",

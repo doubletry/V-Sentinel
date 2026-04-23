@@ -3,15 +3,11 @@ import assert from 'node:assert/strict'
 
 import { connectWebRTC } from './webrtc.js'
 
-test('connectWebRTC continues with POST when ICE OPTIONS fails', async () => {
+test('connectWebRTC sends a single POST offer with application/sdp', async () => {
   const calls = []
 
   globalThis.fetch = async (url, options = {}) => {
     calls.push({ url, options })
-
-    if (options.method === 'OPTIONS') {
-      throw new Error('OPTIONS failed')
-    }
 
     if (options.method === 'POST') {
       return {
@@ -69,9 +65,8 @@ test('connectWebRTC continues with POST when ICE OPTIONS fails', async () => {
 
   assert.ok(connection)
   assert.deepEqual(connection.pc.config.iceServers, [])
-  assert.equal(calls.length, 2)
-  assert.equal(calls[0].options.method, 'OPTIONS')
-  assert.equal(calls[1].options.method, 'POST')
-  assert.equal(calls[1].options.headers.Authorization, 'Basic YWxpY2U6c2VjcmV0')
-  assert.equal(calls[1].options.headers['Content-Type'], 'application/sdp')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].options.method, 'POST')
+  assert.equal(calls[0].options.headers.Authorization, 'Basic YWxpY2U6c2VjcmV0')
+  assert.equal(calls[0].options.headers['Content-Type'], 'application/sdp')
 })

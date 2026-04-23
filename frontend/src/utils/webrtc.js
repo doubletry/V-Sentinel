@@ -1,94 +1,148 @@
-import config from '../config.js'
+import {
+  buildWhepEndpointHeaders,
+  buildWhepPatchHeaders,
+  buildWhepUrl,
+  generateSdpFragment,
+  parseOfferData,
+} from './webrtcHelpers.mjs'
 
-function normalizeBaseUrl(value) {
-  return String(value || '').trim().replace(/\/+$/, '')
+async function sendOffer(whepUrl, offerSdp, authHeaders) {
+  const response = await fetch(whepUrl, {
+    method: 'POST',
+    headers: authHeaders,
+    body: offerSdp,
+  })
+
+  switch (response.status) {
+    case 201:
+      return {
+        answerSdp: await response.text(),
+        sessionUrl: new URL(response.headers.get('location'), whepUrl).toString(),
+      }
+    case 404: {
+      const error = new Error('stream not found')
+      error.name = 'WHEPError'
+      error.status = 404
+      throw error
+    }
+    default: {
+      const error = new Error(`WHEP error: ${response.status} ${response.statusText}`)
+      error.name = 'WHEPError'
+      error.status = response.status
+      throw error
+    }
+  }
 }
 
-function normalizeRoutePath(value) {
-  return String(value || '').trim().replace(/^\/+/, '').replace(/\/+$/, '')
+function patchLocalCandidates(sessionUrl, offerData, candidates) {
+  if (!sessionUrl || !candidates.length) return
+
+  fetch(sessionUrl, {
+    method: 'PATCH',
+    headers: buildWhepPatchHeaders(),
+    body: generateSdpFragment(offerData, candidates),
+  }).catch((error) => {
+    console.warn(
+      'Failed to send ICE candidates to WHEP session (connection quality may be affected):',
+      error
+    )
+  })
+}
+
+function deleteSession(sessionUrl) {
+  if (!sessionUrl) return
+
+  fetch(sessionUrl, {
+    method: 'DELETE',
+  }).catch(() => {
+    // Ignore cleanup failures.
+  })
 }
 
 /**
- * Connect to a MediaMTX stream via WebRTC (WHEP protocol).
- * @param {string} streamPath - The stream path on MediaMTX (e.g. "camera1")
- * @param {HTMLVideoElement} videoEl - The video element to attach to
- * @param {string} webrtcBaseUrl - MediaMTX WebRTC base address from settings
- * @returns {object} - { pc: RTCPeerConnection, stop: Function }
+ * Connect to a MediaMTX stream via its documented WHEP browser flow.
+ * @param {string} streamPath
+ * @param {HTMLVideoElement} videoEl
+ * @param {string} webrtcBaseUrl
+ * @param {object} [options]
+ * @returns {object} - { pc, stop }
  */
-export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl) {
-  const base = normalizeBaseUrl(webrtcBaseUrl || config.mediamtxWebrtcUrl)
-  const route = normalizeRoutePath(streamPath)
-  const whepUrl = `${base}/${route}/whep`
+export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options = {}) {
+  const whepUrl = buildWhepUrl(webrtcBaseUrl, streamPath)
+  if (!whepUrl) {
+    throw new Error('Missing WebRTC gateway address')
+  }
 
+  const offerHeaders = buildWhepEndpointHeaders(options.username, options.password, {
+    'Content-Type': 'application/sdp',
+  })
   const pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    iceServers: [],
+    sdpSemantics: 'unified-plan',
   })
 
-  // Add transceivers to receive audio and video
-  pc.addTransceiver('video', { direction: 'recvonly' })
-  pc.addTransceiver('audio', { direction: 'recvonly' })
+  let sessionUrl = null
+  let stopped = false
+  const queuedCandidates = []
+  const transceiverDirection = 'recvonly'
 
-  // Attach stream to video element when tracks arrive
+  pc.addTransceiver('video', { direction: transceiverDirection })
+  pc.addTransceiver('audio', { direction: transceiverDirection })
+  // MediaMTX's documented browser WHEP flow creates a local data channel so
+  // the peer connection can receive server-side data channels when available.
+  pc.createDataChannel('')
+
   pc.ontrack = (event) => {
-    if (videoEl) {
-      if (!videoEl.srcObject) {
-        videoEl.srcObject = event.streams[0]
-      }
+    if (videoEl && !videoEl.srcObject) {
+      videoEl.srcObject = event.streams[0]
     }
   }
 
-  // Create SDP offer
   const offer = await pc.createOffer()
   await pc.setLocalDescription(offer)
+  const offerData = parseOfferData(offer.sdp)
 
-  // Wait for ICE gathering to complete (or timeout)
-  await waitForIceGathering(pc)
+  pc.onicecandidate = (event) => {
+    if (stopped || !event.candidate) return
 
-  // Send offer to MediaMTX WHEP endpoint
-  let response
-  try {
-    response = await fetch(whepUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/sdp' },
-      body: pc.localDescription.sdp,
-    })
-  } catch (err) {
-    pc.close()
-    throw new Error(`WHEP request failed: ${err.message}`)
+    if (!sessionUrl) {
+      queuedCandidates.push(event.candidate)
+      return
+    }
+
+    patchLocalCandidates(sessionUrl, offerData, [event.candidate])
   }
 
-  if (!response.ok) {
+  let answerSdp
+  try {
+    const result = await sendOffer(whepUrl, offer.sdp, offerHeaders)
+    sessionUrl = result.sessionUrl
+    answerSdp = result.answerSdp
+  } catch (error) {
     pc.close()
-    const error = new Error(`WHEP error: ${response.status} ${response.statusText}`)
-    error.name = 'WHEPError'
-    error.status = response.status
     throw error
   }
 
-  const answerSdp = await response.text()
-  await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+  await pc.setRemoteDescription({
+    type: 'answer',
+    sdp: answerSdp,
+  })
+
+  if (queuedCandidates.length) {
+    patchLocalCandidates(
+      sessionUrl,
+      offerData,
+      queuedCandidates.splice(0, queuedCandidates.length)
+    )
+  }
 
   return {
     pc,
-    stop: () => pc.close(),
+    stop: () => {
+      if (stopped) return
+      stopped = true
+      deleteSession(sessionUrl)
+      pc.close()
+    },
   }
-}
-
-/**
- * Wait for ICE gathering to complete (or timeout after 3s).
- */
-function waitForIceGathering(pc) {
-  return new Promise((resolve) => {
-    if (pc.iceGatheringState === 'complete') {
-      resolve()
-      return
-    }
-    const timeout = setTimeout(resolve, 3000)
-    pc.addEventListener('icegatheringstatechange', () => {
-      if (pc.iceGatheringState === 'complete') {
-        clearTimeout(timeout)
-        resolve()
-      }
-    })
-  })
 }

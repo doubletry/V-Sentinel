@@ -18,7 +18,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse, quote
 
 import cv2
 import numpy as np
@@ -43,8 +43,13 @@ LOW_LATENCY_ANALYZEDURATION = "0"
 STREAM_TIMEOUT_MICROSECONDS = "5000000"
 OUTPUT_QUEUE_TIMEOUT_SEC = 0.2
 MAX_REASONABLE_SOURCE_FPS = 120.0
+OBSERVED_FPS_ESTIMATE_WINDOW_SEC = 1.0
 FPS_CHANGE_THRESHOLD = 0.01
 GOP_DIVISOR = 2
+PUSH_STARTUP_CHECK_DELAY = 0.3  # seconds to wait after spawning ffmpeg to verify it is alive / 创建 ffmpeg 后等待验证存活的秒数
+PUSH_RETRY_BASE_COOLDOWN = 2.0  # initial cooldown seconds after push failure / 推流失败后的初始冷却秒数
+PUSH_RETRY_MAX_COOLDOWN = 30.0  # maximum cooldown between retries / 重试之间的最大冷却秒数
+MAX_STDERR_LOG_CHARS = 500  # truncation limit for logged ffmpeg stderr / 日志中 ffmpeg stderr 的截断长度
 
 try:
     from turbojpeg import TurboJPEG, TJPF_RGB
@@ -138,6 +143,8 @@ class BaseVideoProcessor(ABC):
         self._push_width: int = 0
         self._push_height: int = 0
         self._push_fps: float = 0.0
+        self._push_retry_after: float = 0.0  # monotonic time before which retries are skipped / 重试冷却截止时间
+        self._push_consecutive_failures: int = 0  # consecutive failure counter / 连续失败计数
         self._output_queue: queue.Queue[
             tuple[np.ndarray, AnalysisResult, str] | None
         ] = queue.Queue(maxsize=2)
@@ -156,6 +163,11 @@ class BaseVideoProcessor(ABC):
             return
         self._stop_event.clear()
         self._output_stop.clear()
+        # Reset push retry state so a fresh start is not blocked by stale
+        # cooldown from a previous run.
+        # 重置推流重试状态，避免上次运行残留的冷却期阻塞新启动。
+        self._push_consecutive_failures = 0
+        self._push_retry_after = 0.0
         self._start_output_worker()
         self.status = "running"
         self._task = asyncio.create_task(
@@ -267,13 +279,32 @@ class BaseVideoProcessor(ABC):
                         f"No video track found in stream {self.rtsp_url}"
                     )
                 video_stream.thread_type = "AUTO"
-                self._update_publish_fps(self._stream_fps(video_stream))
+                source_fps = self._stream_fps(video_stream)
+                self._update_publish_fps(source_fps)
+                observed_first_frame_at: float | None = None
+                observed_frame_count = 0
 
                 for frame in container.decode(video=0):
                     if self._stop_event.is_set():
                         break
                     stream_ok = True
                     reconnect_attempts = 0
+                    if source_fps is None:
+                        now = _time.monotonic()
+                        if observed_first_frame_at is None:
+                            observed_first_frame_at = now
+                            observed_frame_count = 1
+                        else:
+                            observed_frame_count += 1
+                            observed_fps = self._observed_fps(
+                                observed_frame_count,
+                                now - observed_first_frame_at,
+                            )
+                            if observed_fps is not None:
+                                # Stop re-estimating after the first stable
+                                # observed FPS is obtained.
+                                source_fps = observed_fps
+                                self._update_publish_fps(source_fps)
                     frame_counter += 1
                     if (
                         FRAME_SAMPLE_INTERVAL > 1
@@ -360,6 +391,23 @@ class BaseVideoProcessor(ABC):
                 continue
             if math.isfinite(value) and 0 < value <= MAX_REASONABLE_SOURCE_FPS:
                 return value
+        return None
+
+    @staticmethod
+    def _observed_fps(frame_count: int, elapsed_seconds: float) -> float | None:
+        """Estimate rounded FPS from observed decoded frames over time.
+        基于一段时间内观察到的解码帧估算取整后的 FPS。"""
+        if (
+            frame_count < 2
+            or not math.isfinite(elapsed_seconds)
+            or elapsed_seconds < OBSERVED_FPS_ESTIMATE_WINDOW_SEC
+        ):
+            return None
+        # FPS is derived from intervals between decoded frames, so N frames
+        # over a window only contain N-1 frame gaps.
+        estimated_fps = round((frame_count - 1) / elapsed_seconds)
+        if 0 < estimated_fps <= MAX_REASONABLE_SOURCE_FPS:
+            return float(estimated_fps)
         return None
 
     # ── Abstract method ───────────────────────────────────────────────────
@@ -701,19 +749,13 @@ class BaseVideoProcessor(ABC):
         输入流未报告帧率前使用的默认推流 FPS。"""
         return float(FALLBACK_PUBLISH_FPS)
 
-    @staticmethod
-    def _sampled_publish_fps(source_fps: float, sample_interval: int) -> float:
-        """Convert input FPS to effective sampled publish FPS.
-        将输入 FPS 转成采样后的有效推流 FPS。"""
-        return max(source_fps / max(sample_interval, 1), 1.0)
-
     def _update_publish_fps(self, source_fps: float | None) -> None:
-        """Refresh effective publish FPS from source FPS and sample interval.
-        根据源流 FPS 和采样间隔刷新有效推流 FPS。"""
+        """Refresh effective publish FPS from source FPS.
+        根据源流 FPS 刷新有效推流 FPS。"""
         if source_fps is None or not math.isfinite(source_fps) or source_fps <= 0:
             publish_fps = self._default_publish_fps()
         else:
-            publish_fps = self._sampled_publish_fps(source_fps, FRAME_SAMPLE_INTERVAL)
+            publish_fps = float(source_fps)
         with self._publish_state_lock:
             self._source_fps = source_fps
             self._publish_fps = publish_fps
@@ -778,44 +820,67 @@ class BaseVideoProcessor(ABC):
         latest_path: str | None = None
         next_deadline = time.monotonic()
         while not self._output_stop.is_set():
-            if latest_frame is None or latest_path is None:
+            try:
+                if latest_frame is None or latest_path is None:
+                    try:
+                        item = self._output_queue.get(timeout=OUTPUT_QUEUE_TIMEOUT_SEC)
+                    except queue.Empty:
+                        continue
+                    if item is None:
+                        break
+                    latest_frame, latest_path = self._prepare_output_item(item)
+                    if latest_frame is None:
+                        continue
+                    self._push_frame(latest_frame.copy(), latest_path)
+                    next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
+                    continue
+
+                now = time.monotonic()
+                wait_for = max(0.0, next_deadline - now)
                 try:
-                    item = self._output_queue.get(timeout=OUTPUT_QUEUE_TIMEOUT_SEC)
+                    item = self._output_queue.get(timeout=wait_for)
                 except queue.Empty:
+                    self._push_frame(latest_frame.copy(), latest_path)
+                    frame_interval = 1.0 / self._current_publish_fps()
+                    next_deadline += frame_interval
+                    now = time.monotonic()
+                    if next_deadline < now:
+                        logger.debug(
+                            "Publisher fell behind by {:.3f}s for {}",
+                            now - next_deadline,
+                            self.source_id,
+                        )
+                        next_deadline = now + frame_interval
                     continue
                 if item is None:
                     break
                 latest_frame, latest_path = self._prepare_output_item(item)
                 if latest_frame is None:
                     continue
+                stop_after_coalesce = False
+                while True:
+                    now = time.monotonic()
+                    remaining = next_deadline - now
+                    if remaining <= 0:
+                        break
+                    try:
+                        item = self._output_queue.get(timeout=remaining)
+                    except queue.Empty:
+                        break
+                    if item is None:
+                        stop_after_coalesce = True
+                        break
+                    latest_frame, latest_path = self._prepare_output_item(item)
+                    if latest_frame is None:
+                        continue
+                if stop_after_coalesce:
+                    break
                 self._push_frame(latest_frame.copy(), latest_path)
                 next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
-                continue
-
-            now = time.monotonic()
-            wait_for = max(0.0, next_deadline - now)
-            try:
-                item = self._output_queue.get(timeout=wait_for)
-            except queue.Empty:
-                self._push_frame(latest_frame.copy(), latest_path)
-                frame_interval = 1.0 / self._current_publish_fps()
-                next_deadline += frame_interval
-                now = time.monotonic()
-                if next_deadline < now:
-                    logger.debug(
-                        "Publisher fell behind by {:.3f}s for {}",
-                        now - next_deadline,
-                        self.source_id,
-                    )
-                    next_deadline = now + frame_interval
-                continue
-            if item is None:
-                break
-            latest_frame, latest_path = self._prepare_output_item(item)
-            if latest_frame is None:
-                continue
-            self._push_frame(latest_frame.copy(), latest_path)
-            next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
+            except Exception as exc:
+                logger.error(
+                    "Output worker error for {}: {}", self.source_id, exc
+                )
 
     def _prepare_output_item(
         self,
@@ -857,6 +922,36 @@ class BaseVideoProcessor(ABC):
             frame = frame[:new_h, :new_w]
         return frame
 
+    def _build_push_rtsp_url(self, output_rtsp_path: str) -> str:
+        """Build the RTSP push URL, injecting MediaMTX credentials when configured.
+        构造 RTSP 推流 URL，已配置 MediaMTX 账号密码时会注入到 URL 中。"""
+        base = str(
+            self.app_settings.get("mediamtx_rtsp_addr", "rtsp://localhost:8554")
+        ).rstrip("/")
+        username = str(self.app_settings.get("mediamtx_username", "") or "")
+        password = str(self.app_settings.get("mediamtx_password", "") or "")
+        if username:
+            parsed = urlparse(base)
+            host = parsed.hostname or ""
+            if host:
+                userinfo = quote(username, safe="")
+                if password:
+                    userinfo += ":" + quote(password, safe="")
+                netloc = userinfo + "@" + host
+                if parsed.port is not None:
+                    netloc += f":{parsed.port}"
+                base = urlunparse(
+                    (
+                        parsed.scheme,
+                        netloc,
+                        parsed.path,
+                        parsed.params,
+                        parsed.query,
+                        parsed.fragment,
+                    )
+                ).rstrip("/")
+        return f"{base}/{output_rtsp_path}"
+
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.
         通过持久化 ffmpeg 子进程将标注帧推送到 MediaMTX。"""
@@ -865,7 +960,14 @@ class BaseVideoProcessor(ABC):
         if h == 0 or w == 0:
             return
 
+        rtsp_url = self._build_push_rtsp_url(output_rtsp_path)
+
         with self._push_lock:
+            # Respect retry cooldown after previous failures.
+            # 失败后遵守重试冷却期。
+            if time.monotonic() < self._push_retry_after:
+                return
+
             try:
                 target_fps = self._current_publish_fps()
                 # Keep keyframes about twice per second so new RTSP readers can
@@ -875,19 +977,16 @@ class BaseVideoProcessor(ABC):
                 gop = max(1, int(round(target_fps / GOP_DIVISOR)))
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
-                if (
+                need_new_proc = (
                     self._push_proc is None
                     or self._push_proc.poll() is not None
                     or self._push_path != output_rtsp_path
                     or self._push_width != w
                     or self._push_height != h
                     or abs(self._push_fps - target_fps) > FPS_CHANGE_THRESHOLD
-                ):
+                )
+                if need_new_proc:
                     self._close_push_process()
-                    rtsp_url = (
-                        f"{self.app_settings.get('mediamtx_rtsp_addr', 'rtsp://localhost:8554')}"
-                        f"/{output_rtsp_path}"
-                    )
                     cmd = [
                         "ffmpeg",
                         "-y",
@@ -915,22 +1014,80 @@ class BaseVideoProcessor(ABC):
                         cmd,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
                     )
                     self._push_path = output_rtsp_path
                     self._push_width = w
                     self._push_height = h
                     self._push_fps = target_fps
 
+                    # Give ffmpeg a moment to initialize and verify it is alive.
+                    # 等待 ffmpeg 启动并验证其存活。
+                    time.sleep(PUSH_STARTUP_CHECK_DELAY)
+                    if self._push_proc.poll() is not None:
+                        stderr_text = self._read_push_stderr()
+                        logger.warning(
+                            "ffmpeg exited immediately for {} (code {}): {}",
+                            rtsp_url,
+                            self._push_proc.returncode,
+                            stderr_text,
+                        )
+                        self._close_push_process()
+                        self._record_push_failure()
+                        return
+
                 if self._push_proc is not None and self._push_proc.stdin is not None:
                     self._push_proc.stdin.write(frame.tobytes())
                     self._push_proc.stdin.flush()
+                    # Reset failure counter on successful write.
+                    # 写入成功后重置失败计数。
+                    self._push_consecutive_failures = 0
+                    self._push_retry_after = 0.0
             except (BrokenPipeError, OSError) as exc:
-                logger.warning("Push error for {}: {}", rtsp_url, exc)
+                stderr_text = self._read_push_stderr()
+                logger.warning(
+                    "Push error for {}: {} | stderr: {}", rtsp_url, exc, stderr_text
+                )
                 self._close_push_process()
+                self._record_push_failure()
             except Exception as exc:
                 logger.warning("Push error for {}: {}", rtsp_url, exc)
                 self._close_push_process()
+                self._record_push_failure()
+
+    def _record_push_failure(self) -> None:
+        """Increment consecutive failure count and schedule a retry cooldown.
+        增加连续失败计数并设置重试冷却期。"""
+        self._push_consecutive_failures += 1
+        cooldown = min(
+            PUSH_RETRY_BASE_COOLDOWN * self._push_consecutive_failures,
+            PUSH_RETRY_MAX_COOLDOWN,
+        )
+        self._push_retry_after = time.monotonic() + cooldown
+        logger.info(
+            "Push retry cooldown {:.1f}s (attempt {}) for {}",
+            cooldown,
+            self._push_consecutive_failures,
+            self.source_id,
+        )
+
+    def _read_push_stderr(self) -> str:
+        """Read available stderr from the ffmpeg push process (non-blocking).
+        非阻塞地读取 ffmpeg 推流进程的 stderr 输出。"""
+        if self._push_proc is None or self._push_proc.stderr is None:
+            return ""
+        try:
+            # Only read stderr if the process has already exited, to avoid
+            # blocking on a still-running process.
+            # 仅在进程已退出时读取 stderr，以避免阻塞仍在运行的进程。
+            if self._push_proc.poll() is None:
+                return "(process still running)"
+            data = self._push_proc.stderr.read()
+            if data:
+                return data.decode("utf-8", errors="replace").strip()[-MAX_STDERR_LOG_CHARS:]
+            return ""
+        except Exception:
+            return ""
 
     def _close_push_process(self) -> None:
         """Terminate the persistent ffmpeg push subprocess.
@@ -939,6 +1096,8 @@ class BaseVideoProcessor(ABC):
             try:
                 if self._push_proc.stdin is not None:
                     self._push_proc.stdin.close()
+                if self._push_proc.stderr is not None:
+                    self._push_proc.stderr.close()
                 self._push_proc.terminate()
                 self._push_proc.wait(timeout=3.0)
             except Exception:

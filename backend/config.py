@@ -52,6 +52,12 @@ DEFAULT_APP_SETTINGS: dict[str, str] = {
     # MediaMTX
     "mediamtx_rtsp_addr": "rtsp://localhost:8554",
     "mediamtx_webrtc_addr": "http://localhost:8889",
+    # MediaMTX authentication (optional). When set, credentials are injected into
+    # RTSP push URLs and sent as HTTP Basic auth on WebRTC (WHEP) requests.
+    # MediaMTX 认证（可选）。设置后将注入到 RTSP 推流 URL，并作为 HTTP Basic
+    # 认证发送到 WebRTC（WHEP）请求。
+    "mediamtx_username": "",
+    "mediamtx_password": "",
     # Email summary / 邮件总结
     "email_from_address": "",
     "email_from_auth_code": "",

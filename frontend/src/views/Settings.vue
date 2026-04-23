@@ -194,6 +194,18 @@
           <el-form-item :label="t('settings.webrtcAddress')">
             <el-input v-model="form.mediamtx_webrtc_addr" placeholder="http://localhost:8889" />
           </el-form-item>
+          <el-form-item :label="t('settings.mediamtxUsername')">
+            <el-input v-model="form.mediamtx_username" :placeholder="t('settings.mediamtxUsernamePlaceholder')" />
+          </el-form-item>
+          <el-form-item :label="t('settings.mediamtxPassword')">
+            <el-input
+              v-model="form.mediamtx_password"
+              type="password"
+              show-password
+              :placeholder="t('settings.mediamtxPasswordPlaceholder')"
+            />
+          </el-form-item>
+          <p class="form-hint">{{ t('settings.mediamtxAuthHint') }}</p>
         </section>
 
         <section class="settings-section">
@@ -327,6 +339,8 @@ const form = ref({
   upload_enabled: 'true',
   mediamtx_rtsp_addr: '',
   mediamtx_webrtc_addr: '',
+  mediamtx_username: '',
+  mediamtx_password: '',
   email_from_address: '',
   email_from_auth_code: '',
   email_to_addresses: '',
@@ -412,12 +426,18 @@ async function reload() {
 
 async function save() {
   saving.value = true
-  const previousPlugin = appSettingsStore.settings?.processor_plugin || 'truck'
+  const previousSettings = appSettingsStore.settings || {}
+  const previousPlugin = previousSettings.processor_plugin || 'truck'
+  const mediamtxSettingsChanged =
+    previousSettings.mediamtx_rtsp_addr !== form.value.mediamtx_rtsp_addr ||
+    previousSettings.mediamtx_username !== form.value.mediamtx_username ||
+    previousSettings.mediamtx_password !== form.value.mediamtx_password
   try {
     syncRoiTagOptionsToForm()
     const pluginChanged = previousPlugin !== form.value.processor_plugin
+    const requiresProcessingRefresh = pluginChanged || mediamtxSettingsChanged
     let runningSourceIds = []
-    if (pluginChanged) {
+    if (requiresProcessingRefresh) {
       await sourceStore.syncProcessorStatus()
       runningSourceIds = sourceStore.getRunningSourceIdsSnapshot()
     }
@@ -426,8 +446,11 @@ async function save() {
     Object.assign(form.value, data)
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     appSettingsStore.applyLanguage(form.value.ui_language)
+    if (mediamtxSettingsChanged) {
+      await sourceStore.fetchSources()
+    }
 
-    if (!pluginChanged) {
+    if (!requiresProcessingRefresh) {
       ElMessage.success(t('settings.settingsSaved'))
       return
     }

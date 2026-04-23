@@ -15,14 +15,10 @@ from core.base_processor import (
     ROI,
     ROIPoint,
 )
-from core.constants import FRAME_SAMPLE_INTERVAL
 
 TEST_WAIT_FRAME_COUNT = 3
 TEST_SOURCE_FPS = 30.0
-TEST_SAMPLED_PUBLISH_FPS = max(
-    TEST_SOURCE_FPS / max(FRAME_SAMPLE_INTERVAL, 1), 1.0
-)
-TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_SAMPLED_PUBLISH_FPS
+TEST_PUBLISH_WAIT = TEST_WAIT_FRAME_COUNT / TEST_SOURCE_FPS
 # Timing assertions allow moderate scheduler jitter from thread wakeups / CI.
 # 为线程调度和 CI 抖动预留适度容差。
 TIMING_TOLERANCE_FACTOR = 1.8
@@ -575,8 +571,8 @@ class TestCoreBaseVideoProcessorPipeline:
             later - earlier for earlier, later in zip(push_times, push_times[1:])
         ]
         assert intervals
-        assert min(intervals) >= (1 / TEST_SAMPLED_PUBLISH_FPS) / TIMING_TOLERANCE_FACTOR
-        assert max(intervals) <= (1 / TEST_SAMPLED_PUBLISH_FPS) * TIMING_TOLERANCE_FACTOR
+        assert min(intervals) >= (1 / TEST_SOURCE_FPS) / TIMING_TOLERANCE_FACTOR
+        assert max(intervals) <= (1 / TEST_SOURCE_FPS) * TIMING_TOLERANCE_FACTOR
 
     async def test_output_worker_uses_latest_frame_from_queue(self):
         class OutputProcessor(BaseVideoProcessor):
@@ -615,7 +611,90 @@ class TestCoreBaseVideoProcessorPipeline:
         assert pushed
         assert any(frame.sum() == frame.size * 255 for frame in pushed)
 
-    def test_update_publish_fps_tracks_sampled_input_rate(self):
+    async def test_output_worker_survives_push_frame_exception(self):
+        """Output worker should keep running even if _push_frame raises."""
+        class OutputProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = OutputProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        call_count = 0
+
+        def _failing_then_ok_push(frame, path):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("transient error")
+            # Second call succeeds
+
+        proc._push_frame = _failing_then_ok_push
+        proc._update_publish_fps(TEST_SOURCE_FPS)
+        proc._start_output_worker()
+
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        proc._enqueue_output(
+            frame,
+            AnalysisResult(annotated_frame=frame.copy()),
+            "cam1_processed",
+        )
+        await asyncio.sleep(TEST_PUBLISH_WAIT)
+        proc._stop_output_worker()
+
+        # Output worker should have survived the first exception and called push again.
+        assert call_count >= 2
+
+    async def test_output_worker_keeps_steady_cadence_when_new_frames_arrive_early(self):
+        class OutputProcessor(BaseVideoProcessor):
+            async def process_frame(self, frame, encoded, shape, roi_pixel_points):
+                return AnalysisResult()
+
+        proc = OutputProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        pushed: list[np.ndarray] = []
+
+        def _record_push(frame, path):
+            pushed.append(frame.copy())
+
+        proc._push_frame = _record_push
+        proc._publish_fps = 5.0
+        frame_period = 1.0 / proc._publish_fps
+        proc._start_output_worker()
+
+        frame1 = np.full((64, 64, 3), 1, dtype=np.uint8)
+        frame2 = np.full((64, 64, 3), 2, dtype=np.uint8)
+        proc._enqueue_output(
+            frame1,
+            AnalysisResult(annotated_frame=frame1.copy()),
+            "cam1_processed",
+        )
+        proc._enqueue_output(
+            frame2,
+            AnalysisResult(annotated_frame=frame2.copy()),
+            "cam1_processed",
+        )
+
+        # Sleep for less than one frame period so only the initial immediate push should happen.
+        await asyncio.sleep(frame_period / 4)
+        assert len(pushed) == 1
+        assert np.array_equal(pushed[0], frame1)
+
+        # Wait long enough for the next scheduled publish to send the latest coalesced frame.
+        await asyncio.sleep(frame_period * 1.25)
+        proc._stop_output_worker()
+
+        assert len(pushed) >= 2
+        assert np.array_equal(pushed[-1], frame2)
+
+    def test_update_publish_fps_tracks_source_rate(self):
         proc = DummyCoreProcessor(
             source_id="s1",
             source_name="cam",
@@ -626,7 +705,7 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._update_publish_fps(30.0)
 
         assert proc._source_fps == 30.0
-        assert proc._current_publish_fps() == 10.0
+        assert proc._current_publish_fps() == 30.0
 
     def test_push_frame_uses_dynamic_fps_and_tcp_transport(self, monkeypatch):
         proc = DummyCoreProcessor(
@@ -677,6 +756,222 @@ class TestCoreBaseVideoProcessorPipeline:
         captured["proc"].stdin.write.assert_called_once_with(frame.tobytes())
         captured["proc"].stdin.flush.assert_called_once()
 
+    def test_push_frame_captures_stderr_on_immediate_exit(self, monkeypatch):
+        """When ffmpeg exits immediately, stderr is captured and a retry cooldown is set."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        class _DeadProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+                self.stderr = MagicMock()
+                self.returncode = 1
+                self.stderr.read.return_value = b"Connection refused"
+
+            def poll(self):
+                return 1  # process already exited
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        def _fake_popen(cmd, **kwargs):
+            return _DeadProc()
+
+        monkeypatch.setattr("core.base_processor.subprocess.Popen", _fake_popen)
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        # Process should have been cleaned up.
+        assert proc._push_proc is None
+        # Retry cooldown should be active.
+        assert proc._push_consecutive_failures == 1
+        assert proc._push_retry_after > 0
+
+    def test_push_frame_respects_retry_cooldown(self, monkeypatch):
+        """Push attempts are skipped during the retry cooldown period."""
+        import time as _time
+
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        # Set a cooldown far in the future so it is guaranteed to be active.
+        _far_future_seconds = 3600
+        proc._push_retry_after = _time.monotonic() + _far_future_seconds
+        proc._push_consecutive_failures = 1
+
+        popen_called = []
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen",
+            lambda *a, **kw: popen_called.append(1),
+        )
+
+        proc._push_frame(frame, "cam1_processed")
+        # Popen should NOT have been called because we're in cooldown.
+        assert len(popen_called) == 0
+
+    def test_push_frame_resets_failures_on_success(self, monkeypatch):
+        """Successful write resets the consecutive failure counter."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        proc._push_consecutive_failures = 3
+        proc._push_retry_after = 0.0
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        class _FakeProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+                self.stderr = MagicMock()
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen", lambda *a, **kw: _FakeProc()
+        )
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        assert proc._push_consecutive_failures == 0
+        assert proc._push_retry_after == 0.0
+
+    def test_push_frame_broken_pipe_sets_cooldown(self, monkeypatch):
+        """BrokenPipeError sets a retry cooldown and captures stderr."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+
+        class _FailingProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+                self.stdin.write.side_effect = BrokenPipeError("Broken pipe")
+                self.stderr = MagicMock()
+                self.stderr.read.return_value = b""
+                self.returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen", lambda *a, **kw: _FailingProc()
+        )
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        assert proc._push_proc is None
+        assert proc._push_consecutive_failures == 1
+        assert proc._push_retry_after > 0
+
+    def test_build_push_rtsp_url_without_credentials(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        assert (
+            proc._build_push_rtsp_url("cam1_processed")
+            == "rtsp://localhost:8554/cam1_processed"
+        )
+
+    def test_build_push_rtsp_url_injects_credentials(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "alice",
+                "mediamtx_password": "s3cret",
+            },
+        )
+        assert (
+            proc._build_push_rtsp_url("cam1_processed")
+            == "rtsp://alice:s3cret@localhost:8554/cam1_processed"
+        )
+
+    def test_build_push_rtsp_url_url_encodes_special_chars(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "user@home",
+                "mediamtx_password": "p@ss:word/!",
+            },
+        )
+        url = proc._build_push_rtsp_url("cam1_processed")
+        # '@', ':' and '/' inside credentials must be percent-encoded so they
+        # don't break URL parsing.
+        assert url == (
+            "rtsp://user%40home:p%40ss%3Aword%2F%21@localhost:8554/cam1_processed"
+        )
+
+    def test_build_push_rtsp_url_username_only(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_username": "alice",
+                "mediamtx_password": "",
+            },
+        )
+        assert (
+            proc._build_push_rtsp_url("cam1_processed")
+            == "rtsp://alice@localhost:8554/cam1_processed"
+        )
+
     def test_stream_fps_prefers_codec_framerate_over_inflated_rates(self):
         class _CodecContext:
             framerate = 25
@@ -723,3 +1018,12 @@ class TestCoreBaseVideoProcessorPipeline:
             guessed_rate = None
 
         assert BaseVideoProcessor._stream_fps(_Stream()) is None
+
+    def test_observed_fps_rounds_estimate_after_observation_window(self):
+        assert BaseVideoProcessor._observed_fps(31, 1.01) == 30.0
+
+    def test_observed_fps_requires_enough_elapsed_time(self):
+        assert BaseVideoProcessor._observed_fps(31, 0.5) is None
+
+    def test_observed_fps_rejects_unreasonable_estimate(self):
+        assert BaseVideoProcessor._observed_fps(500, 1.0) is None

@@ -57,6 +57,21 @@
             {{ (row.missing_actions || []).length ? t('vehicleEvents.statusMissing') : t('vehicleEvents.statusComplete') }}
           </template>
         </el-table-column>
+        <el-table-column :label="t('vehicleEvents.actions')" width="120" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-popconfirm
+              :title="t('vehicleEvents.deleteConfirmMessage')"
+              :confirm-button-text="t('vehicleEvents.delete')"
+              @confirm="handleDelete(row)"
+            >
+              <template #reference>
+                <el-button type="danger" size="small" plain>
+                  {{ t('vehicleEvents.delete') }}
+                </el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
     <div class="events-pagination">
@@ -148,6 +163,16 @@ function handlePageChange(page) {
 function handlePageSizeChange(size) {
   pageSize.value = Number(size)
   currentPage.value = 1
+}
+
+async function handleDelete(row) {
+  try {
+    await vehicleEventsApi.delete(row.id)
+    ElMessage.success(t('vehicleEvents.deleteSuccess'))
+    vehicleEvents.value = vehicleEvents.value.filter((e) => e.id !== row.id)
+  } catch (err) {
+    ElMessage.error(t('vehicleEvents.deleteFailed', { message: err.message }))
+  }
 }
 
 onMounted(() => {

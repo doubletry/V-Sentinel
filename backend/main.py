@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from loguru import logger
 
 from backend.api import processor as processor_router
@@ -81,6 +81,30 @@ def datetime_from_record(record: logging.LogRecord) -> str:
     return datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat()
 
 
+def configure_frontend_routes(app: FastAPI, frontend_dist: Path) -> None:
+    """Serve built SPA assets with an index.html fallback for client routes.
+    为构建后的 SPA 提供静态资源和 index.html 回退。"""
+    index_file = frontend_dist / "index.html"
+    if not index_file.exists():
+        return
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_index() -> FileResponse:
+        return FileResponse(index_file)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def frontend_catch_all(full_path: str) -> FileResponse:
+        requested = (frontend_dist / full_path).resolve()
+        try:
+            requested.relative_to(frontend_dist.resolve())
+        except ValueError:
+            return FileResponse(index_file)
+
+        if requested.is_file():
+            return FileResponse(requested)
+        return FileResponse(index_file)
+
+
 _STDLIB_LOG_HANDLER = _StdlibProcessingLogHandler()
 _STDLIB_LOG_CAPTURE_CONFIGURED = False
 
@@ -144,6 +168,7 @@ async def lifespan(app: FastAPI):
         app_settings=app_settings,
         email_client=email_client,
     )
+    app.state.processor_manager = processor_manager
     await processor_manager.start_agent()
 
     logger.info("{} started successfully", settings.app_name)
@@ -196,5 +221,5 @@ async def health() -> dict:
 # ── Static files (production: serve built frontend) / 静态文件（生产环境：托管构建后的前端） ──
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 if _frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+    configure_frontend_routes(app, _frontend_dist)
     logger.info("Serving frontend from {}", _frontend_dist)

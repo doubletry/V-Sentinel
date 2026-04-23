@@ -830,6 +830,8 @@ class BaseVideoProcessor(ABC):
                 if now >= next_deadline:
                     self._push_frame(latest_frame.copy(), latest_path)
                     next_deadline = now + (1.0 / self._current_publish_fps())
+                else:
+                    time.sleep(0)
             except Exception as exc:
                 logger.error(
                     "Output worker error for {}: {}", self.source_id, exc

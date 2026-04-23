@@ -7,7 +7,6 @@ import {
   buildWhepPatchHeaders,
   buildWhepUrl,
   generateSdpFragment,
-  linkHeaderToIceServers,
   parseOfferData,
 } from './webrtcHelpers.mjs'
 
@@ -53,23 +52,6 @@ test('buildWhepPatchHeaders omits auth on session PATCH requests', () => {
     'Content-Type': 'application/trickle-ice-sdpfrag',
     'If-Match': '*',
   })
-})
-
-test('linkHeaderToIceServers parses ice server links', () => {
-  assert.deepEqual(
-    linkHeaderToIceServers(
-      '<stun:stun.example.com>; rel="ice-server", <turn:turn.example.com?transport=udp>; rel="ice-server"; username="alice"; credential="secret"; credential-type="password"'
-    ),
-    [
-      { urls: ['stun:stun.example.com'] },
-      {
-        urls: ['turn:turn.example.com?transport=udp'],
-        username: 'alice',
-        credential: 'secret',
-        credentialType: 'password',
-      },
-    ]
-  )
 })
 
 test('parseOfferData and generateSdpFragment build a trickle ICE payload', () => {

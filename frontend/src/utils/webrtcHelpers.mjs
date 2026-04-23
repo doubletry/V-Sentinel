@@ -77,29 +77,6 @@ export function buildWhepPatchHeaders() {
   }
 }
 
-export function linkHeaderToIceServers(linkHeader) {
-  const decodeQuotedValue = (value) => String(value || '').replace(/\\(.)/g, '$1')
-
-  return linkHeader
-    ? linkHeader.split(', ').map((link) => {
-        const match = link.match(
-          /^<(.+?)>; rel="ice-server"(; username="(.*?)"; credential="(.*?)"; credential-type="password")?/i
-        )
-        if (!match) {
-          return null
-        }
-
-        const server = { urls: [match[1]] }
-        if (match[3] !== undefined) {
-          server.username = decodeQuotedValue(match[3])
-          server.credential = decodeQuotedValue(match[4])
-          server.credentialType = 'password'
-        }
-        return server
-      }).filter(Boolean)
-    : []
-}
-
 export function parseOfferData(sdp) {
   const offerData = { iceUfrag: '', icePwd: '', medias: [] }
 

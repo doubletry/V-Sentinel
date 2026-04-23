@@ -62,11 +62,16 @@ test('connectWebRTC continues with POST when ICE OPTIONS fails', async () => {
 
   globalThis.RTCPeerConnection = MockPeerConnection
 
-  const connection = await connectWebRTC('cam1', null, 'http://localhost:8889')
+  const connection = await connectWebRTC('cam1', null, 'http://localhost:8889', {
+    username: 'alice',
+    password: 'secret',
+  })
 
   assert.ok(connection)
+  assert.deepEqual(connection.pc.config.iceServers, [])
   assert.equal(calls.length, 2)
   assert.equal(calls[0].options.method, 'OPTIONS')
   assert.equal(calls[1].options.method, 'POST')
+  assert.equal(calls[1].options.headers.Authorization, 'Basic YWxpY2U6c2VjcmV0')
   assert.equal(calls[1].options.headers['Content-Type'], undefined)
 })

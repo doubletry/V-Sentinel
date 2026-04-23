@@ -1,3 +1,5 @@
+const WHEP_ENDPOINT_PATTERN = /\/whep\/?$/i
+
 export function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '')
 }
@@ -13,7 +15,7 @@ export function buildWhepUrl(webrtcBaseUrl, streamPath) {
 
   try {
     const parsed = new URL(base)
-    if (/\/whep\/?$/i.test(parsed.pathname)) {
+    if (WHEP_ENDPOINT_PATTERN.test(parsed.pathname)) {
       return parsed.toString()
     }
     if (!route) return ''
@@ -21,9 +23,12 @@ export function buildWhepUrl(webrtcBaseUrl, streamPath) {
     const basePath = parsed.pathname.replace(/^\/+|\/+$/g, '')
     parsed.pathname = `/${[basePath, route, 'whep'].filter(Boolean).join('/')}`
     return parsed.toString()
-  } catch (_) {
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn('Failed to parse WebRTC address as URL, using string fallback:', webrtcBaseUrl, error)
+    }
     // Keep a string-based fallback for non-standard or partially typed addresses.
-    if (/\/whep\/?$/i.test(base)) {
+    if (WHEP_ENDPOINT_PATTERN.test(base)) {
       return base
     }
     if (!route) return ''

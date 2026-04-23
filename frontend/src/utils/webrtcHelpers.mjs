@@ -8,6 +8,13 @@ export function normalizeRoutePath(value) {
   return String(value || '').trim().replace(/^\/+/, '').replace(/\/+$/, '')
 }
 
+function joinUrlPath(...segments) {
+  return `/${segments
+    .map((segment) => String(segment || '').replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+    .join('/')}`
+}
+
 export function buildWhepUrl(webrtcBaseUrl, streamPath) {
   const base = normalizeBaseUrl(webrtcBaseUrl)
   const route = normalizeRoutePath(streamPath)
@@ -20,13 +27,13 @@ export function buildWhepUrl(webrtcBaseUrl, streamPath) {
     }
     if (!route) return ''
 
-    const trimmedPathname = parsed.pathname.replace(/^\/+|\/+$/g, '')
-    // Build `/optional-base-path/{streamPath}/whep` without duplicate separators.
-    parsed.pathname = `/${[trimmedPathname, route, 'whep'].filter(Boolean).join('/')}`
+    // Build `/optional-base-path/{streamPath}/whep` while trimming only segment boundaries.
+    parsed.pathname = joinUrlPath(parsed.pathname, route, 'whep')
     return parsed.toString()
   } catch (error) {
     if (import.meta.env.DEV) {
-      console.warn('Failed to parse WebRTC address as URL, using string fallback:', error)
+      const safeBase = base.split('?')[0]
+      console.warn(`Failed to parse WebRTC address as URL, using string fallback: ${safeBase}`, error)
     }
     // Keep a string-based fallback for non-standard or partially typed addresses.
     if (WHEP_ENDPOINT_PATTERN.test(base)) {

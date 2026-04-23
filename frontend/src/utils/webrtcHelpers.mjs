@@ -32,6 +32,20 @@ export function buildBasicAuthHeader(username, password) {
   }
 }
 
+export function buildWhepEndpointHeaders(username, password, extraHeaders = {}) {
+  return {
+    ...buildBasicAuthHeader(username, password),
+    ...extraHeaders,
+  }
+}
+
+export function buildWhepPatchHeaders() {
+  return {
+    'Content-Type': 'application/trickle-ice-sdpfrag',
+    'If-Match': '*',
+  }
+}
+
 export function linkHeaderToIceServers(linkHeader) {
   const decodeQuotedValue = (value) => String(value || '').replace(/\\(.)/g, '$1')
 

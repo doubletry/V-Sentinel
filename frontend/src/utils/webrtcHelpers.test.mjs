@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 
 import {
   buildBasicAuthHeader,
+  buildWhepEndpointHeaders,
+  buildWhepPatchHeaders,
   buildWhepUrl,
   generateSdpFragment,
   linkHeaderToIceServers,
@@ -19,6 +21,23 @@ test('buildWhepUrl normalizes the base URL and route path', () => {
 test('buildBasicAuthHeader encodes username and password', () => {
   assert.deepEqual(buildBasicAuthHeader('alice', 'secret'), {
     Authorization: 'Basic YWxpY2U6c2VjcmV0',
+  })
+})
+
+test('buildWhepEndpointHeaders includes auth on WHEP endpoint requests', () => {
+  assert.deepEqual(
+    buildWhepEndpointHeaders('alice', 'secret', { 'Content-Type': 'application/sdp' }),
+    {
+      Authorization: 'Basic YWxpY2U6c2VjcmV0',
+      'Content-Type': 'application/sdp',
+    }
+  )
+})
+
+test('buildWhepPatchHeaders omits auth on session PATCH requests', () => {
+  assert.deepEqual(buildWhepPatchHeaders(), {
+    'Content-Type': 'application/trickle-ice-sdpfrag',
+    'If-Match': '*',
   })
 })
 

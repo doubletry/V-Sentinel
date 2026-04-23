@@ -1,5 +1,6 @@
 import {
-  buildBasicAuthHeader,
+  buildWhepEndpointHeaders,
+  buildWhepPatchHeaders,
   buildWhepUrl,
   generateSdpFragment,
   linkHeaderToIceServers,
@@ -22,10 +23,7 @@ async function requestIceServers(whepUrl, authHeaders) {
 async function sendOffer(whepUrl, offerSdp, authHeaders) {
   const response = await fetch(whepUrl, {
     method: 'POST',
-    headers: {
-      ...authHeaders,
-      'Content-Type': 'application/sdp',
-    },
+    headers: authHeaders,
     body: offerSdp,
   })
 
@@ -50,16 +48,12 @@ async function sendOffer(whepUrl, offerSdp, authHeaders) {
   }
 }
 
-function patchLocalCandidates(sessionUrl, offerData, candidates, authHeaders) {
+function patchLocalCandidates(sessionUrl, offerData, candidates) {
   if (!sessionUrl || !candidates.length) return
 
   fetch(sessionUrl, {
     method: 'PATCH',
-    headers: {
-      ...authHeaders,
-      'Content-Type': 'application/trickle-ice-sdpfrag',
-      'If-Match': '*',
-    },
+    headers: buildWhepPatchHeaders(),
     body: generateSdpFragment(offerData, candidates),
   }).catch((error) => {
     console.warn(
@@ -69,12 +63,11 @@ function patchLocalCandidates(sessionUrl, offerData, candidates, authHeaders) {
   })
 }
 
-function deleteSession(sessionUrl, authHeaders) {
+function deleteSession(sessionUrl) {
   if (!sessionUrl) return
 
   fetch(sessionUrl, {
     method: 'DELETE',
-    headers: authHeaders,
   }).catch(() => {
     // Ignore cleanup failures.
   })
@@ -94,8 +87,11 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
     throw new Error('Missing WebRTC gateway address')
   }
 
-  const authHeaders = buildBasicAuthHeader(options.username, options.password)
-  const iceServers = await requestIceServers(whepUrl, authHeaders)
+  const endpointHeaders = buildWhepEndpointHeaders(options.username, options.password)
+  const offerHeaders = buildWhepEndpointHeaders(options.username, options.password, {
+    'Content-Type': 'application/sdp',
+  })
+  const iceServers = await requestIceServers(whepUrl, endpointHeaders)
   const pc = new RTCPeerConnection({
     iceServers,
     sdpSemantics: 'unified-plan',
@@ -130,12 +126,12 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
       return
     }
 
-    patchLocalCandidates(sessionUrl, offerData, [event.candidate], authHeaders)
+    patchLocalCandidates(sessionUrl, offerData, [event.candidate])
   }
 
   let answerSdp
   try {
-    const result = await sendOffer(whepUrl, offer.sdp, authHeaders)
+    const result = await sendOffer(whepUrl, offer.sdp, offerHeaders)
     sessionUrl = result.sessionUrl
     answerSdp = result.answerSdp
   } catch (error) {
@@ -152,8 +148,7 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
     patchLocalCandidates(
       sessionUrl,
       offerData,
-      queuedCandidates.splice(0, queuedCandidates.length),
-      authHeaders
+      queuedCandidates.splice(0, queuedCandidates.length)
     )
   }
 
@@ -162,7 +157,7 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
     stop: () => {
       if (stopped) return
       stopped = true
-      deleteSession(sessionUrl, authHeaders)
+      deleteSession(sessionUrl)
       pc.close()
     },
   }

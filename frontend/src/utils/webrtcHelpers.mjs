@@ -18,10 +18,11 @@ export function buildWhepUrl(webrtcBaseUrl, streamPath) {
     }
     if (!route) return ''
 
-    const basePath = parsed.pathname.replace(/\/+$/, '')
-    parsed.pathname = `${basePath}/${route}/whep`.replace(/\/{2,}/g, '/')
+    const basePath = parsed.pathname.replace(/^\/+|\/+$/g, '')
+    parsed.pathname = `/${[basePath, route, 'whep'].filter(Boolean).join('/')}`
     return parsed.toString()
   } catch (_) {
+    // Keep a string-based fallback for non-standard or partially typed addresses.
     if (/\/whep\/?$/i.test(base)) {
       return base
     }

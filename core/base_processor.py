@@ -826,12 +826,26 @@ class BaseVideoProcessor(ABC):
                 latest_frame, latest_path = self._prepare_output_item(item)
                 if latest_frame is None:
                     continue
-                now = time.monotonic()
-                if now >= next_deadline:
-                    self._push_frame(latest_frame.copy(), latest_path)
-                    next_deadline = now + (1.0 / self._current_publish_fps())
-                else:
-                    time.sleep(0)
+                stop_after_coalesce = False
+                while True:
+                    now = time.monotonic()
+                    remaining = next_deadline - now
+                    if remaining <= 0:
+                        break
+                    try:
+                        item = self._output_queue.get(timeout=remaining)
+                    except queue.Empty:
+                        break
+                    if item is None:
+                        stop_after_coalesce = True
+                        break
+                    latest_frame, latest_path = self._prepare_output_item(item)
+                    if latest_frame is None:
+                        continue
+                if stop_after_coalesce:
+                    break
+                self._push_frame(latest_frame.copy(), latest_path)
+                next_deadline = time.monotonic() + (1.0 / self._current_publish_fps())
             except Exception as exc:
                 logger.error(
                     "Output worker error for {}: {}", self.source_id, exc

@@ -1047,14 +1047,13 @@ class BaseVideoProcessor(ABC):
                         "-g", str(gop),
                         "-bf", "0",
                     ]
-                    if video_bitrate is not None:
-                        cmd.extend(
-                            [
-                                "-b:v", video_bitrate,
-                                "-maxrate", video_bitrate,
-                                "-bufsize", self._double_video_bitrate(video_bitrate),
-                            ]
-                        )
+                    cmd.extend(
+                        [
+                            "-b:v", video_bitrate,
+                            "-maxrate", video_bitrate,
+                            "-bufsize", self._double_video_bitrate(video_bitrate),
+                        ]
+                    )
                     cmd.extend(
                         [
                             "-muxdelay", "0",

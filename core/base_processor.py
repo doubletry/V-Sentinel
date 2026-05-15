@@ -974,13 +974,13 @@ class BaseVideoProcessor(ABC):
 
     @staticmethod
     def _double_video_bitrate(bitrate: str) -> str:
-        """Return a small VBV buffer size derived from the configured bitrate.
-        根据配置码率得到较小的 VBV 缓冲区大小。"""
+        """Double the configured bitrate for ffmpeg VBV buffer sizing.
+        将配置码率翻倍用于 ffmpeg VBV 缓冲区大小。"""
         suffix = bitrate[-1:] if bitrate[-1:] in {"k", "m"} else ""
         number = bitrate[:-1] if suffix else bitrate
         return f"{int(number) * 2}{suffix}"
 
-    def _output_video_bitrate(self) -> str | None:
+    def _output_video_bitrate(self) -> str:
         """Return configured result-stream bitrate, falling back to the default.
         返回配置的结果流码率，无效时回退到默认值。"""
         configured = self._normalize_video_bitrate(

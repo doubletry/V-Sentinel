@@ -107,9 +107,12 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
       return
     }
 
-    if (offerData) {
-      patchLocalCandidates(sessionUrl, offerData, [event.candidate])
+    if (!offerData) {
+      queuedCandidates.push(event.candidate)
+      return
     }
+
+    patchLocalCandidates(sessionUrl, offerData, [event.candidate])
   }
 
   const offer = await pc.createOffer()

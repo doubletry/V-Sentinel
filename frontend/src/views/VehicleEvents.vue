@@ -174,9 +174,9 @@ function handlePageSizeChange(size) {
 async function handleDelete(row) {
   try {
     await vehicleEventsApi.delete(row.id)
+    ElMessage.success(t('vehicleEvents.deleteSuccess'))
     vehicleEvents.value = vehicleEvents.value.filter((e) => e.id !== row.id)
     clampCurrentPage()
-    ElMessage.success(t('vehicleEvents.deleteSuccess'))
   } catch (err) {
     ElMessage.error(t('vehicleEvents.deleteFailed', { message: err.message }))
   }

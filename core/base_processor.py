@@ -11,8 +11,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import math
+import os
 import queue
 import re
+import select
 import subprocess
 import threading
 import time
@@ -52,6 +54,8 @@ PUSH_STARTUP_CHECK_DELAY = 0.3  # seconds to wait after spawning ffmpeg to verif
 PUSH_RETRY_BASE_COOLDOWN = 2.0  # initial cooldown seconds after push failure / 推流失败后的初始冷却秒数
 PUSH_RETRY_MAX_COOLDOWN = 30.0  # maximum cooldown between retries / 重试之间的最大冷却秒数
 MAX_STDERR_LOG_CHARS = 500  # truncation limit for logged ffmpeg stderr / 日志中 ffmpeg stderr 的截断长度
+PUSH_WRITE_TIMEOUT_SEC = 2.0  # max time allowed for one raw frame write to ffmpeg stdin / 单帧写入 ffmpeg stdin 的最长时间
+PROCESSING_STOP_TIMEOUT_SEC = 3.0  # max wait for in-flight frame tasks during stop / 停止时等待帧任务的最长时间
 
 try:
     from turbojpeg import TurboJPEG, TJPF_RGB
@@ -151,6 +155,7 @@ class BaseVideoProcessor(ABC):
         self._push_stderr_lines: deque[str] = deque(maxlen=32)
         self._push_stderr_thread: threading.Thread | None = None
         self._push_stderr_lock = threading.Lock()
+        self._push_stdin_nonblocking = False
         self._output_queue: queue.Queue[
             tuple[np.ndarray, AnalysisResult, str] | None
         ] = queue.Queue(maxsize=2)
@@ -184,22 +189,18 @@ class BaseVideoProcessor(ABC):
     async def stop(self) -> None:
         """Stop the processing task gracefully."""
         self._stop_event.set()
+        # Stop/close the push side first so a blocked ffmpeg stdin write cannot
+        # keep the output worker alive while frame processing is shutting down.
+        # 优先停止/关闭推流侧，避免 ffmpeg stdin 写入卡住时拖住输出线程。
+        self._stop_output_worker()
+        self._close_push_process()
         if self._task is not None and not self._task.done():
             self._task.cancel()
             try:
                 await asyncio.wait_for(asyncio.shield(self._task), timeout=5.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-        if self._processing_tasks:
-            for task in list(self._processing_tasks):
-                task.cancel()
-            try:
-                await asyncio.gather(*self._processing_tasks, return_exceptions=True)
-            except Exception:
-                pass
-            self._processing_tasks.clear()
-        self._stop_output_worker()
-        self._close_push_process()
+        await self._cancel_processing_tasks()
         self.status = "stopped"
         logger.info("Stopped processor for {}", self.source_id)
 
@@ -706,7 +707,32 @@ class BaseVideoProcessor(ABC):
             logger.error("process_frame error: {}", exc)
             result = AnalysisResult()
 
+        if self._stop_event.is_set():
+            return
         await self._handle_result(frame, result)
+
+    async def _cancel_processing_tasks(self) -> None:
+        """Cancel in-flight frame tasks without allowing stop to hang forever.
+        取消进行中的帧任务，并避免停止流程无限卡住。"""
+        if not self._processing_tasks:
+            return
+        tasks = list(self._processing_tasks)
+        for task in tasks:
+            task.cancel()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=PROCESSING_STOP_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Timed out waiting for {} processing task(s) to stop for {}",
+                len([task for task in tasks if not task.done()]),
+                self.source_id,
+            )
+        except Exception:
+            pass
+        self._processing_tasks.clear()
 
     async def _handle_result(self, frame: np.ndarray, result: AnalysisResult) -> None:
         """Default per-result handling: enqueue for drawing/pushing if needed."""
@@ -1030,6 +1056,8 @@ class BaseVideoProcessor(ABC):
                     cmd = [
                         "ffmpeg",
                         "-y",
+                        "-hide_banner",
+                        "-loglevel", "warning",
                         "-f", "rawvideo",
                         "-pixel_format", "rgb24",
                         "-video_size", f"{w}x{h}",
@@ -1061,6 +1089,7 @@ class BaseVideoProcessor(ABC):
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.PIPE,
                     )
+                    self._configure_push_stdin()
                     self._start_push_stderr_drain()
                     self._push_path = output_rtsp_path
                     self._push_width = w
@@ -1084,8 +1113,7 @@ class BaseVideoProcessor(ABC):
                         return
 
                 if self._push_proc is not None and self._push_proc.stdin is not None:
-                    self._push_proc.stdin.write(frame.tobytes())
-                    self._push_proc.stdin.flush()
+                    self._write_push_frame_bytes(frame.tobytes())
                     # Reset failure counter on successful write.
                     # 写入成功后重置失败计数。
                     self._push_consecutive_failures = 0
@@ -1167,6 +1195,7 @@ class BaseVideoProcessor(ABC):
                         continue
                     with self._push_stderr_lock:
                         self._push_stderr_lines.append(line)
+                    logger.warning("ffmpeg push stderr for {}: {}", self.source_id, line)
             except Exception:
                 return
 
@@ -1203,8 +1232,59 @@ class BaseVideoProcessor(ABC):
             self._push_height = 0
             self._push_fps = 0.0
             self._push_bitrate = None
+            self._push_stdin_nonblocking = False
             with self._push_stderr_lock:
                 self._push_stderr_lines.clear()
+
+    def _configure_push_stdin(self) -> None:
+        """Put ffmpeg stdin into non-blocking mode when possible.
+        尽可能将 ffmpeg stdin 设置为非阻塞模式。"""
+        self._push_stdin_nonblocking = False
+        stdin = getattr(self._push_proc, "stdin", None) if self._push_proc is not None else None
+        if stdin is None:
+            return
+        try:
+            fd = stdin.fileno()
+            if not isinstance(fd, int):
+                return
+            os.set_blocking(fd, False)
+            self._push_stdin_nonblocking = True
+        except Exception as exc:
+            logger.debug("Unable to set ffmpeg stdin non-blocking for {}: {}", self.source_id, exc)
+
+    def _write_push_frame_bytes(self, data: bytes) -> None:
+        """Write one raw frame to ffmpeg stdin with a bounded wait.
+        在有限等待时间内将一帧原始数据写入 ffmpeg stdin。"""
+        stdin = getattr(self._push_proc, "stdin", None) if self._push_proc is not None else None
+        if stdin is None:
+            return
+        if not self._push_stdin_nonblocking:
+            stdin.write(data)
+            stdin.flush()
+            return
+
+        fd = stdin.fileno()
+        view = memoryview(data)
+        written = 0
+        deadline = time.monotonic() + PUSH_WRITE_TIMEOUT_SEC
+        while written < len(view):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Timed out writing frame to ffmpeg stdin after {PUSH_WRITE_TIMEOUT_SEC:.1f}s"
+                )
+            _, writable, _ = select.select([], [fd], [], remaining)
+            if not writable:
+                raise TimeoutError(
+                    f"Timed out waiting for ffmpeg stdin after {PUSH_WRITE_TIMEOUT_SEC:.1f}s"
+                )
+            try:
+                count = os.write(fd, view[written:])
+            except BlockingIOError:
+                continue
+            if count <= 0:
+                raise BrokenPipeError("ffmpeg stdin accepted zero bytes")
+            written += count
 
     # ── Utility ───────────────────────────────────────────────────────────
 

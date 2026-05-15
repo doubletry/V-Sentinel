@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -759,6 +760,9 @@ class TestCoreBaseVideoProcessorPipeline:
         assert get_flag_value("-framerate") == f"{proc._current_publish_fps():.3f}"
         assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
+        assert "-hide_banner" in cmd
+        assert "-loglevel" in cmd
+        assert cmd[cmd.index("-loglevel") + 1] == "warning"
         assert "-use_wallclock_as_timestamps" in cmd
         assert cmd[cmd.index("-use_wallclock_as_timestamps") + 1] == "1"
         for removed_flag in (
@@ -991,6 +995,61 @@ class TestCoreBaseVideoProcessorPipeline:
         assert proc._push_proc is None
         assert proc._push_consecutive_failures == 1
         assert proc._push_retry_after > 0
+
+    def test_push_frame_restarts_when_ffmpeg_stdin_blocks(self, monkeypatch):
+        """A stalled ffmpeg stdin write should not block the output worker forever."""
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_rtsp_addr": "rtsp://localhost:8554"},
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        read_fd, write_fd = os.pipe()
+        captured: dict[str, object] = {"terminated": False}
+
+        class _PipeStdin:
+            def fileno(self):
+                return write_fd
+
+            def close(self):
+                os.close(write_fd)
+
+        class _StalledProc:
+            def __init__(self):
+                self.stdin = _PipeStdin()
+                self.stderr = MagicMock()
+                self.returncode = None
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                captured["terminated"] = True
+
+            def wait(self, timeout=None):
+                captured["wait_timeout"] = timeout
+
+            def kill(self):
+                captured["killed"] = True
+
+        monkeypatch.setattr(
+            "core.base_processor.subprocess.Popen", lambda *a, **kw: _StalledProc()
+        )
+        monkeypatch.setattr("core.base_processor.time.sleep", lambda _: None)
+        monkeypatch.setattr("core.base_processor.select.select", lambda *a, **kw: ([], [], []))
+        monkeypatch.setattr("core.base_processor.PUSH_WRITE_TIMEOUT_SEC", 0.01)
+
+        try:
+            proc._push_frame(frame, "cam1_processed")
+        finally:
+            os.close(read_fd)
+
+        assert proc._push_proc is None
+        assert proc._push_consecutive_failures == 1
+        assert proc._push_retry_after > 0
+        assert captured["terminated"] is True
 
     def test_build_push_rtsp_url_without_credentials(self):
         proc = DummyCoreProcessor(

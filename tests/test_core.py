@@ -748,13 +748,20 @@ class TestCoreBaseVideoProcessorPipeline:
         cmd = captured["cmd"]
         assert cmd[0] == "ffmpeg"
         assert "-f" in cmd and "rawvideo" in cmd
-        assert "-pix_fmt" in cmd and "rgb24" in cmd
+        assert "-pixel_format" in cmd and "rgb24" in cmd
+        assert cmd[cmd.index("-video_size") + 1] == "64x64"
+        assert cmd[cmd.index("-framerate") + 1] == f"{proc._current_publish_fps():.3f}"
         assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
         assert "-use_wallclock_as_timestamps" in cmd
         assert cmd[cmd.index("-use_wallclock_as_timestamps") + 1] == "1"
-        assert "-fps_mode" in cmd
-        assert cmd[cmd.index("-fps_mode") + 1] == "passthrough"
+        assert "-fps_mode" not in cmd
+        assert "-fflags" not in cmd
+        assert "-flags" not in cmd
+        assert "-flush_packets" not in cmd
+        assert "-muxdelay" not in cmd
+        assert "-muxpreload" not in cmd
+        assert "-bf" not in cmd
         assert "-b:v" in cmd
         assert cmd[cmd.index("-b:v") + 1] == "2500k"
         assert "-maxrate" in cmd
@@ -762,7 +769,6 @@ class TestCoreBaseVideoProcessorPipeline:
         assert "-bufsize" in cmd
         assert cmd[cmd.index("-bufsize") + 1] == "5000k"
         assert "rtsp://localhost:8554/cam1_processed" == cmd[-1]
-        assert f"{proc._current_publish_fps():.3f}" in cmd
         captured["proc"].stdin.write.assert_called_once_with(frame.tobytes())
         captured["proc"].stdin.flush.assert_called_once()
 

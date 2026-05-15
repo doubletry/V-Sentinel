@@ -47,7 +47,6 @@ OUTPUT_QUEUE_TIMEOUT_SEC = 0.2
 MAX_REASONABLE_SOURCE_FPS = 120.0
 OBSERVED_FPS_ESTIMATE_WINDOW_SEC = 1.0
 FPS_CHANGE_THRESHOLD = 0.01
-GOP_DIVISOR = 2
 PUSH_STARTUP_CHECK_DELAY = 0.3  # seconds to wait after spawning ffmpeg to verify it is alive / 创建 ffmpeg 后等待验证存活的秒数
 PUSH_RETRY_BASE_COOLDOWN = 2.0  # initial cooldown seconds after push failure / 推流失败后的初始冷却秒数
 PUSH_RETRY_MAX_COOLDOWN = 30.0  # maximum cooldown between retries / 重试之间的最大冷却秒数
@@ -1011,11 +1010,6 @@ class BaseVideoProcessor(ABC):
             try:
                 target_fps = self._current_publish_fps()
                 video_bitrate = self._output_video_bitrate()
-                # Keep keyframes about twice per second so new RTSP readers can
-                # lock onto the stream faster under low-latency UDP delivery.
-                # GOP_DIVISOR = 2 means ~0.5s keyframe spacing.
-                # 约每 0.5 秒一个关键帧，帮助低延迟 UDP 读者更快起播。
-                gop = max(1, int(round(target_fps / GOP_DIVISOR)))
                 # Re-create ffmpeg process when path or dimensions change.
                 # 当路径或尺寸变化时重建 ffmpeg 进程。
                 need_new_proc = (
@@ -1032,22 +1026,16 @@ class BaseVideoProcessor(ABC):
                     cmd = [
                         "ffmpeg",
                         "-y",
-                        "-fflags", "nobuffer",
-                        "-flags", "low_delay",
-                        "-flush_packets", "1",
-                        "-f", "rawvideo",
-                        "-pix_fmt", "rgb24",
-                        "-s", f"{w}x{h}",
-                        "-r", f"{target_fps:.3f}",
                         "-use_wallclock_as_timestamps", "1",
+                        "-f", "rawvideo",
+                        "-pixel_format", "rgb24",
+                        "-video_size", f"{w}x{h}",
+                        "-framerate", f"{target_fps:.3f}",
                         "-i", "pipe:0",
-                        "-fps_mode", "passthrough",
                         "-c:v", "libx264",
-                        "-pix_fmt", "yuv420p",
                         "-preset", PUSH_PRESET,
                         "-tune", "zerolatency",
-                        "-g", str(gop),
-                        "-bf", "0",
+                        "-pix_fmt", "yuv420p",
                     ]
                     cmd.extend(
                         [
@@ -1058,8 +1046,6 @@ class BaseVideoProcessor(ABC):
                     )
                     cmd.extend(
                         [
-                            "-muxdelay", "0",
-                            "-muxpreload", "0",
                             "-f", "rtsp",
                             "-rtsp_transport", "tcp",
                             rtsp_url,

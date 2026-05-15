@@ -746,28 +746,29 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._push_frame(frame, "cam1_processed")
 
         cmd = captured["cmd"]
+        def _flag_value(flag: str) -> str:
+            assert flag in cmd
+            return cmd[cmd.index(flag) + 1]
+
         assert cmd[0] == "ffmpeg"
         assert "-f" in cmd and "rawvideo" in cmd
         assert "-pixel_format" in cmd and "rgb24" in cmd
-        assert cmd[cmd.index("-video_size") : cmd.index("-video_size") + 2] == [
-            "-video_size",
-            "64x64",
-        ]
-        assert cmd[cmd.index("-framerate") : cmd.index("-framerate") + 2] == [
-            "-framerate",
-            f"{proc._current_publish_fps():.3f}",
-        ]
+        assert _flag_value("-video_size") == "64x64"
+        assert _flag_value("-framerate") == f"{proc._current_publish_fps():.3f}"
         assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
         assert "-use_wallclock_as_timestamps" in cmd
         assert cmd[cmd.index("-use_wallclock_as_timestamps") + 1] == "1"
-        assert "-fps_mode" not in cmd
-        assert "-fflags" not in cmd
-        assert "-flags" not in cmd
-        assert "-flush_packets" not in cmd
-        assert "-muxdelay" not in cmd
-        assert "-muxpreload" not in cmd
-        assert "-bf" not in cmd
+        for removed_flag in (
+            "-fps_mode",
+            "-fflags",
+            "-flags",
+            "-flush_packets",
+            "-muxdelay",
+            "-muxpreload",
+            "-bf",
+        ):
+            assert removed_flag not in cmd
         assert "-b:v" in cmd
         assert cmd[cmd.index("-b:v") + 1] == "2500k"
         assert "-maxrate" in cmd

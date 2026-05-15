@@ -85,6 +85,7 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
   let stopped = false
   const queuedCandidates = []
   const transceiverDirection = 'recvonly'
+  let offerData = null
 
   pc.addTransceiver('video', { direction: transceiverDirection })
   pc.addTransceiver('audio', { direction: transceiverDirection })
@@ -98,10 +99,6 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
     }
   }
 
-  const offer = await pc.createOffer()
-  await pc.setLocalDescription(offer)
-  const offerData = parseOfferData(offer.sdp)
-
   pc.onicecandidate = (event) => {
     if (stopped || !event.candidate) return
 
@@ -110,8 +107,14 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
       return
     }
 
-    patchLocalCandidates(sessionUrl, offerData, [event.candidate])
+    if (offerData) {
+      patchLocalCandidates(sessionUrl, offerData, [event.candidate])
+    }
   }
+
+  const offer = await pc.createOffer()
+  await pc.setLocalDescription(offer)
+  offerData = parseOfferData(offer.sdp)
 
   let answerSdp
   try {
@@ -128,7 +131,7 @@ export async function connectWebRTC(streamPath, videoEl, webrtcBaseUrl, options 
     sdp: answerSdp,
   })
 
-  if (queuedCandidates.length) {
+  if (queuedCandidates.length && offerData) {
     patchLocalCandidates(
       sessionUrl,
       offerData,

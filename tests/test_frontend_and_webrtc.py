@@ -26,3 +26,15 @@ class TestFrontendRoutes:
         asset_resp = client.get("/assets/app.js")
         assert asset_resp.status_code == 200
         assert "console.log('ok')" in asset_resp.text
+
+    def test_api_like_path_does_not_fall_back_to_index_html(self, tmp_path):
+        dist = tmp_path / "dist"
+        dist.mkdir()
+        (dist / "index.html").write_text("<html><body>spa</body></html>", encoding="utf-8")
+
+        app = FastAPI()
+        configure_frontend_routes(app, dist)
+        client = TestClient(app)
+
+        api_resp = client.get("/api/settings/")
+        assert api_resp.status_code == 404

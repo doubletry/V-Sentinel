@@ -5,7 +5,7 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from loguru import logger
@@ -94,6 +94,8 @@ def configure_frontend_routes(app: FastAPI, frontend_dist: Path) -> None:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def frontend_catch_all(full_path: str) -> FileResponse:
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
         requested = (frontend_dist / full_path).resolve()
         try:
             requested.relative_to(frontend_dist.resolve())

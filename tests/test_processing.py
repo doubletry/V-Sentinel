@@ -224,6 +224,18 @@ class TestProcessorManager:
         mgr = self._make_manager()
         await mgr.stop_all()  # Should not raise
 
+    def test_update_app_settings_swaps_shared_dict_for_running_processors(self):
+        mgr = self._make_manager()
+        processor = MagicMock()
+        processor.app_settings = mgr._app_settings
+        mgr._processors["s1"] = processor
+
+        mgr.update_app_settings({"mediamtx_username": "alice"})
+
+        assert mgr._app_settings == {"mediamtx_username": "alice"}
+        assert processor.app_settings == {"mediamtx_username": "alice"}
+        assert processor.app_settings is mgr._app_settings
+
     def test_truck_adapter_initializes_core_state(self):
         from backend.processing.truck import TruckMonitorProcessor
 

@@ -17,6 +17,7 @@ import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse, quote
@@ -147,6 +148,9 @@ class BaseVideoProcessor(ABC):
         self._push_bitrate: str | None = None
         self._push_retry_after: float = 0.0  # monotonic time before which retries are skipped / 重试冷却截止时间
         self._push_consecutive_failures: int = 0  # consecutive failure counter / 连续失败计数
+        self._push_stderr_lines: deque[str] = deque(maxlen=32)
+        self._push_stderr_thread: threading.Thread | None = None
+        self._push_stderr_lock = threading.Lock()
         self._output_queue: queue.Queue[
             tuple[np.ndarray, AnalysisResult, str] | None
         ] = queue.Queue(maxsize=2)
@@ -1057,6 +1061,7 @@ class BaseVideoProcessor(ABC):
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.PIPE,
                     )
+                    self._start_push_stderr_drain()
                     self._push_path = output_rtsp_path
                     self._push_width = w
                     self._push_height = h
@@ -1116,7 +1121,12 @@ class BaseVideoProcessor(ABC):
     def _read_push_stderr(self) -> str:
         """Read available stderr from the ffmpeg push process (non-blocking).
         非阻塞地读取 ffmpeg 推流进程的 stderr 输出。"""
-        if self._push_proc is None or self._push_proc.stderr is None:
+        with self._push_stderr_lock:
+            buffered = "\n".join(self._push_stderr_lines).strip()
+        if buffered:
+            return buffered[-MAX_STDERR_LOG_CHARS:]
+        stderr = getattr(self._push_proc, "stderr", None) if self._push_proc is not None else None
+        if stderr is None:
             return ""
         try:
             # Only read stderr if the process has already exited, to avoid
@@ -1124,12 +1134,48 @@ class BaseVideoProcessor(ABC):
             # 仅在进程已退出时读取 stderr，以避免阻塞仍在运行的进程。
             if self._push_proc.poll() is None:
                 return "(process still running)"
-            data = self._push_proc.stderr.read()
+            data = stderr.read()
             if data:
                 return data.decode("utf-8", errors="replace").strip()[-MAX_STDERR_LOG_CHARS:]
             return ""
         except Exception:
             return ""
+
+    def _start_push_stderr_drain(self) -> None:
+        """Drain ffmpeg stderr in the background to avoid pipe backpressure.
+        后台持续读取 ffmpeg stderr，避免管道缓冲区写满后阻塞。"""
+        stderr = getattr(self._push_proc, "stderr", None) if self._push_proc is not None else None
+        if stderr is None:
+            return
+
+        with self._push_stderr_lock:
+            self._push_stderr_lines.clear()
+
+        def _drain() -> None:
+            stderr_stream = getattr(self._push_proc, "stderr", None) if self._push_proc is not None else None
+            if stderr_stream is None:
+                return
+            try:
+                while True:
+                    raw = stderr_stream.readline()
+                    if not raw:
+                        break
+                    if not isinstance(raw, (bytes, bytearray)):
+                        break
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    with self._push_stderr_lock:
+                        self._push_stderr_lines.append(line)
+            except Exception:
+                return
+
+        self._push_stderr_thread = threading.Thread(
+            target=_drain,
+            name=f"ffmpeg-stderr-{self.source_id}",
+            daemon=True,
+        )
+        self._push_stderr_thread.start()
 
     def _close_push_process(self) -> None:
         """Terminate the persistent ffmpeg push subprocess.
@@ -1138,8 +1184,9 @@ class BaseVideoProcessor(ABC):
             try:
                 if self._push_proc.stdin is not None:
                     self._push_proc.stdin.close()
-                if self._push_proc.stderr is not None:
-                    self._push_proc.stderr.close()
+                stderr = getattr(self._push_proc, "stderr", None)
+                if stderr is not None:
+                    stderr.close()
                 self._push_proc.terminate()
                 self._push_proc.wait(timeout=3.0)
             except Exception:
@@ -1147,12 +1194,17 @@ class BaseVideoProcessor(ABC):
                     self._push_proc.kill()
                 except Exception:
                     pass
+            if self._push_stderr_thread is not None:
+                self._push_stderr_thread.join(timeout=0.2)
+            self._push_stderr_thread = None
             self._push_proc = None
             self._push_path = None
             self._push_width = 0
             self._push_height = 0
             self._push_fps = 0.0
             self._push_bitrate = None
+            with self._push_stderr_lock:
+                self._push_stderr_lines.clear()
 
     # ── Utility ───────────────────────────────────────────────────────────
 

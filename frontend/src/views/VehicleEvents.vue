@@ -109,6 +109,11 @@ const currentPage = ref(1)
 const pageSize = ref(DEFAULT_PAGE_SIZE)
 const pageSizeOptions = PAGE_SIZE_OPTIONS
 
+function clampCurrentPage() {
+  const totalPages = Math.max(1, Math.ceil(vehicleEvents.value.length / pageSize.value))
+  currentPage.value = Math.min(currentPage.value, totalPages)
+}
+
 const pagedVehicleEvents = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   const end = start + pageSize.value
@@ -133,6 +138,7 @@ async function loadEvents() {
     eventSince.value = result.since || ''
     eventUntil.value = result.until || ''
     currentPage.value = 1
+    clampCurrentPage()
   } catch (err) {
     ElMessage.error(t('vehicleEvents.loadFailed', { message: err.message }))
   } finally {
@@ -168,8 +174,9 @@ function handlePageSizeChange(size) {
 async function handleDelete(row) {
   try {
     await vehicleEventsApi.delete(row.id)
-    ElMessage.success(t('vehicleEvents.deleteSuccess'))
     vehicleEvents.value = vehicleEvents.value.filter((e) => e.id !== row.id)
+    clampCurrentPage()
+    ElMessage.success(t('vehicleEvents.deleteSuccess'))
   } catch (err) {
     ElMessage.error(t('vehicleEvents.deleteFailed', { message: err.message }))
   }

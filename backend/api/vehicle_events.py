@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from backend.db.database import get_all_settings, get_vehicle_visits_between
+from backend.db.database import get_all_settings, get_vehicle_visits_between, delete_vehicle_visit
 from core.truck.agent import TruckAnalysisAgent
 
 router = APIRouter(prefix="/api/vehicle-events", tags=["vehicle-events"])
@@ -99,3 +99,12 @@ async def send_summary_now(request: Request) -> dict:
         "visit_count": len(visits),
         "summary_text": summary_text,
     }
+
+
+@router.delete("/{visit_id}", status_code=204)
+async def delete_vehicle_event(visit_id: str) -> None:
+    """Delete a vehicle visit record so it no longer appears anywhere.
+    删除一条车辆到访记录，使其不再出现在网页和邮件中。"""
+    deleted = await delete_vehicle_visit(visit_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Vehicle event not found")

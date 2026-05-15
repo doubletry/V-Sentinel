@@ -204,7 +204,12 @@ function onResultDragStart(event, resultStream) {
 
 async function addSource() {
   const routePath = normalizeRoutePath(form.route_path)
-  const rtspUrl = buildRtspUrl(appSettingsStore.mediamtxRtspAddr, routePath)
+  const rtspUrl = buildRtspUrl(
+    appSettingsStore.mediamtxRtspAddr,
+    routePath,
+    appSettingsStore.mediamtxUsername,
+    appSettingsStore.mediamtxPassword
+  )
 
   if (!form.name || !routePath) {
     ElMessage.warning(t('sourceList.fillAllFields'))
@@ -253,7 +258,12 @@ async function saveEdit() {
   if (!editingSourceId.value) return
 
   const routePath = normalizeRoutePath(editForm.route_path)
-  const rtspUrl = buildRtspUrl(appSettingsStore.mediamtxRtspAddr, routePath)
+  const rtspUrl = buildRtspUrl(
+    appSettingsStore.mediamtxRtspAddr,
+    routePath,
+    appSettingsStore.mediamtxUsername,
+    appSettingsStore.mediamtxPassword
+  )
 
   if (!editForm.name || !routePath) {
     ElMessage.warning(t('sourceList.fillAllFields'))

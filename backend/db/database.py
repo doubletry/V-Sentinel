@@ -8,6 +8,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import aiosqlite
 from loguru import logger
@@ -515,6 +516,139 @@ async def update_settings(data: dict[str, str]) -> dict[str, str]:
     return await get_all_settings()
 
 
+def _normalize_rtsp_base_address(value: str | None) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def _build_source_rtsp_url(
+    rtsp_base_address: str,
+    route_path: str,
+    username: str | None = None,
+    password: str | None = None,
+) -> str:
+    """Build a source RTSP URL from base settings plus route path.
+    根据基础设置和路由路径构造视频源 RTSP URL。"""
+    base = _normalize_rtsp_base_address(rtsp_base_address)
+    route = str(route_path or "").strip().strip("/")
+    if not base or not route:
+        return ""
+
+    parsed = urlparse(base)
+    host = parsed.hostname or ""
+    if not host:
+        return f"{base}/{route}"
+
+    userinfo = ""
+    username = str(username or "").strip()
+    password = str(password or "")
+    if username:
+        userinfo = quote(username, safe="")
+        if password:
+            userinfo += ":" + quote(password, safe="")
+        userinfo += "@"
+
+    netloc = f"{userinfo}{host}"
+    if parsed.port is not None:
+        netloc += f":{parsed.port}"
+
+    rebuilt = urlunparse(
+        (
+            parsed.scheme,
+            netloc,
+            parsed.path.rstrip("/"),
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        )
+    ).rstrip("/")
+    return f"{rebuilt}/{route}"
+
+
+def _extract_route_path(
+    rtsp_url: str,
+    rtsp_base_address: str | None,
+) -> str | None:
+    """Extract a source route path when the URL belongs to the managed RTSP base.
+    当 URL 属于当前托管 RTSP 基地址时，提取其路由路径。"""
+    full = str(rtsp_url or "").strip()
+    base = _normalize_rtsp_base_address(rtsp_base_address)
+    if not full or not base:
+        return None
+
+    try:
+        source = urlparse(full)
+        managed = urlparse(base)
+    except Exception:
+        return None
+
+    if not source.scheme or not managed.scheme:
+        return None
+    if source.scheme.lower() != managed.scheme.lower():
+        return None
+    if (source.hostname or "").lower() != (managed.hostname or "").lower():
+        return None
+
+    source_port = source.port
+    managed_port = managed.port
+    if source_port != managed_port:
+        return None
+
+    base_path = managed.path.rstrip("/")
+    source_path = source.path or ""
+    prefix = f"{base_path}/" if base_path else "/"
+    if not source_path.startswith(prefix):
+        return None
+
+    route = source_path.removeprefix(prefix).strip("/")
+    return unquote(route) if route else None
+
+
+async def sync_source_rtsp_urls_with_settings(
+    previous_settings: dict[str, str],
+    current_settings: dict[str, str],
+) -> list[VideoSource]:
+    """Rewrite managed source RTSP URLs after MediaMTX settings change.
+    MediaMTX 设置变更后，重写受管视频源的 RTSP URL。"""
+    previous_base = previous_settings.get("mediamtx_rtsp_addr", "")
+    current_base = current_settings.get("mediamtx_rtsp_addr", "")
+    current_username = current_settings.get("mediamtx_username", "")
+    current_password = current_settings.get("mediamtx_password", "")
+
+    if not previous_base or not current_base:
+        return await list_sources()
+
+    async with _db_session() as db:
+        async with db.execute(
+            "SELECT id, name, rtsp_url, created_at FROM video_sources ORDER BY created_at"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        changed_ids: list[str] = []
+        for row in rows:
+            source_id, _name, rtsp_url, _created_at = row
+            route_path = _extract_route_path(rtsp_url, previous_base)
+            if not route_path:
+                continue
+
+            new_url = _build_source_rtsp_url(
+                current_base,
+                route_path,
+                current_username,
+                current_password,
+            )
+            if new_url and new_url != rtsp_url:
+                await db.execute(
+                    "UPDATE video_sources SET rtsp_url = ? WHERE id = ?",
+                    (new_url, source_id),
+                )
+                changed_ids.append(source_id)
+
+        if changed_ids:
+            await db.commit()
+
+    return await list_sources()
+
+
 async def save_vehicle_visit(
     source_id: str,
     source_name: str,
@@ -607,6 +741,17 @@ async def get_vehicle_visits_between(start_iso: str, end_iso: str) -> list[dict]
             "created_at": row[9],
         })
     return result
+
+
+async def delete_vehicle_visit(visit_id: str) -> bool:
+    """Delete a vehicle visit record by ID. Returns True if a row was deleted.
+    按 ID 删除一条车辆到访记录。若删除了行则返回 True。"""
+    async with _db_session() as db:
+        cursor = await db.execute(
+            "DELETE FROM vehicle_visits WHERE id = ?", (visit_id,)
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 async def prune_analysis_messages(retention_days: int) -> None:

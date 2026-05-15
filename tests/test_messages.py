@@ -199,3 +199,36 @@ class TestMessagesAPI:
         assert "到达时间" in data["summary_text"]
         assert "离开时间" in data["summary_text"]
         app.state.email_client.send_daily_summary_email.assert_awaited_once()
+
+    async def test_delete_vehicle_event_endpoint(self, async_client: AsyncClient):
+        now = datetime.now(timezone.utc).isoformat()
+        visit_id = await save_vehicle_visit(
+            source_id="s1",
+            source_name="Cam1",
+            track_id=1,
+            enter_time=now,
+            exit_time=now,
+            plate="DEL001",
+            confirmed_actions=[],
+            missing_actions=[],
+        )
+
+        # Verify it exists in today's events
+        resp = await async_client.get("/api/vehicle-events/today")
+        assert resp.status_code == 200
+        plates = [v["plate"] for v in resp.json()["visits"]]
+        assert "DEL001" in plates
+
+        # Delete it
+        resp = await async_client.delete(f"/api/vehicle-events/{visit_id}")
+        assert resp.status_code == 204
+
+        # Verify it no longer appears
+        resp = await async_client.get("/api/vehicle-events/today")
+        assert resp.status_code == 200
+        plates = [v["plate"] for v in resp.json()["visits"]]
+        assert "DEL001" not in plates
+
+    async def test_delete_vehicle_event_not_found(self, async_client: AsyncClient):
+        resp = await async_client.delete("/api/vehicle-events/nonexistent-id")
+        assert resp.status_code == 404

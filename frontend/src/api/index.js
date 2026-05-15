@@ -60,6 +60,7 @@ export const messagesApi = {
 export const vehicleEventsApi = {
   today: () => api.get('/api/vehicle-events/today'),
   sendSummaryNow: () => api.post('/api/vehicle-events/send-summary-now'),
+  delete: (visitId) => api.delete(`/api/vehicle-events/${visitId}`),
 }
 
 // Settings API

@@ -6,11 +6,33 @@ export function normalizeBaseAddress(value) {
   return String(value || '').trim().replace(/\/+$/, '')
 }
 
-export function buildRtspUrl(rtspBaseAddress, routePath) {
+function _logParseWarning(message, value, error) {
+  if (import.meta.env.DEV) {
+    console.warn(message, value, error)
+  }
+}
+
+export function buildRtspUrl(rtspBaseAddress, routePath, username = '', password = '') {
   const base = normalizeBaseAddress(rtspBaseAddress)
   const route = normalizeRoutePath(routePath)
   if (!base || !route) return ''
-  return `${base}/${route}`
+
+  try {
+    const parsed = new URL(base)
+    const user = String(username || '').trim()
+    if (user) {
+      parsed.username = user
+      parsed.password = String(password || '')
+    } else {
+      parsed.username = ''
+      parsed.password = ''
+    }
+    const href = parsed.toString().replace(/\/+$/, '')
+    return `${href}/${route}`
+  } catch (error) {
+    _logParseWarning('Failed to parse RTSP base address:', rtspBaseAddress, error)
+    return `${base}/${route}`
+  }
 }
 
 export function extractRoutePath(rtspUrl, rtspBaseAddress) {
@@ -18,8 +40,25 @@ export function extractRoutePath(rtspUrl, rtspBaseAddress) {
   if (!full) return ''
 
   const base = normalizeBaseAddress(rtspBaseAddress)
-  if (base && full.startsWith(`${base}/`)) {
-    return normalizeRoutePath(full.slice(base.length + 1))
+  if (base) {
+    try {
+      const fullUrl = new URL(full)
+      const baseUrl = new URL(base)
+      if (
+        fullUrl.protocol === baseUrl.protocol &&
+        fullUrl.hostname === baseUrl.hostname &&
+        fullUrl.port === baseUrl.port &&
+        fullUrl.pathname.startsWith(`${baseUrl.pathname.replace(/\/+$/, '')}/`)
+      ) {
+        const prefix = `${baseUrl.pathname.replace(/\/+$/, '')}/`
+        return normalizeRoutePath(fullUrl.pathname.slice(prefix.length))
+      }
+    } catch (error) {
+      _logParseWarning('Failed to parse source/base RTSP URLs:', { rtspUrl, rtspBaseAddress }, error)
+      if (full.startsWith(`${base}/`)) {
+        return normalizeRoutePath(full.slice(base.length + 1))
+      }
+    }
   }
 
   try {

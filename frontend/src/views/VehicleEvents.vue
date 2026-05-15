@@ -57,6 +57,21 @@
             {{ (row.missing_actions || []).length ? t('vehicleEvents.statusMissing') : t('vehicleEvents.statusComplete') }}
           </template>
         </el-table-column>
+        <el-table-column :label="t('vehicleEvents.actions')" width="120" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-popconfirm
+              :title="t('vehicleEvents.deleteConfirmMessage')"
+              :confirm-button-text="t('vehicleEvents.delete')"
+              @confirm="handleDelete(row)"
+            >
+              <template #reference>
+                <el-button type="danger" size="small" plain>
+                  {{ t('vehicleEvents.delete') }}
+                </el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
     <div class="events-pagination">
@@ -94,6 +109,11 @@ const currentPage = ref(1)
 const pageSize = ref(DEFAULT_PAGE_SIZE)
 const pageSizeOptions = PAGE_SIZE_OPTIONS
 
+function clampCurrentPage() {
+  const totalPages = Math.max(1, Math.ceil(vehicleEvents.value.length / pageSize.value))
+  currentPage.value = Math.min(currentPage.value, totalPages)
+}
+
 const pagedVehicleEvents = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   const end = start + pageSize.value
@@ -118,6 +138,7 @@ async function loadEvents() {
     eventSince.value = result.since || ''
     eventUntil.value = result.until || ''
     currentPage.value = 1
+    clampCurrentPage()
   } catch (err) {
     ElMessage.error(t('vehicleEvents.loadFailed', { message: err.message }))
   } finally {
@@ -148,6 +169,17 @@ function handlePageChange(page) {
 function handlePageSizeChange(size) {
   pageSize.value = Number(size)
   currentPage.value = 1
+}
+
+async function handleDelete(row) {
+  try {
+    await vehicleEventsApi.delete(row.id)
+    ElMessage.success(t('vehicleEvents.deleteSuccess'))
+    vehicleEvents.value = vehicleEvents.value.filter((e) => e.id !== row.id)
+    clampCurrentPage()
+  } catch (err) {
+    ElMessage.error(t('vehicleEvents.deleteFailed', { message: err.message }))
+  }
 }
 
 onMounted(() => {

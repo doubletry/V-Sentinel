@@ -975,6 +975,7 @@ class BaseVideoProcessor(ABC):
     def _double_video_bitrate(bitrate: str) -> str:
         """Double the configured bitrate for ffmpeg VBV buffer sizing.
         将配置码率翻倍用于 ffmpeg VBV 缓冲区大小。"""
+        bitrate = bitrate.lower()
         suffix = bitrate[-1:] if bitrate[-1:] in {"k", "m"} else ""
         number = bitrate[:-1] if suffix else bitrate
         return f"{float(number) * 2:g}{suffix}"
@@ -987,7 +988,7 @@ class BaseVideoProcessor(ABC):
         )
         if configured is not None:
             return configured
-        return self._normalize_video_bitrate(DEFAULT_OUTPUT_BITRATE) or DEFAULT_OUTPUT_BITRATE
+        return DEFAULT_OUTPUT_BITRATE
 
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.

@@ -29,6 +29,7 @@ class TestSettingsDB:
         assert all_settings["daily_summary_hour"] == "23"
         assert all_settings["daily_summary_minute"] == "59"
         assert all_settings["message_retention_days"] == "7"
+        assert all_settings["mediamtx_output_bitrate"] == "2500k"
 
     async def test_get_setting(self, init_db):
         val = await get_setting("vengine_host")
@@ -76,6 +77,7 @@ class TestSettingsAPI:
                 "site_title": "My Sentinel",
                 "processor_plugin": "example",
                 "roi_tag_options": "[\"person\",\"vehicle\"]",
+                "mediamtx_output_bitrate": "4m",
                 "email_from_address": "sender@example.com",
                 "email_from_auth_code": "secret",
                 "email_to_addresses": "to1@example.com,to2@example.com",
@@ -94,6 +96,7 @@ class TestSettingsAPI:
         assert data["site_title"] == "My Sentinel"
         assert data["processor_plugin"] == "example"
         assert data["roi_tag_options"] == "[\"person\",\"vehicle\"]"
+        assert data["mediamtx_output_bitrate"] == "4m"
         assert data["email_from_address"] == "sender@example.com"
         assert data["email_from_auth_code"] == "secret"
         assert data["email_to_addresses"] == "to1@example.com,to2@example.com"

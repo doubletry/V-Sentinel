@@ -204,6 +204,7 @@ export default {
     mediamtx: 'MediaMTX',
     rtspAddress: 'RTSP 地址',
     webrtcAddress: 'WebRTC 地址',
+    outputBitrate: '结果推流码率',
     mediamtxUsername: 'MediaMTX 账号',
     mediamtxPassword: 'MediaMTX 密码',
     mediamtxUsernamePlaceholder: '可选，留空表示无需认证',

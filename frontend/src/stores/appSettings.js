@@ -14,6 +14,7 @@ const DEFAULT_UI_SETTINGS = {
   roi_tag_options: '["person","vehicle","intrusion"]',
   mediamtx_rtsp_addr: 'rtsp://localhost:8554',
   mediamtx_webrtc_addr: config.mediamtxWebrtcUrl || 'http://localhost:8889',
+  mediamtx_output_bitrate: '2500k',
   mediamtx_username: '',
   mediamtx_password: '',
   email_from_address: '',
@@ -79,6 +80,9 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
   const mediamtxWebrtcAddr = computed(
     () => settings.value.mediamtx_webrtc_addr || DEFAULT_UI_SETTINGS.mediamtx_webrtc_addr
   )
+  const mediamtxOutputBitrate = computed(
+    () => settings.value.mediamtx_output_bitrate || DEFAULT_UI_SETTINGS.mediamtx_output_bitrate
+  )
   const mediamtxUsername = computed(() => settings.value.mediamtx_username || '')
   const mediamtxPassword = computed(() => settings.value.mediamtx_password || '')
 
@@ -134,6 +138,7 @@ export const useAppSettingsStore = defineStore('appSettings', () => {
     roiTagOptions,
     mediamtxRtspAddr,
     mediamtxWebrtcAddr,
+    mediamtxOutputBitrate,
     mediamtxUsername,
     mediamtxPassword,
     fetchSettings,

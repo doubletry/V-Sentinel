@@ -37,6 +37,7 @@ from core.constants import (
 )
 
 FALLBACK_PUBLISH_FPS = 1
+DEFAULT_OUTPUT_BITRATE = "2500k"
 INPUT_RTSP_TRANSPORT = "tcp"
 LOW_LATENCY_PROBESIZE = "32"
 LOW_LATENCY_ANALYZEDURATION = "0"
@@ -143,6 +144,7 @@ class BaseVideoProcessor(ABC):
         self._push_width: int = 0
         self._push_height: int = 0
         self._push_fps: float = 0.0
+        self._push_bitrate: str | None = None
         self._push_retry_after: float = 0.0  # monotonic time before which retries are skipped / 重试冷却截止时间
         self._push_consecutive_failures: int = 0  # consecutive failure counter / 连续失败计数
         self._output_queue: queue.Queue[
@@ -952,6 +954,42 @@ class BaseVideoProcessor(ABC):
                 ).rstrip("/")
         return f"{base}/{output_rtsp_path}"
 
+    @staticmethod
+    def _normalize_video_bitrate(value: Any) -> str | None:
+        """Normalize ffmpeg video bitrate values such as 2500k or 4M.
+        标准化 ffmpeg 视频码率值，例如 2500k 或 4M。"""
+        text = str(value or "").strip().lower()
+        if not text:
+            return None
+        suffix = ""
+        if text[-1:] in {"k", "m"}:
+            suffix = text[-1]
+            text = text[:-1]
+        if not text.isdigit():
+            return None
+        amount = int(text)
+        if amount <= 0:
+            return None
+        return f"{amount}{suffix}"
+
+    @staticmethod
+    def _double_video_bitrate(bitrate: str) -> str:
+        """Return a small VBV buffer size derived from the configured bitrate.
+        根据配置码率得到较小的 VBV 缓冲区大小。"""
+        suffix = bitrate[-1:] if bitrate[-1:] in {"k", "m"} else ""
+        number = bitrate[:-1] if suffix else bitrate
+        return f"{int(number) * 2}{suffix}"
+
+    def _output_video_bitrate(self) -> str | None:
+        """Return configured result-stream bitrate, falling back to the default.
+        返回配置的结果流码率，无效时回退到默认值。"""
+        configured = self._normalize_video_bitrate(
+            self.app_settings.get("mediamtx_output_bitrate")
+        )
+        if configured is not None:
+            return configured
+        return self._normalize_video_bitrate(DEFAULT_OUTPUT_BITRATE)
+
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.
         通过持久化 ffmpeg 子进程将标注帧推送到 MediaMTX。"""
@@ -970,6 +1008,7 @@ class BaseVideoProcessor(ABC):
 
             try:
                 target_fps = self._current_publish_fps()
+                video_bitrate = self._output_video_bitrate()
                 # Keep keyframes about twice per second so new RTSP readers can
                 # lock onto the stream faster under low-latency UDP delivery.
                 # GOP_DIVISOR = 2 means ~0.5s keyframe spacing.
@@ -984,6 +1023,7 @@ class BaseVideoProcessor(ABC):
                     or self._push_width != w
                     or self._push_height != h
                     or abs(self._push_fps - target_fps) > FPS_CHANGE_THRESHOLD
+                    or self._push_bitrate != video_bitrate
                 )
                 if need_new_proc:
                     self._close_push_process()
@@ -997,19 +1037,33 @@ class BaseVideoProcessor(ABC):
                         "-pix_fmt", "rgb24",
                         "-s", f"{w}x{h}",
                         "-r", f"{target_fps:.3f}",
+                        "-use_wallclock_as_timestamps", "1",
                         "-i", "pipe:0",
+                        "-fps_mode", "passthrough",
                         "-c:v", "libx264",
                         "-pix_fmt", "yuv420p",
                         "-preset", PUSH_PRESET,
                         "-tune", "zerolatency",
                         "-g", str(gop),
                         "-bf", "0",
-                        "-muxdelay", "0",
-                        "-muxpreload", "0",
-                        "-f", "rtsp",
-                        "-rtsp_transport", "tcp",
-                        rtsp_url,
                     ]
+                    if video_bitrate is not None:
+                        cmd.extend(
+                            [
+                                "-b:v", video_bitrate,
+                                "-maxrate", video_bitrate,
+                                "-bufsize", self._double_video_bitrate(video_bitrate),
+                            ]
+                        )
+                    cmd.extend(
+                        [
+                            "-muxdelay", "0",
+                            "-muxpreload", "0",
+                            "-f", "rtsp",
+                            "-rtsp_transport", "tcp",
+                            rtsp_url,
+                        ]
+                    )
                     self._push_proc = subprocess.Popen(
                         cmd,
                         stdin=subprocess.PIPE,
@@ -1020,6 +1074,7 @@ class BaseVideoProcessor(ABC):
                     self._push_width = w
                     self._push_height = h
                     self._push_fps = target_fps
+                    self._push_bitrate = video_bitrate
 
                     # Give ffmpeg a moment to initialize and verify it is alive.
                     # 等待 ffmpeg 启动并验证其存活。
@@ -1110,6 +1165,7 @@ class BaseVideoProcessor(ABC):
             self._push_width = 0
             self._push_height = 0
             self._push_fps = 0.0
+            self._push_bitrate = None
 
     # ── Utility ───────────────────────────────────────────────────────────
 

@@ -194,6 +194,9 @@
           <el-form-item :label="t('settings.webrtcAddress')">
             <el-input v-model="form.mediamtx_webrtc_addr" placeholder="http://localhost:8889" />
           </el-form-item>
+          <el-form-item :label="t('settings.outputBitrate')">
+            <el-input v-model="form.mediamtx_output_bitrate" placeholder="2500k" />
+          </el-form-item>
           <el-form-item :label="t('settings.mediamtxUsername')">
             <el-input v-model="form.mediamtx_username" :placeholder="t('settings.mediamtxUsernamePlaceholder')" />
           </el-form-item>
@@ -339,6 +342,7 @@ const form = ref({
   upload_enabled: 'true',
   mediamtx_rtsp_addr: '',
   mediamtx_webrtc_addr: '',
+  mediamtx_output_bitrate: '2500k',
   mediamtx_username: '',
   mediamtx_password: '',
   email_from_address: '',

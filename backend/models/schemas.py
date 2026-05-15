@@ -143,6 +143,7 @@ class AppSettingsUpdate(BaseModel):
 
     mediamtx_rtsp_addr: str | None = None
     mediamtx_webrtc_addr: str | None = None
+    mediamtx_output_bitrate: str | None = None
     mediamtx_username: str | None = None
     mediamtx_password: str | None = None
     email_from_address: str | None = None

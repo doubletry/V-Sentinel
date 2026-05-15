@@ -751,10 +751,73 @@ class TestCoreBaseVideoProcessorPipeline:
         assert "-pix_fmt" in cmd and "rgb24" in cmd
         assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
+        assert "-use_wallclock_as_timestamps" in cmd
+        assert cmd[cmd.index("-use_wallclock_as_timestamps") + 1] == "1"
+        assert "-fps_mode" in cmd
+        assert cmd[cmd.index("-fps_mode") + 1] == "passthrough"
+        assert "-b:v" in cmd
+        assert cmd[cmd.index("-b:v") + 1] == "2500k"
+        assert "-maxrate" in cmd
+        assert cmd[cmd.index("-maxrate") + 1] == "2500k"
+        assert "-bufsize" in cmd
+        assert cmd[cmd.index("-bufsize") + 1] == "5000k"
         assert "rtsp://localhost:8554/cam1_processed" == cmd[-1]
         assert f"{proc._current_publish_fps():.3f}" in cmd
         captured["proc"].stdin.write.assert_called_once_with(frame.tobytes())
         captured["proc"].stdin.flush.assert_called_once()
+
+    def test_push_frame_uses_configured_output_bitrate(self, monkeypatch):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={
+                "mediamtx_rtsp_addr": "rtsp://localhost:8554",
+                "mediamtx_output_bitrate": "4M",
+            },
+        )
+        proc._update_publish_fps(30.0)
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        captured: dict[str, object] = {}
+
+        class _FakeProc:
+            def __init__(self):
+                self.stdin = MagicMock()
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout=None):
+                pass
+
+            def kill(self):
+                pass
+
+        def _fake_popen(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return _FakeProc()
+
+        monkeypatch.setattr("core.base_processor.subprocess.Popen", _fake_popen)
+
+        proc._push_frame(frame, "cam1_processed")
+
+        cmd = captured["cmd"]
+        assert cmd[cmd.index("-b:v") + 1] == "4m"
+        assert cmd[cmd.index("-maxrate") + 1] == "4m"
+        assert cmd[cmd.index("-bufsize") + 1] == "8m"
+
+    def test_invalid_output_bitrate_falls_back_to_default(self):
+        proc = DummyCoreProcessor(
+            source_id="s1",
+            source_name="cam",
+            rtsp_url="rtsp://localhost:8554/cam1",
+            app_settings={"mediamtx_output_bitrate": "not-a-rate"},
+        )
+
+        assert proc._output_video_bitrate() == "2500k"
 
     def test_push_frame_captures_stderr_on_immediate_exit(self, monkeypatch):
         """When ffmpeg exits immediately, stderr is captured and a retry cooldown is set."""

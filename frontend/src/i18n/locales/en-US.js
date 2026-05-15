@@ -204,6 +204,7 @@ export default {
     mediamtx: 'MediaMTX',
     rtspAddress: 'RTSP Address',
     webrtcAddress: 'WebRTC Address',
+    outputBitrate: 'Result Stream Bitrate',
     mediamtxUsername: 'MediaMTX Username',
     mediamtxPassword: 'MediaMTX Password',
     mediamtxUsernamePlaceholder: 'Optional. Leave blank to disable auth.',

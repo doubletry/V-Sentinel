@@ -1125,6 +1125,13 @@ class BaseVideoProcessor(ABC):
                 )
                 self._close_push_process()
                 self._record_push_failure()
+            except TimeoutError as exc:
+                stderr_text = self._read_push_stderr()
+                logger.warning(
+                    "Push timed out for {}: {} | stderr: {}", rtsp_url, exc, stderr_text
+                )
+                self._close_push_process()
+                self._record_push_failure()
             except Exception as exc:
                 logger.warning("Push error for {}: {}", rtsp_url, exc)
                 self._close_push_process()
@@ -1245,6 +1252,8 @@ class BaseVideoProcessor(ABC):
             return
         try:
             fd = stdin.fileno()
+            # Tests and some file-like wrappers may expose a mock/non-integer
+            # fileno; only real OS file descriptors can be made non-blocking.
             if not isinstance(fd, int):
                 return
             os.set_blocking(fd, False)
@@ -1273,7 +1282,7 @@ class BaseVideoProcessor(ABC):
                 raise TimeoutError(
                     f"Timed out writing frame to ffmpeg stdin after {PUSH_WRITE_TIMEOUT_SEC:.1f}s"
                 )
-            _, writable, _ = select.select([], [fd], [], remaining)
+            _, writable, _ = select.select([], [fd], [], max(0.0, remaining))
             if not writable:
                 raise TimeoutError(
                     f"Timed out waiting for ffmpeg stdin after {PUSH_WRITE_TIMEOUT_SEC:.1f}s"

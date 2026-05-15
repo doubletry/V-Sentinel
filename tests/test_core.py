@@ -751,6 +751,7 @@ class TestCoreBaseVideoProcessorPipeline:
         assert "-pixel_format" in cmd and "rgb24" in cmd
         assert cmd[cmd.index("-video_size") + 1] == "64x64"
         assert cmd[cmd.index("-framerate") + 1] == f"{proc._current_publish_fps():.3f}"
+        assert f"{proc._current_publish_fps():.3f}" in cmd
         assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
         assert "-use_wallclock_as_timestamps" in cmd

@@ -1026,11 +1026,11 @@ class BaseVideoProcessor(ABC):
                     cmd = [
                         "ffmpeg",
                         "-y",
-                        "-use_wallclock_as_timestamps", "1",
                         "-f", "rawvideo",
                         "-pixel_format", "rgb24",
                         "-video_size", f"{w}x{h}",
                         "-framerate", f"{target_fps:.3f}",
+                        "-use_wallclock_as_timestamps", "1",
                         "-i", "pipe:0",
                         "-c:v", "libx264",
                         "-preset", PUSH_PRESET,

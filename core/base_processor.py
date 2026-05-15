@@ -1284,9 +1284,7 @@ class BaseVideoProcessor(ABC):
                 )
             _, writable, _ = select.select([], [fd], [], max(0.0, remaining))
             if not writable:
-                raise TimeoutError(
-                    f"Timed out waiting for ffmpeg stdin after {PUSH_WRITE_TIMEOUT_SEC:.1f}s"
-                )
+                continue
             try:
                 count = os.write(fd, view[written:])
             except BlockingIOError:

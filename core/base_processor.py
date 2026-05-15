@@ -958,7 +958,9 @@ class BaseVideoProcessor(ABC):
     @staticmethod
     def _normalize_video_bitrate(value: Any) -> str | None:
         """Normalize ffmpeg video bitrate values such as 2500k or 4M.
-        标准化 ffmpeg 视频码率值，例如 2500k 或 4M。"""
+        The result is lowercase and drops insignificant zeros, so 2.0K becomes 2k.
+        标准化 ffmpeg 视频码率值，例如 2500k 或 4M。结果使用小写并去掉无意义的 0，
+        因此 2.0K 会变为 2k。"""
         text = str(value or "").strip().lower()
         if not text:
             return None

@@ -819,6 +819,10 @@ class TestCoreBaseVideoProcessorPipeline:
 
         assert proc._output_video_bitrate() == "2500k"
 
+    def test_video_bitrate_normalization_accepts_uppercase_and_decimals(self):
+        assert BaseVideoProcessor._normalize_video_bitrate("2.0K") == "2k"
+        assert BaseVideoProcessor._normalize_video_bitrate("2.5M") == "2.5m"
+
     def test_push_frame_captures_stderr_on_immediate_exit(self, monkeypatch):
         """When ffmpeg exits immediately, stderr is captured and a retry cooldown is set."""
         proc = DummyCoreProcessor(

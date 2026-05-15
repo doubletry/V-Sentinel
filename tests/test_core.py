@@ -773,7 +773,7 @@ class TestCoreBaseVideoProcessorPipeline:
             rtsp_url="rtsp://localhost:8554/cam1",
             app_settings={
                 "mediamtx_rtsp_addr": "rtsp://localhost:8554",
-                "mediamtx_output_bitrate": "4M",
+                "mediamtx_output_bitrate": "2.5M",
             },
         )
         proc._update_publish_fps(30.0)
@@ -805,9 +805,9 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._push_frame(frame, "cam1_processed")
 
         cmd = captured["cmd"]
-        assert cmd[cmd.index("-b:v") + 1] == "4m"
-        assert cmd[cmd.index("-maxrate") + 1] == "4m"
-        assert cmd[cmd.index("-bufsize") + 1] == "8m"
+        assert cmd[cmd.index("-b:v") + 1] == "2.5m"
+        assert cmd[cmd.index("-maxrate") + 1] == "2.5m"
+        assert cmd[cmd.index("-bufsize") + 1] == "5m"
 
     def test_invalid_output_bitrate_falls_back_to_default(self):
         proc = DummyCoreProcessor(

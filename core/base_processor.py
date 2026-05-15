@@ -12,6 +12,7 @@ import asyncio
 import base64
 import math
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -961,16 +962,14 @@ class BaseVideoProcessor(ABC):
         text = str(value or "").strip().lower()
         if not text:
             return None
-        suffix = ""
-        if text[-1:] in {"k", "m"}:
-            suffix = text[-1]
-            text = text[:-1]
-        if not text.isdigit():
+        match = re.fullmatch(r"(\d+(?:\.\d+)?|\.\d+)([km]?)", text)
+        if match is None:
             return None
-        amount = int(text)
+        amount = float(match.group(1))
         if amount <= 0:
             return None
-        return f"{amount}{suffix}"
+        amount_text = f"{amount:g}"
+        return f"{amount_text}{match.group(2)}"
 
     @staticmethod
     def _double_video_bitrate(bitrate: str) -> str:
@@ -978,7 +977,7 @@ class BaseVideoProcessor(ABC):
         将配置码率翻倍用于 ffmpeg VBV 缓冲区大小。"""
         suffix = bitrate[-1:] if bitrate[-1:] in {"k", "m"} else ""
         number = bitrate[:-1] if suffix else bitrate
-        return f"{int(number) * 2}{suffix}"
+        return f"{float(number) * 2:g}{suffix}"
 
     def _output_video_bitrate(self) -> str:
         """Return configured result-stream bitrate, falling back to the default.
@@ -988,7 +987,7 @@ class BaseVideoProcessor(ABC):
         )
         if configured is not None:
             return configured
-        return self._normalize_video_bitrate(DEFAULT_OUTPUT_BITRATE)
+        return self._normalize_video_bitrate(DEFAULT_OUTPUT_BITRATE) or DEFAULT_OUTPUT_BITRATE
 
     def _push_frame(self, frame: np.ndarray, output_rtsp_path: str) -> None:
         """Push annotated frame to MediaMTX via a persistent ffmpeg subprocess.

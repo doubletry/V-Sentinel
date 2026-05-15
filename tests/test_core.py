@@ -748,7 +748,9 @@ class TestCoreBaseVideoProcessorPipeline:
         cmd = captured["cmd"]
         def _flag_value(flag: str) -> str:
             assert flag in cmd
-            return cmd[cmd.index(flag) + 1]
+            index = cmd.index(flag)
+            assert index + 1 < len(cmd)
+            return cmd[index + 1]
 
         assert cmd[0] == "ffmpeg"
         assert "-f" in cmd and "rawvideo" in cmd
@@ -775,7 +777,7 @@ class TestCoreBaseVideoProcessorPipeline:
         assert cmd[cmd.index("-maxrate") + 1] == "2500k"
         assert "-bufsize" in cmd
         assert cmd[cmd.index("-bufsize") + 1] == "5000k"
-        assert "rtsp://localhost:8554/cam1_processed" == cmd[-1]
+        assert cmd[-1] == "rtsp://localhost:8554/cam1_processed"
         captured["proc"].stdin.write.assert_called_once_with(frame.tobytes())
         captured["proc"].stdin.flush.assert_called_once()
 

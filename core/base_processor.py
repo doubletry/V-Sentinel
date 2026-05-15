@@ -1252,9 +1252,8 @@ class BaseVideoProcessor(ABC):
             return
         try:
             fd = stdin.fileno()
-            # Tests and some file-like wrappers may expose a mock/non-integer
-            # fileno; only real OS file descriptors can be made non-blocking.
-            if not isinstance(fd, int):
+            # Only valid OS file descriptors can be made non-blocking.
+            if not isinstance(fd, int) or fd < 0:
                 return
             os.set_blocking(fd, False)
             self._push_stdin_nonblocking = True
@@ -1289,7 +1288,7 @@ class BaseVideoProcessor(ABC):
                 count = os.write(fd, view[written:])
             except BlockingIOError:
                 continue
-            if count <= 0:
+            if count == 0:
                 raise BrokenPipeError("ffmpeg stdin accepted zero bytes")
             written += count
 

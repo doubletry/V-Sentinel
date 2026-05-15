@@ -746,7 +746,7 @@ class TestCoreBaseVideoProcessorPipeline:
         proc._push_frame(frame, "cam1_processed")
 
         cmd = captured["cmd"]
-        def _flag_value(flag: str) -> str:
+        def get_flag_value(flag: str) -> str:
             assert flag in cmd
             index = cmd.index(flag)
             assert index + 1 < len(cmd)
@@ -755,8 +755,8 @@ class TestCoreBaseVideoProcessorPipeline:
         assert cmd[0] == "ffmpeg"
         assert "-f" in cmd and "rawvideo" in cmd
         assert "-pixel_format" in cmd and "rgb24" in cmd
-        assert _flag_value("-video_size") == "64x64"
-        assert _flag_value("-framerate") == f"{proc._current_publish_fps():.3f}"
+        assert get_flag_value("-video_size") == "64x64"
+        assert get_flag_value("-framerate") == f"{proc._current_publish_fps():.3f}"
         assert "-rtsp_transport" in cmd and "tcp" in cmd
         assert "libx264" in cmd
         assert "-use_wallclock_as_timestamps" in cmd

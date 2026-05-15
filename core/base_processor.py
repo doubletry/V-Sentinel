@@ -1033,9 +1033,9 @@ class BaseVideoProcessor(ABC):
                         "-use_wallclock_as_timestamps", "1",
                         "-i", "pipe:0",
                         "-c:v", "libx264",
+                        "-pix_fmt", "yuv420p",
                         "-preset", PUSH_PRESET,
                         "-tune", "zerolatency",
-                        "-pix_fmt", "yuv420p",
                     ]
                     cmd.extend(
                         [

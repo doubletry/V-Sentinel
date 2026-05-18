@@ -516,6 +516,97 @@ async def update_settings(data: dict[str, str]) -> dict[str, str]:
     return await get_all_settings()
 
 
+def _plugin_config_key(plugin_name: str) -> str:
+    return f"plugin_runtime_config:{plugin_name}"
+
+
+def _plugin_label_candidates_key(plugin_name: str) -> str:
+    return f"plugin_label_candidates:{plugin_name}"
+
+
+async def get_plugin_runtime_config(plugin_name: str) -> dict:
+    """Return persisted runtime config for a processor plugin.
+    返回处理器插件的持久化运行时配置。"""
+    raw = await get_setting(_plugin_config_key(plugin_name))
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid plugin runtime config for {}: {}", plugin_name, exc)
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+async def save_plugin_runtime_config(plugin_name: str, config: dict) -> dict:
+    """Persist runtime config for a processor plugin.
+    持久化处理器插件运行时配置。"""
+    text = json.dumps(config, ensure_ascii=False, sort_keys=True)
+    await update_settings({_plugin_config_key(plugin_name): text})
+    return config
+
+
+async def list_plugin_label_candidates(plugin_name: str) -> list[dict[str, str]]:
+    """Return persisted model-label candidates for a processor plugin.
+    返回处理器插件持久化的模型标签候选。"""
+    raw = await get_setting(_plugin_label_candidates_key(plugin_name))
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid plugin label candidates for {}: {}", plugin_name, exc)
+        return []
+    if not isinstance(parsed, list):
+        return []
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label", "")).strip()
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        result.append({
+            "label": label,
+            "source": str(item.get("source") or "observed"),
+            "last_seen": str(item.get("last_seen") or ""),
+        })
+    return result
+
+
+async def add_plugin_label_candidate(
+    plugin_name: str,
+    label: str,
+    *,
+    source: str = "observed",
+) -> list[dict[str, str]]:
+    """Record one observed or user-provided plugin label candidate.
+    记录一个观测到或用户提供的插件标签候选。"""
+    normalized = str(label or "").strip()
+    if not normalized:
+        return await list_plugin_label_candidates(plugin_name)
+
+    candidates = await list_plugin_label_candidates(plugin_name)
+    now = _now_iso()
+    for item in candidates:
+        if item["label"] == normalized:
+            item["source"] = item.get("source") or source
+            item["last_seen"] = now
+            break
+    else:
+        candidates.append({
+            "label": normalized,
+            "source": source,
+            "last_seen": now,
+        })
+
+    text = json.dumps(candidates, ensure_ascii=False, sort_keys=True)
+    await update_settings({_plugin_label_candidates_key(plugin_name): text})
+    return candidates
+
+
 def _normalize_rtsp_base_address(value: str | None) -> str:
     return str(value or "").strip().rstrip("/")
 

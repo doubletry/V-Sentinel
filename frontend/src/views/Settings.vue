@@ -109,6 +109,7 @@
                 filterable
                 allow-create
                 default-first-option
+                @change="onProcessorPluginChange"
               >
                 <el-option
                   v-for="option in localizedProcessorPluginOptions"
@@ -146,6 +147,84 @@
             </div>
           </div>
           <p class="service-tip">{{ t('settings.backendServiceTip') }}</p>
+        </section>
+
+        <section class="settings-section">
+          <h2>{{ t('settings.pluginRuntimeConfig') }}</h2>
+          <p class="form-hint">{{ t('settings.pluginRuntimeConfigHint') }}</p>
+          <div v-if="pluginConfigLoading" class="form-hint">
+            {{ t('settings.loadingPluginConfig') }}
+          </div>
+          <template v-else-if="selectedPluginSchema">
+            <el-form-item
+              v-for="field in pluginConstantFields"
+              :key="field.key"
+              :label="locale === 'en-US' ? field.label_en : field.label_zh"
+            >
+              <div class="field-stack">
+                <el-input
+                  v-model="pluginConstants[field.key]"
+                  :placeholder="String(field.default ?? '')"
+                />
+                <p v-if="field.requires_restart" class="form-hint">
+                  {{ t('settings.manualRestartRequired') }}
+                </p>
+              </div>
+            </el-form-item>
+
+            <el-form-item :label="t('settings.actionLabelCandidates')">
+              <div class="field-stack">
+                <el-table :data="actionLabelRows" size="small">
+                  <el-table-column prop="label" :label="t('settings.modelLabel')" min-width="170" />
+                  <el-table-column :label="t('settings.displayLabel')" min-width="170">
+                    <template #default="{ row }">
+                      <el-input
+                        v-model="row.display"
+                        :placeholder="t('settings.untranslated')"
+                      />
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('settings.requiredAction')" width="120">
+                    <template #default="{ row }">
+                      <el-switch v-model="row.required" />
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('settings.labelSource')" min-width="130">
+                    <template #default="{ row }">
+                      <el-tag size="small" type="info">{{ labelSourceText(row.source) }}</el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column :label="t('settings.actions')" width="90">
+                    <template #default="{ row }">
+                      <el-button
+                        v-if="row.source === 'custom'"
+                        size="small"
+                        type="danger"
+                        @click="removeActionLabel(row.label)"
+                      >
+                        {{ t('common.delete') }}
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <div class="plugin-label-input-row">
+                  <el-input
+                    v-model="customActionLabel"
+                    :placeholder="t('settings.customActionLabelPlaceholder')"
+                    @keyup.enter="addCustomActionLabel"
+                  />
+                  <el-button type="primary" @click="addCustomActionLabel">
+                    {{ t('settings.addCustomActionLabel') }}
+                  </el-button>
+                  <el-button @click="refreshPluginLabelCandidates">
+                    {{ t('settings.refreshLabelCandidates') }}
+                  </el-button>
+                </div>
+                <p class="form-hint">{{ t('settings.actionLabelHint') }}</p>
+              </div>
+            </el-form-item>
+          </template>
+          <p v-else class="form-hint">{{ t('settings.noPluginRuntimeConfig') }}</p>
         </section>
 
         <section class="settings-section">
@@ -303,7 +382,7 @@ import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ElMessage from 'element-plus/es/components/message/index'
 import { localeOptions } from '../i18n/index.js'
-import { processorApi } from '../api/index.js'
+import { processorApi, settingsApi } from '../api/index.js'
 import { useAppSettingsStore } from '../stores/appSettings.js'
 import { useSourceStore } from '../stores/source.js'
 
@@ -312,6 +391,12 @@ const appSettingsStore = useAppSettingsStore()
 const sourceStore = useSourceStore()
 const languageOptions = localeOptions
 const processorPluginOptions = ref([])
+const pluginRuntimeConfig = ref(null)
+const pluginConstants = ref({})
+const actionLabelRows = ref([])
+const customActionLabel = ref('')
+const pluginConfigLoading = ref(false)
+const savedPluginConfigSnapshot = ref('')
 const retentionDayOptions = [7, 15, 21, 30]
 const timezoneOptions = ['Asia/Shanghai', 'UTC', 'Asia/Tokyo', 'Europe/London', 'America/New_York']
 
@@ -365,6 +450,16 @@ const localizedProcessorPluginOptions = computed(() =>
   }))
 )
 
+const selectedPluginOption = computed(() =>
+  processorPluginOptions.value.find((option) => option.value === form.value.processor_plugin)
+)
+
+const selectedPluginSchema = computed(() =>
+  pluginRuntimeConfig.value?.config_schema || selectedPluginOption.value?.config_schema || null
+)
+
+const pluginConstantFields = computed(() => selectedPluginSchema.value?.constants || [])
+
 function parseRoiTagOptions(raw) {
   if (Array.isArray(raw)) {
     return Array.from(new Set(raw.map((item) => String(item || '').trim()).filter(Boolean)))
@@ -410,6 +505,89 @@ function removeRoiTag(tag) {
   syncRoiTagOptionsToForm()
 }
 
+function buildPluginPayload() {
+  return {
+    constants: { ...pluginConstants.value },
+    action_labels: actionLabelRows.value.map((row) => ({
+      label: String(row.label || '').trim(),
+      display: String(row.display || '').trim(),
+      required: Boolean(row.required),
+      source: row.source || 'custom',
+    })).filter((row) => row.label),
+  }
+}
+
+function syncPluginRuntimeConfig(data) {
+  pluginRuntimeConfig.value = data || null
+  pluginConstants.value = { ...(data?.config?.constants || {}) }
+  actionLabelRows.value = Array.isArray(data?.label_candidates)
+    ? data.label_candidates.map((item) => ({
+      label: item.label,
+      display: item.display || '',
+      required: Boolean(item.required),
+      source: item.source || 'custom',
+      last_seen: item.last_seen || '',
+    }))
+    : []
+  savedPluginConfigSnapshot.value = JSON.stringify(buildPluginPayload())
+}
+
+async function loadPluginRuntimeConfig(plugin = form.value.processor_plugin) {
+  if (!plugin) return
+  pluginConfigLoading.value = true
+  try {
+    const data = await settingsApi.getPluginRuntimeConfig(plugin)
+    syncPluginRuntimeConfig(data)
+  } catch (err) {
+    pluginRuntimeConfig.value = null
+    pluginConstants.value = {}
+    actionLabelRows.value = []
+    savedPluginConfigSnapshot.value = JSON.stringify(buildPluginPayload())
+    ElMessage.warning(t('settings.failedToLoadPluginConfig', { message: err.message }))
+  } finally {
+    pluginConfigLoading.value = false
+  }
+}
+
+async function onProcessorPluginChange(plugin) {
+  await loadPluginRuntimeConfig(plugin)
+}
+
+function labelSourceText(source) {
+  const value = String(source || '')
+  if (value.includes('default') && value.includes('observed')) {
+    return t('settings.labelSourceDefaultObserved')
+  }
+  if (value === 'default') return t('settings.labelSourceDefault')
+  if (value === 'observed') return t('settings.labelSourceObserved')
+  return t('settings.labelSourceCustom')
+}
+
+function addCustomActionLabel() {
+  const label = customActionLabel.value.trim()
+  if (!label) return
+  if (actionLabelRows.value.some((row) => row.label === label)) {
+    ElMessage.warning(t('settings.actionLabelExists'))
+    return
+  }
+  actionLabelRows.value.push({
+    label,
+    display: '',
+    required: false,
+    source: 'custom',
+    last_seen: '',
+  })
+  customActionLabel.value = ''
+}
+
+function removeActionLabel(label) {
+  actionLabelRows.value = actionLabelRows.value.filter((row) => row.label !== label)
+}
+
+async function refreshPluginLabelCandidates() {
+  await loadPluginRuntimeConfig(form.value.processor_plugin)
+}
+
 async function reload() {
   loading.value = true
   try {
@@ -421,6 +599,7 @@ async function reload() {
     processorPluginOptions.value = Array.isArray(plugins) ? plugins : []
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
     syncRoiTagOptionsToForm()
+    await loadPluginRuntimeConfig(form.value.processor_plugin)
   } catch (err) {
     ElMessage.error(t('settings.failedToLoad', { message: err.message }))
   } finally {
@@ -439,13 +618,15 @@ async function save() {
   try {
     syncRoiTagOptionsToForm()
     const pluginChanged = previousPlugin !== form.value.processor_plugin
-    const requiresProcessingRefresh = pluginChanged || mediamtxSettingsChanged
-    let runningSourceIds = []
-    if (requiresProcessingRefresh) {
-      await sourceStore.syncProcessorStatus()
-      runningSourceIds = sourceStore.getRunningSourceIdsSnapshot()
+    const pluginPayload = buildPluginPayload()
+    const pluginConfigChanged = JSON.stringify(pluginPayload) !== savedPluginConfigSnapshot.value
+    if (selectedPluginSchema.value) {
+      const pluginResponse = await settingsApi.updatePluginRuntimeConfig(
+        form.value.processor_plugin,
+        pluginPayload
+      )
+      syncPluginRuntimeConfig(pluginResponse)
     }
-
     const data = await appSettingsStore.updateSettings(form.value)
     Object.assign(form.value, data)
     roiTagList.value = parseRoiTagOptions(form.value.roi_tag_options)
@@ -454,30 +635,12 @@ async function save() {
       await sourceStore.fetchSources()
     }
 
-    if (!requiresProcessingRefresh) {
+    if (!pluginChanged && !mediamtxSettingsChanged && !pluginConfigChanged) {
       ElMessage.success(t('settings.settingsSaved'))
       return
     }
 
-    if (!runningSourceIds.length) {
-      ElMessage.success(t('settings.settingsSavedRestartRequired'))
-      return
-    }
-
-    const restartResult = await sourceStore.restartProcessing(runningSourceIds)
-    if (restartResult.status === 'partial') {
-      ElMessage.warning(
-        t('settings.settingsSavedRestartPartial', {
-          restarted: restartResult.restarted,
-          failed: restartResult.failed.length,
-        })
-      )
-      return
-    }
-
-    ElMessage.success(
-      t('settings.settingsSavedRestarted', { count: restartResult.restarted })
-    )
+    ElMessage.success(t('settings.settingsSavedRestartRequired'))
   } catch (err) {
     ElMessage.error(t('settings.failedToSave', { message: err.message }))
   } finally {
@@ -697,6 +860,18 @@ onMounted(async () => {
 
 .port-switch-row .el-input {
   flex: 1;
+}
+
+.plugin-label-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.plugin-label-input-row .el-input {
+  flex: 1;
+  min-width: 220px;
 }
 
 .settings-actions {

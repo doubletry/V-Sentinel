@@ -1,10 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
 from backend.db import database as db
-from backend.models.schemas import AppSettingsUpdate, EmailTestRequest
+from backend.models.schemas import (
+    AppSettingsUpdate,
+    EmailTestRequest,
+    PluginRuntimeConfigUpdate,
+)
+from backend.processing.plugin_config import (
+    build_plugin_runtime_config_response,
+    normalize_plugin_config,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -70,3 +78,46 @@ async def test_email_settings(
     email_client = request.app.state.email_client
     await email_client.reconnect_from_settings(merged_settings)
     return await email_client.send_test_email(app_settings, overrides=overrides)
+
+
+@router.get("/plugin-runtime-config")
+async def get_plugin_runtime_config(plugin: str = Query(..., min_length=1)) -> dict:
+    """Get runtime config metadata and values for a processor plugin.
+    获取处理器插件的运行时配置元数据与当前值。"""
+    try:
+        return await build_plugin_runtime_config_response(plugin)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.put("/plugin-runtime-config")
+async def update_plugin_runtime_config(
+    data: PluginRuntimeConfigUpdate,
+    request: Request,
+    plugin: str = Query(..., min_length=1),
+) -> dict:
+    """Save validated runtime config for a processor plugin.
+    保存已校验的处理器插件运行时配置。"""
+    try:
+        normalized = normalize_plugin_config(plugin, data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.save_plugin_runtime_config(plugin, normalized)
+    settings = await db.get_all_settings()
+    request.app.state.processor_manager.update_app_settings(settings)
+    return await build_plugin_runtime_config_response(plugin)
+
+
+@router.get("/plugin-label-candidates")
+async def get_plugin_label_candidates(plugin: str = Query(..., min_length=1)) -> dict:
+    """Get merged action-label candidates for a processor plugin.
+    获取处理器插件合并后的动作标签候选。"""
+    try:
+        response = await build_plugin_runtime_config_response(plugin)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "plugin": plugin,
+        "label_candidates": response["label_candidates"],
+    }

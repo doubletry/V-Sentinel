@@ -68,6 +68,12 @@ export const settingsApi = {
   get: () => api.get('/api/settings'),
   update: (data) => api.put('/api/settings', data),
   testEmail: (data) => api.post('/api/settings/email/test', data),
+  getPluginRuntimeConfig: (plugin) =>
+    api.get('/api/settings/plugin-runtime-config', { params: { plugin } }),
+  updatePluginRuntimeConfig: (plugin, data) =>
+    api.put('/api/settings/plugin-runtime-config', data, { params: { plugin } }),
+  getPluginLabelCandidates: (plugin) =>
+    api.get('/api/settings/plugin-label-candidates', { params: { plugin } }),
 }
 
 export default api

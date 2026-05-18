@@ -72,6 +72,7 @@ LABEL_EN_TO_ZH: dict[str, str] = {
     "TakePhotosOfSeal": "封条拍照",
     "Other": "其他",
     "unknown": "未知",
+    "None": "无",
 }
 """English-to-Chinese labels for truck-scene messages. truck 场景中英文标签映射。"""
 

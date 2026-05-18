@@ -96,6 +96,25 @@ class BaseVideoProcessor(_CoreBaseVideoProcessor):
         self.started_at = datetime.now(timezone.utc).isoformat()
         await super().start()
 
+    def record_model_label(self, plugin_name: str, label: str) -> None:
+        """Persist one model label candidate without blocking frame processing."""
+        text = str(label or "").strip()
+        if not text:
+            return
+
+        async def _save() -> None:
+            from backend.db import database as db
+
+            try:
+                await db.add_plugin_label_candidate(plugin_name, text)
+            except Exception as exc:  # pragma: no cover - best effort telemetry
+                logger.warning("Failed to record {} label {}: {}", plugin_name, text, exc)
+
+        try:
+            asyncio.create_task(_save())
+        except RuntimeError:
+            logger.debug("No running loop while recording {} label {}", plugin_name, text)
+
     # ── Result dispatch / 结果分发 ────────────────────────────────────────────
 
     async def _handle_result(self, frame, result: AnalysisResult) -> None:

@@ -7,7 +7,12 @@ import pytest
 from httpx import AsyncClient
 
 from backend.config import DEFAULT_APP_SETTINGS
-from backend.db.database import get_all_settings, get_setting, update_settings
+from backend.db.database import (
+    add_plugin_label_candidate,
+    get_all_settings,
+    get_setting,
+    update_settings,
+)
 
 
 class TestSettingsDB:
@@ -164,6 +169,70 @@ class TestSettingsAPI:
         assert data["status"] == "SUCCESS"
         app.state.email_client.reconnect_from_settings.assert_awaited_once()
         app.state.email_client.send_test_email.assert_awaited_once()
+
+    async def test_plugin_runtime_config_endpoint(self, async_client: AsyncClient):
+        resp = await async_client.get(
+            "/api/settings/plugin-runtime-config",
+            params={"plugin": "truck"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["plugin"] == "truck"
+        assert data["config"]["constants"]["OCR_INTERVAL"] == 10
+        labels = {item["label"]: item for item in data["label_candidates"]}
+        assert labels["HandOverKeys"]["required"] is True
+
+    async def test_update_plugin_runtime_config_validates_unknown_key(
+        self,
+        async_client: AsyncClient,
+    ):
+        resp = await async_client.put(
+            "/api/settings/plugin-runtime-config",
+            params={"plugin": "truck"},
+            json={"constants": {"UNKNOWN": 1}, "action_labels": []},
+        )
+        assert resp.status_code == 400
+        assert "Unknown plugin config key" in resp.json()["detail"]
+
+    async def test_update_plugin_runtime_config_persists(
+        self,
+        async_client: AsyncClient,
+    ):
+        resp = await async_client.put(
+            "/api/settings/plugin-runtime-config",
+            params={"plugin": "truck"},
+            json={
+                "constants": {"OCR_INTERVAL": 3},
+                "action_labels": [
+                    {
+                        "label": "CustomAction",
+                        "display": "自定义动作",
+                        "required": True,
+                        "source": "custom",
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["config"]["constants"]["OCR_INTERVAL"] == 3
+        labels = {item["label"]: item for item in data["config"]["action_labels"]}
+        assert labels["CustomAction"]["display"] == "自定义动作"
+        assert labels["CustomAction"]["required"] is True
+
+    async def test_plugin_label_candidates_include_observed_labels(
+        self,
+        async_client: AsyncClient,
+    ):
+        await add_plugin_label_candidate("truck", "NewModelAction")
+
+        resp = await async_client.get(
+            "/api/settings/plugin-label-candidates",
+            params={"plugin": "truck"},
+        )
+        assert resp.status_code == 200
+        labels = {item["label"]: item for item in resp.json()["label_candidates"]}
+        assert labels["NewModelAction"]["source"] == "observed"
 
 
 class TestVEngineClientAddresses:

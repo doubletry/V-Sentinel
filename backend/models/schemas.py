@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -102,6 +102,7 @@ class ProcessorPluginInfo(BaseModel):
     value: str
     label_zh: str
     label_en: str
+    config_schema: dict[str, Any] = {}
 
 
 class PaginatedMessagesResponse(BaseModel):
@@ -157,6 +158,14 @@ class AppSettingsUpdate(BaseModel):
     max_pull_workers: str | None = None
     max_push_workers: str | None = None
     max_cpu_workers: str | None = None
+
+
+class PluginRuntimeConfigUpdate(BaseModel):
+    """Runtime configuration payload for one processor plugin.
+    单个处理器插件的运行时配置载荷。"""
+
+    constants: dict[str, Any] = {}
+    action_labels: list[dict[str, Any]] = []
 
 
 class EmailTestRequest(BaseModel):

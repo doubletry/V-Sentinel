@@ -22,6 +22,17 @@ def _load_plugin_metadata(plugin_name: str) -> dict[str, Any]:
     return getattr(metadata_module, "PLUGIN_METADATA")
 
 
+def get_plugin_metadata(plugin_name: str) -> dict[str, Any]:
+    """Return metadata for a registered processor plugin.
+    返回已注册处理器插件的元数据。"""
+    if plugin_name not in PROCESSOR_PLUGINS:
+        available = ", ".join(sorted(PROCESSOR_PLUGINS))
+        raise ValueError(
+            f"Unknown processor plugin: {plugin_name}. Available: {available}"
+        )
+    return _load_plugin_metadata(plugin_name)
+
+
 def resolve_processor_class(plugin_name: str) -> Type[BaseVideoProcessor]:
     """Resolve a processor plugin name to its backend adapter class.
     将处理器插件名称解析为对应的 backend 适配类。"""
@@ -45,6 +56,7 @@ def list_processor_plugins() -> list[ProcessorPluginInfo]:
                 value=plugin_name,
                 label_zh=str(meta.get("label_zh", plugin_name)),
                 label_en=str(meta.get("label_en", plugin_name)),
+                config_schema=dict(meta.get("config_schema") or {}),
             )
         )
     return result

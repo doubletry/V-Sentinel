@@ -160,6 +160,10 @@ class BaseVideoProcessor(ABC):
         self._source_fps: float | None = None
         self._publish_fps: float = self._default_publish_fps()
 
+    def record_model_label(self, plugin_name: str, label: str) -> None:
+        """Hook for backend adapters to persist labels observed from models."""
+        return None
+
     # ── Lifecycle ──────────────────────────────────────────────────────────
 
     async def start(self) -> None:

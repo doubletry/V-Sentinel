@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import cv2
@@ -57,9 +58,14 @@ from core.truck.constants import (
     CLASSIFICATION_MODEL,
     DETECTION_MODEL,
     LABEL_EN_TO_ZH,
+    MAX_MISSING_FRAMES,
+    MIN_PRESENCE_FRAMES,
     OCR_INTERVAL,
     OCR_MODEL,
     PERSON_LABEL,
+    REQUIRED_ACTIONS,
+    STABILITY_MIN_COUNT,
+    STABILITY_WINDOW,
     TRUCK_LABELS,
 )
 from core.runner import run_processor
@@ -96,14 +102,55 @@ class TruckMonitorProcessor(BaseVideoProcessor):
     def __init__(self, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self._frame_count = 0
+        runtime_config = self._load_runtime_config()
+        constants = runtime_config.get("constants", {})
+        action_labels = runtime_config.get("action_labels", [])
+        required_actions, label_translations = self._parse_action_label_config(action_labels)
+        self._label_en_to_zh = {**LABEL_EN_TO_ZH, **label_translations}
 
         # Tracker is created with settings from app_settings if available.
         # 如果可用，使用 app_settings 中的设置创建跟踪器。
         self.tracker = TruckTracker(
-            ocr_interval=int(
-                self.app_settings.get("ocr_interval", str(OCR_INTERVAL))
-            ),
+            ocr_interval=int(constants.get("OCR_INTERVAL", OCR_INTERVAL)),
+            max_missing_frames=int(constants.get("MAX_MISSING_FRAMES", MAX_MISSING_FRAMES)),
+            min_presence_frames=int(constants.get("MIN_PRESENCE_FRAMES", MIN_PRESENCE_FRAMES)),
+            stability_window=int(constants.get("STABILITY_WINDOW", STABILITY_WINDOW)),
+            stability_min_count=int(constants.get("STABILITY_MIN_COUNT", STABILITY_MIN_COUNT)),
+            required_actions=required_actions,
         )
+
+    def _load_runtime_config(self) -> dict:
+        raw = self.app_settings.get("plugin_runtime_config:truck", "")
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Invalid truck runtime config JSON; using defaults")
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _parse_action_label_config(
+        self,
+        action_labels: object,
+    ) -> tuple[frozenset[str], dict[str, str]]:
+        if not isinstance(action_labels, list):
+            return REQUIRED_ACTIONS, {}
+
+        required: set[str] = set()
+        translations: dict[str, str] = {}
+        for item in action_labels:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label", "")).strip()
+            if not label:
+                continue
+            display = str(item.get("display", "")).strip()
+            if display:
+                translations[label] = display
+            if item.get("required"):
+                required.add(label)
+        return frozenset(required), translations
 
     # ── Main frame handler / 主帧处理器 ──────────────────────────────────
 
@@ -277,7 +324,8 @@ class TruckMonitorProcessor(BaseVideoProcessor):
                     return None
 
                 tid = cls_track_ids[image_id]
-                raw_label = item.get("label", "other")
+                raw_label = str(item.get("label", "other"))
+                self.record_model_label("truck", raw_label)
                 stable_label = self.tracker.feed_action(tid, raw_label)
                 track = self.tracker.get_track(tid)
                 return {
@@ -361,8 +409,8 @@ class TruckMonitorProcessor(BaseVideoProcessor):
             if track_after is not None:
                 new_actions = track_after.confirmed_actions - actions_before
                 for action in sorted(new_actions):
-                    action_zh = LABEL_EN_TO_ZH.get(action, action)
-                    plate_info = track_after.best_plate or LABEL_EN_TO_ZH["unknown"]
+                    action_zh = self._label_en_to_zh.get(action, action)
+                    plate_info = track_after.best_plate or self._label_en_to_zh["unknown"]
                     messages.append({
                         "timestamp": now,
                         "source_name": self.source_name,
@@ -376,10 +424,10 @@ class TruckMonitorProcessor(BaseVideoProcessor):
         # 5d. 车辆离开——离开场景的卡车。
         for visit in decision.visits:
             missing = ", ".join(
-                LABEL_EN_TO_ZH.get(action, action)
+                self._label_en_to_zh.get(action, action)
                 for action in sorted(visit.missing_actions)
-            ) or LABEL_EN_TO_ZH["None"]
-            plate_info = visit.plate or LABEL_EN_TO_ZH["unknown"]
+            ) or self._label_en_to_zh["None"]
+            plate_info = visit.plate or self._label_en_to_zh["unknown"]
             messages.append({
                 "timestamp": now,
                 "source_name": self.source_name,
